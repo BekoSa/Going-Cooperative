@@ -68,16 +68,38 @@ foreach ($testedGate in @(
     "eventspeedreplication",
     "weatherreplication",
     "weathertemperaturereplication",
-    "eventdiagnostics",
     "productionstatev2",
     "productionticketordersv2",
     "workstationruntimepresentation",
     "resourcecontainerreplication",
     "storagepolicyv4",
     "shelfstoragemanifestv1")) {
-    if ($settings[$testedGate] -ne "true") { throw "Committed test config must enable $testedGate." }
+    if ($settings[$testedGate] -ne "true") { throw "Release config must enable $testedGate." }
 }
-if ($settings["directtransportsecurityv1"] -ne "false") { throw "Committed test config must leave directTransportSecurityV1 disabled." }
+if ($settings["directtransportsecurityv1"] -ne "true") { throw "Release config must enable directTransportSecurityV1." }
+foreach ($diagnosticGate in @(
+    "logsnapshots",
+    "cropfieldpolicydiagnostics",
+    "beamreplicationdiagnostics",
+    "worldobjectdeltadiagnostics",
+    "verbosereplicationlogging",
+    "perffpsprobe",
+    "pathingperfdiagnostics",
+    "validatesnapshots",
+    "resultlifecycleprobes",
+    "animationdiagnostics",
+    "characterstatediagnostics",
+    "carrydiagnostics",
+    "goapactionprobe",
+    "resourcestatev2diagnostics",
+    "combatdiagnostics",
+    "medicaldiagnostics",
+    "eventdiagnostics",
+    "tradertransferdiagnostics")) {
+    if ($settings[$diagnosticGate] -ne "false") {
+        throw "Release config must disable $diagnosticGate."
+    }
+}
 foreach ($disabledGate in @(
     "eventschedulerauthority",
     "eventwarningreplication",
@@ -87,7 +109,7 @@ foreach ($disabledGate in @(
     "playertriggeredeventreplication",
     "weatherschedulerauthority")) {
     if ($settings.ContainsKey($disabledGate) -and $settings[$disabledGate] -ne "false") {
-        throw "Committed test config must leave $disabledGate disabled."
+        throw "Release config must leave $disabledGate disabled."
     }
 }
 if ($settings.ContainsKey("mode") -or $settings.ContainsKey("host")) { throw "Release config must not hard-code a session role or host address." }

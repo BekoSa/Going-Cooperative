@@ -1,283 +1,280 @@
 # Going Cooperative
 
-Experimental cooperative multiplayer for **Going Medieval**.
+Experimental two-player cooperative multiplayer for **Going Medieval**.
 
-Going Cooperative uses a host-authoritative model: the host runs the game simulation, clients send player intent, and the host replicates authoritative state back to connected clients.
+Going Cooperative uses a host-authoritative model: the host runs the game
+simulation, the client sends player intent, and the host returns authoritative
+world and presentation state.
 
 > [!WARNING]
-> Going Cooperative is pre-release prototype software. Gameplay coverage is incomplete, configuration and protocol details may change, and desynchronization or save problems are possible. Back up every save before testing.
+> Going Cooperative is pre-release software. Gameplay coverage is incomplete,
+> protocol details may change, and desynchronization or save problems remain
+> possible. Back up every save before using the mod.
 
-## Before you begin
+## Requirements
 
-Every computer needs:
+Each player needs:
 
-- The same version of Going Medieval for Windows x64.
-- [BepInEx 5.4.23.5 for Windows x64](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5).
+- The same Going Medieval version on Windows x64.
 - The same Going Cooperative release.
-- Access to the same network or VPN as the host. The host transfers the selected
-  starting save to the client through the Multiplayer workflow.
+- A legitimate local Going Medieval installation.
+- A reachable LAN/VPN connection to the host, or the experimental Steam relay
+  mode.
 
-The host must accept inbound UDP traffic on port `47692`. Internet play normally requires a VPN such as Tailscale or Radmin VPN, or correctly configured UDP port forwarding.
+The player release already includes the official **BepInEx 5.4.23.5 Windows
+x64** loader. Players do not install BepInEx separately.
 
-**Steam mode (experimental):** with `steamNetworking=true` in `replication.cfg` on both computers (Steam builds of the game only), the multiplayer menu offers a Steam connection mode with friends-only lobbies and overlay invites. Traffic travels through Steam's relay, so no port forwarding or VPN is required. The redesigned menu is the default; set `ui=classic` in `replication.cfg` to restore the previous menu.
+## Easy installation
 
-## Player installation
+1. Close Going Medieval.
+2. Back up important saves.
+3. Open the [Going Cooperative Releases
+   page](https://github.com/reality-comes/Going-Cooperative/releases).
+4. Download `Going-Cooperative-vX.Y.Z-win-x64.zip` from the release's
+   **Assets** section.
+5. In Steam, right-click Going Medieval and select **Manage > Browse local
+   files**.
+6. Extract the **contents** of the ZIP directly into that directory. Allow
+   Windows to merge folders and replace older Going Cooperative/BepInEx files.
+7. Launch Going Medieval.
 
-### 1. Find the Going Medieval directory
+Do not download GitHub's automatically generated source-code archives unless
+you intend to compile the mod.
 
-In Steam, right-click **Going Medieval**, select **Manage → Browse local files**, and open the directory containing:
-
-```text
-Going Medieval.exe
-Going Medieval_Data\
-UnityPlayer.dll
-```
-
-### 2. Install BepInEx
-
-Download `BepInEx_win_x64_5.4.23.5.zip` from the [official BepInEx 5.4.23.5 release](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.5).
-
-Do not download the x86 build, BepInEx 6, a Unix build, or GitHub's source-code archives.
-
-Extract the **contents** of the BepInEx archive directly into the Going Medieval directory. The result should look like:
-
-```text
-Going Medieval\
-├── BepInEx\
-├── doorstop_config.ini
-├── winhttp.dll
-├── Going Medieval.exe
-└── Going Medieval_Data\
-```
-
-Launch Going Medieval, wait for the main menu, and exit. Confirm that BepInEx created:
+The correct installation layout is:
 
 ```text
-BepInEx\plugins\
-BepInEx\config\
-BepInEx\LogOutput.log
-```
-
-If those items were not created, fix the BepInEx installation before continuing.
-
-### 3. Install Going Cooperative
-
-Open the [Going Cooperative Releases](../../releases) page and download `Going-Cooperative-vX.Y.Z.zip` under **Assets**.
-
-> [!IMPORTANT]
-> Do not download GitHub's automatically generated **Source code (zip)** or **Source code (tar.gz)** files unless you intend to compile the mod yourself.
-
-Extract the release archive's **contents** directly into the Going Medieval directory. Allow its `BepInEx` folder to merge with the existing one.
-
-The installed release should initially look like:
-
-```text
-Going Medieval\
-├── BepInEx\
-│   └── plugins\
-│       └── GoingCooperative\
-│           └── GoingCooperative.dll
-├── GoingCooperative\
-│   └── replication.cfg
-├── doorstop_config.ini
-├── winhttp.dll
-└── Going Medieval.exe
+Going Medieval/
+|-- .doorstop_version
+|-- doorstop_config.ini
+|-- winhttp.dll
+|-- BepInEx/
+|   |-- core/
+|   `-- plugins/
+|       `-- GoingCooperative/
+|           `-- GoingCooperative.dll
+|-- GoingCooperative/
+|   `-- replication.cfg
+|-- Licenses/
+|-- Going Medieval.exe
+`-- Going Medieval_Data/
 ```
 
 Do not leave the files inside an extra wrapper directory such as:
 
 ```text
-Going Medieval\Going-Cooperative-v0.2.0\BepInEx\...
+Going Medieval/Going-Cooperative-v0.3.0-win-x64/BepInEx/...
 ```
 
-### 4. Shared runtime configuration
+### Existing BepInEx installations
 
-The release installs `Going Medieval\GoingCooperative\replication.cfg`
-automatically. The same file is used on every computer. Ordinary players do not
-need to create, rename, or edit it.
+The bundle contains the unmodified official BepInEx 5.4.23.5 Windows x64
+distribution. If BepInEx is already installed, extraction may merge with it.
+Back up custom plugins and configuration first. Remove incompatible BepInEx 6,
+x86, Unix, or modified loader files before installing this Windows x64 bundle.
 
-It stores shared replication behavior and performance settings. The Multiplayer
-menu overrides host/client role, remote address, and port in memory for the
-selected session.
+The release does not contain Going Medieval or Unity game files.
 
-Advanced users may edit this file for diagnostics or legacy config-driven
-testing. Setting `multiplayerMenu=false` restores that legacy workflow, where
-the values in the file are used directly.
+## Configuration
 
-Semantic pawn and animal movement/work presentation is currently experimental
-and disabled in packaged releases. It adds host-authored gait/velocity metadata,
-bounded turn-aware path guidance, and ordered presentation lifecycles for
-chopping, construction, digging, harvesting/cutting, deconstruction, repair,
-uninstalling, and crop planting.
-Testers can opt in with:
+The release installs:
 
-```ini
-semanticAgentPresentation=true
+```text
+Going Medieval/GoingCooperative/replication.cfg
 ```
 
-Set the same value on both computers and restart both games after changing it.
-The multiplayer handshake refuses mixed semantic/legacy settings. Setting the
-value to `false` restores the legacy movement and work-presentation path.
+Use the same release configuration on both computers. Ordinary players do not
+need to edit or rename it. The Multiplayer menu chooses host/client role,
+address, port, save, and connection mode in memory.
 
-The required runtime files are the plugin DLL under
-`BepInEx\plugins\GoingCooperative` and the global settings file under
-`GoingCooperative`.
+The packaged configuration:
 
-### 5. Configure the network
+- enables the currently supported replication systems;
+- enables authenticated Direct/IP networking;
+- disables optional diagnostics, probes, snapshot logging, and verbose
+  replication logging.
 
-On the host computer:
+Changing functional replication gates can make the peers incompatible. If an
+advanced user edits `replication.cfg`, make the same change on both machines and
+restart both games.
 
-1. Permit Going Medieval through Windows Firewall.
-2. Permit inbound UDP traffic on port `47692`.
-3. Give the client the host computer's reachable LAN/VPN address.
-4. Use the same port in the Host and Join screens.
+## Starting a session
 
-For play outside the same local network, a private VPN is usually simpler than router port forwarding.
+Use the remapped **Multiplayer** button on the main menu. Going Cooperative is
+currently designed for exactly two players.
 
-### 6. Start and join a session
+### Direct/IP mode
 
-Use the remapped **Multiplayer** button on the main menu. The intended sequence
-is important: connect and transfer the save before either player presses Play.
+Direct mode uses authenticated networking. The host receives a temporary
+session code in the Multiplayer menu. Share the host address, port, and session
+code privately with the client. The client must enter the same code.
+
+The session code protects the Direct connection with endpoint pinning,
+authenticated UDP packets, replay rejection, and authenticated save/control
+transfer. A wrong or missing code is rejected.
+
+For the default port `47692`, the host must permit Going Medieval through
+Windows Firewall and allow inbound **UDP and TCP** traffic. Internet play
+normally requires a private VPN or correctly configured port forwarding.
 
 #### Host
 
 1. Select **Multiplayer**.
-2. Choose **Select Load** and select the settlement save to host.
-3. Select **Host** and confirm the UDP port.
-4. Wait for the client to connect.
-5. Wait for the selected save to finish transferring and for both sides to show
-   **Connected**.
-6. Select **Play** after the client is ready.
-7. The normal Going Medieval loading screen opens and loads the hosted save.
+2. Choose **Host** and Direct/IP mode.
+3. Select the settlement save.
+4. Confirm the port.
+5. Give the client the reachable LAN/VPN address and generated session code.
+6. Wait for the client and save transfer to reach **Connected**.
+7. Select **Play** after the client is ready.
 
 #### Client
 
-1. Select **Multiplayer**, then **Join**.
-2. Enter the host's reachable LAN/VPN IP address and the same UDP port.
-3. Select **Connect**.
-4. Wait while the client receives and verifies the host's save.
-5. Wait for **Connected**, then select **Play**.
-6. The normal Going Medieval loading screen opens and loads the transferred
-   save.
+1. Select **Multiplayer**.
+2. Choose **Join** and Direct/IP mode.
+3. Enter the host's LAN/VPN address, port, and session code.
+4. Select **Connect**.
+5. Wait for the host save to transfer and verify.
+6. Wait for **Connected**, then select **Play**.
 
-The menu assigns the role, endpoint, and port for the current session without
-rewriting `replication.cfg`. Do not manually load a different save on the client
-after connecting.
+Do not manually load a different save on the client after connecting.
 
-Set the following value to disable the replacement menu and restore the original
-config-driven runtime and client resync overlay:
+### Steam mode (experimental)
 
-```ini
-multiplayerMenu=false
-```
+When both players own the Steam version, the Multiplayer menu can use a
+friends-only Steam lobby and overlay invite. Steam relay mode normally avoids
+manual VPN and port-forwarding setup. Both players must still use the same
+Going Cooperative and Going Medieval versions.
 
-### In-game controls and Full Session Resync
+## Full Session Resync
 
-During multiplayer, a compact transparent HUD appears at the top center of the
-game. It shows the connection state and whether the local player is the host or
-client. The client also has a **FULL RESYNC** button.
-
-Use Full Resync when the client is visibly desynchronized, missing important
-world state, or otherwise no longer matches the host:
+During multiplayer, a compact HUD appears at the top center. The client can use
+**FULL RESYNC** when important world state no longer matches the host.
 
 1. The client selects **FULL RESYNC**.
-2. Both games enter the dedicated resync overlay while gameplay replication is
-   paused.
+2. Both games enter the resync overlay.
 3. The host creates a fresh authoritative checkpoint.
-4. The checkpoint is transferred to and verified by the client.
-5. Both sides pass through the mod's blank pseudo-home transition, then reload
-   the checkpoint through the normal game loading flow.
-6. Replication resumes after the synchronized reload completes.
+4. The checkpoint transfers to and verifies on the client.
+5. Both games pass through the mod's blank transition and reload the checkpoint.
+6. Replication resumes after the synchronized load.
 
-Do not close either game or manually load another save while resync is in
-progress. If resync fails, retain the logs from both computers before retrying.
-Press `F8` if the Multiplayer panel needs to be reopened as a fallback.
+Do not close either game or load another save during resync. Press `F8` if the
+Multiplayer panel must be reopened.
 
-## Verify the installation
+## Verifying the installation
 
-After launching the game, inspect:
+After reaching the main menu, these paths should exist:
 
 ```text
-BepInEx\LogOutput.log
-BepInEx\GoingCooperative\plugin.log
+BepInEx/LogOutput.log
+BepInEx/GoingCooperative/plugin.log
+BepInEx/plugins/GoingCooperative/GoingCooperative.dll
+GoingCooperative/replication.cfg
 ```
 
-A successful startup should include messages similar to:
+`BepInEx/LogOutput.log` should contain:
 
 ```text
-Going Cooperative replication plugin loaded version=0.2.0
-Going Cooperative replication runtime started mode=host
+Going Cooperative host-authoritative replication plugin loaded.
 ```
 
-or:
+The Multiplayer button should replace the normal Tutorial button.
+
+## Updating
+
+Close Going Medieval, download the newer Windows x64 release ZIP, and extract
+its contents into the game directory. Allow it to replace the older bundled
+files. Do not mix plugin DLLs or `replication.cfg` files from different
+releases.
+
+## Uninstalling
+
+Always close the game first.
+
+Remove:
 
 ```text
-Going Cooperative replication runtime started mode=client
+BepInEx/plugins/GoingCooperative/
+GoingCooperative/
 ```
 
-If `BepInEx\GoingCooperative\plugin.log` does not appear, verify these exact paths:
+If no other mod uses BepInEx, you may also remove:
 
 ```text
-BepInEx\plugins\GoingCooperative\GoingCooperative.dll
-GoingCooperative\replication.cfg
+BepInEx/
+.doorstop_version
+changelog.txt
+doorstop_config.ini
+winhttp.dll
 ```
+
+Do not remove the shared BepInEx files if other installed mods need them.
 
 ## Troubleshooting
 
-### BepInEx does not initialize
+### The Multiplayer button does not appear
 
-- Confirm `winhttp.dll` and `doorstop_config.ini` are beside `Going Medieval.exe`.
-- Confirm you installed the Windows x64 BepInEx 5.4.23.5 archive.
-- Launch the game once without Going Cooperative and check for `BepInEx\LogOutput.log`.
+- Confirm the files are not inside an extra wrapper directory.
+- Confirm the DLL path is exactly
+  `BepInEx/plugins/GoingCooperative/GoingCooperative.dll`.
+- Confirm `winhttp.dll` and `doorstop_config.ini` are beside
+  `Going Medieval.exe`.
+- Check `BepInEx/LogOutput.log` for `Going Cooperative`, `error`, or
+  `exception`.
 
-### The plugin does not load
+### Direct connection fails
 
-- Confirm the DLL is exactly `BepInEx\plugins\GoingCooperative\GoingCooperative.dll`.
-- Search `BepInEx\LogOutput.log` for `Going Cooperative`, `error`, or `exception`.
-- Confirm all participants use the same Going Cooperative and Going Medieval versions.
+- Confirm the host started before the client connected.
+- Confirm address and port match.
+- Confirm the session code matches exactly.
+- Allow Going Medieval and TCP/UDP port `47692` through the host firewall.
+- Do not use `127.0.0.1` unless both games run on the same computer.
+- Rebooting both games can clear a stale socket after an interrupted test.
 
-### The client cannot reach the host
+### The transferred save will not load
 
-- Enter the host's actual LAN or VPN address in **Multiplayer → Join**.
-- Confirm the host is running before the client connects.
-- Confirm the Host and Join screens use the same UDP port, normally `47692`.
-- Check Windows Firewall and any VPN or router rules.
-- Do not use `127.0.0.1` unless host and client are running on the same computer.
-
-### The client cannot load the transferred save
-
-- Confirm both computers use the same Going Medieval version and the same Going
-  Cooperative build.
-- Let the transfer reach **Connected** before selecting **Play**.
-- Do not manually start or load a different settlement on the client.
-- Check both logs for `save`, `transfer`, `verify`, `hash`, or `load` errors.
+- Confirm both computers use the same Going Medieval version and release ZIP.
+- Wait for **Connected** before either player selects **Play**.
+- Do not manually load another settlement on the client.
+- Check both logs for `save`, `transfer`, `verify`, `hash`, or `load`.
 
 ### Full Session Resync does not finish
 
-- Leave both games open on the resync overlay; checkpoint creation and loading
-  can take time for large settlements.
-- Confirm the host still has access to its save directory.
-- Check both logs for `resync`, `checkpoint`, `pseudo-Home`, `transfer`, or
-  `load` errors.
-- Restart the session from the Multiplayer menu if the resync explicitly reports
-  failure rather than continuing indefinitely.
+- Leave both games open while checkpoint creation and transfer complete.
+- Confirm the host still has access to its save folder.
+- Check both logs for `resync`, `checkpoint`, `transfer`, `verify`, or `load`.
+- Restart the multiplayer session if the overlay reports a definite failure.
+
+## Release contents and third-party software
+
+The Windows release bundles the exact official BepInEx 5.4.23.5 x64 archive,
+verified before packaging with its published SHA-256. It includes Unity
+Doorstop, HarmonyX/Harmony, MonoMod, and Mono.Cecil.
+
+The release contains:
+
+- `THIRD-PARTY-NOTICES.md`;
+- complete applicable license texts under `Licenses/`;
+- the exact corresponding Unity Doorstop v4.5.0 source archive under
+  `Licenses/Source/`;
+- `RELEASE-MANIFEST.txt` with component provenance and per-file SHA-256 hashes;
+- a separate SHA-256 file for the complete release ZIP.
+
+See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for exact versions,
+licenses, source links, and attribution.
 
 ## Building from source
 
-Ordinary players should use the ZIP attached to a GitHub Release. The steps below are only for developers building their own copy.
+Ordinary players should use the ZIP attached to a GitHub Release.
 
-### Prerequisites
+Developer prerequisites:
 
 - Windows PowerShell 5.1 or newer.
 - A .NET SDK containing the Roslyn C# compiler.
-- A local Going Medieval installation.
-- BepInEx 5.4.23.5 installed in that game directory, or a separate compatible BepInEx core directory.
-
-Open PowerShell in the repository directory—the directory containing `README.md`, `scripts`, and `src`.
+- A local Going Medieval Windows x64 installation.
+- Internet access for the pinned BepInEx download, or a local copy of the
+  official BepInEx archive.
 
 ### Compile only
-
-Close Going Medieval, then run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Build.ps1 `
@@ -285,60 +282,55 @@ powershell -ExecutionPolicy Bypass -File .\scripts\Build.ps1 `
   -GameRoot "C:\Path\To\Going Medieval"
 ```
 
-The compiled plugin is written to:
+Output:
 
 ```text
-artifacts\bin\Release\GoingCooperative.dll
+artifacts/bin/Release/GoingCooperative.dll
 ```
 
-### Create a GitHub release archive
-
-Run:
+### Create the self-contained player ZIP
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Package-Release.ps1 `
-  -Version 0.2.0 `
   -GameRoot "C:\Path\To\Going Medieval"
 ```
 
-Replace the example game path with the directory containing `Going Medieval.exe`.
-
-The packaging script will compile the plugin, stage the player-facing directory structure, create the ZIP, and calculate its SHA-256 checksum:
+The script reads the version from the plugin source, builds the DLL, downloads
+the pinned official BepInEx Windows x64 archive when necessary, verifies its
+SHA-256, downloads and verifies the corresponding Unity Doorstop source,
+stages the complete easy-install layout, validates the release config, adds
+licenses and a manifest, and creates:
 
 ```text
-artifacts\Going-Cooperative-v0.2.0.zip
-artifacts\Going-Cooperative-v0.2.0.zip.sha256
+artifacts/Going-Cooperative-v0.3.0-win-x64.zip
+artifacts/Going-Cooperative-v0.3.0-win-x64.zip.sha256
 ```
 
-If BepInEx is stored outside the game directory, pass its `core` directory explicitly:
+To build without downloading BepInEx:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\Package-Release.ps1 `
-  -Version 0.2.0 `
   -GameRoot "C:\Path\To\Going Medieval" `
-  -BepInExRoot "C:\Path\To\BepInEx\core"
+  -BepInExArchive "C:\Downloads\BepInEx_win_x64_5.4.23.5.zip"
 ```
 
-Upload `Going-Cooperative-v0.2.0.zip` as the player download under GitHub Release **Assets**. The `.sha256` file may be uploaded beside it for integrity verification.
+The supplied archive must match the pinned official SHA-256.
+Pass `-UnityDoorstopSourceArchive` in the same way to use a pre-downloaded
+official Unity Doorstop v4.5.0 source archive.
 
 ## Repository layout
 
 ```text
-config\
-└── replication.cfg
-scripts\
-├── Build.ps1
-└── Package-Release.ps1
-src\
-├── GoingCooperative.Core\
-└── GoingCooperative.Plugin.BepInEx\
+config/                 Release replication configuration
+scripts/                Build, package, and validation scripts
+src/                    Core and BepInEx plugin source
+third-party/licenses/   Redistributed third-party license texts
 ```
 
-- `GoingCooperative.Core` contains transport contracts, codecs, replication messages, save identity, and shared runtime primitives compiled into the plugin.
-- `GoingCooperative.Plugin.BepInEx` contains the BepInEx entry point and host-authoritative replication runtime.
-- Going Medieval, Unity, and BepInEx binaries are intentionally excluded from the repository and release archive.
-- Local logs, saves, captures, active configurations, build output, and temporary files should not be committed.
+Generated artifacts, game files, active configs, logs, saves, and downloaded
+dependencies are not committed.
 
 ## License
 
-Going Cooperative is available under the [MIT License](LICENSE). Third-party projects and trademarks remain subject to their own terms; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+Going Cooperative is available under the [MIT License](LICENSE). Third-party
+components remain under their respective licenses.
