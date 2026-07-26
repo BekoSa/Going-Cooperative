@@ -26,6 +26,13 @@ namespace GoingCooperative.Core
         public const string ProductionQueueAction = "ProductionQueue";
         public const string ProductionQueueV2Action = "ProductionQueueV2";
         public const string ManagementPolicyAction = "ManagementPolicy";
+        public const string StoragePolicyUpdateAction = "StoragePolicyUpdate";
+        public const string StoragePolicyStateAction = "StoragePolicyState";
+        public const int StoragePolicySchemaVersion = StoragePolicyPayloadCodec.SchemaVersion;
+        public const int StoragePolicyPayloadMaxUtf8Bytes = StoragePolicyPayloadCodec.MaximumPayloadUtf8Bytes;
+        public const int MaximumStoragePolicySlots = StoragePolicyPayloadCodec.MaximumSlots;
+        public const int MaximumStoragePolicyCells = StoragePolicyPayloadCodec.MaximumCells;
+        public const int MaximumStoragePolicyCatalogEntries = StoragePolicyPayloadCodec.MaximumCatalogEntries;
         public const string WorkerManagePresetAction = "WorkerManagePreset";
         public const string DraftStateAction = "DraftState";
         public const string DraftMoveAction = "DraftMove";
@@ -48,6 +55,178 @@ namespace GoingCooperative.Core
         public const string TraderTradeCommitAction = "TraderTradeCommit";
         public const string TraderTradeBasketUpdateAction = "TraderTradeBasketUpdate";
         public const string TraderTradeOpenRequestAction = "TraderTradeOpenRequest";
+        public const string PrioritisedObjectWorkV1Action = "PrioritisedObjectWorkV1";
+        public const string PrioritisedObjectWorkResultV1Action = "PrioritisedObjectWorkResultV1";
+
+        public static string CreatePrioritisedObjectWorkV1Payload(
+            string workerEntityId,
+            long targetHostId,
+            string targetEntityId,
+            string targetFamily,
+            string targetPolicy,
+            string goalId,
+            string requestId,
+            int targetX,
+            int targetY,
+            int targetZ)
+        {
+            return "{\"action\":\"" + PrioritisedObjectWorkV1Action
+                + "\",\"workerEntityId\":\"" + EscapeJsonString(workerEntityId)
+                + "\",\"targetHostId\":" + targetHostId.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetEntityId\":\"" + EscapeJsonString(targetEntityId)
+                + "\",\"targetFamily\":\"" + EscapeJsonString(targetFamily)
+                + "\",\"targetPolicy\":\"" + EscapeJsonString(targetPolicy)
+                + "\",\"goalId\":\"" + EscapeJsonString(goalId)
+                + "\",\"requestId\":\"" + EscapeJsonString(requestId)
+                + "\",\"targetX\":" + targetX.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetY\":" + targetY.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetZ\":" + targetZ.ToString(CultureInfo.InvariantCulture)
+                + "}";
+        }
+
+        public static bool TryReadPrioritisedObjectWorkV1Payload(
+            string payloadJson,
+            out string workerEntityId,
+            out long targetHostId,
+            out string targetEntityId,
+            out string targetFamily,
+            out string targetPolicy,
+            out string goalId,
+            out string requestId,
+            out int targetX,
+            out int targetY,
+            out int targetZ)
+        {
+            var normalized = Normalize(payloadJson);
+            workerEntityId = string.Empty;
+            targetHostId = 0L;
+            targetEntityId = string.Empty;
+            targetFamily = string.Empty;
+            targetPolicy = string.Empty;
+            goalId = string.Empty;
+            requestId = string.Empty;
+            targetX = 0;
+            targetY = 0;
+            targetZ = 0;
+            return HasAction(normalized, PrioritisedObjectWorkV1Action)
+                && TryReadStringProperty(normalized, "workerEntityId", out workerEntityId)
+                && !string.IsNullOrWhiteSpace(workerEntityId)
+                && workerEntityId.Length <= 256
+                && TryReadLongProperty(normalized, "targetHostId", out targetHostId)
+                && targetHostId >= 0L
+                && TryReadStringProperty(normalized, "targetEntityId", out targetEntityId)
+                && targetEntityId.Length <= 256
+                && (targetHostId > 0L || !string.IsNullOrWhiteSpace(targetEntityId))
+                && TryReadStringProperty(normalized, "targetFamily", out targetFamily)
+                && !string.IsNullOrWhiteSpace(targetFamily)
+                && targetFamily.Length <= 64
+                && TryReadStringProperty(normalized, "targetPolicy", out targetPolicy)
+                && targetPolicy.Length <= 64
+                && TryReadStringProperty(normalized, "goalId", out goalId)
+                && !string.IsNullOrWhiteSpace(goalId)
+                && goalId.Length <= 128
+                && TryReadStringProperty(normalized, "requestId", out requestId)
+                && !string.IsNullOrWhiteSpace(requestId)
+                && requestId.Length <= 128
+                && TryReadIntProperty(normalized, "targetX", out targetX)
+                && TryReadIntProperty(normalized, "targetY", out targetY)
+                && TryReadIntProperty(normalized, "targetZ", out targetZ);
+        }
+
+        public static string CreatePrioritisedObjectWorkResultV1Payload(
+            string workerEntityId,
+            long targetHostId,
+            string targetEntityId,
+            string targetFamily,
+            string targetPolicy,
+            string goalId,
+            string requestId,
+            int targetX,
+            int targetY,
+            int targetZ)
+        {
+            return "{\"action\":\"" + PrioritisedObjectWorkResultV1Action
+                + "\",\"workerEntityId\":\"" + EscapeJsonString(workerEntityId)
+                + "\",\"targetHostId\":" + targetHostId.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetEntityId\":\"" + EscapeJsonString(targetEntityId)
+                + "\",\"targetFamily\":\"" + EscapeJsonString(targetFamily)
+                + "\",\"targetPolicy\":\"" + EscapeJsonString(targetPolicy)
+                + "\",\"goalId\":\"" + EscapeJsonString(goalId)
+                + "\",\"requestId\":\"" + EscapeJsonString(requestId)
+                + "\",\"targetX\":" + targetX.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetY\":" + targetY.ToString(CultureInfo.InvariantCulture)
+                + ",\"targetZ\":" + targetZ.ToString(CultureInfo.InvariantCulture)
+                + "}";
+        }
+
+        public static bool TryReadPrioritisedObjectWorkResultV1Payload(
+            string payloadJson,
+            out string workerEntityId,
+            out long targetHostId,
+            out string targetEntityId,
+            out string targetFamily,
+            out string targetPolicy,
+            out string goalId,
+            out string requestId,
+            out int targetX,
+            out int targetY,
+            out int targetZ)
+        {
+            var normalized = Normalize(payloadJson);
+            workerEntityId = string.Empty;
+            targetHostId = 0L;
+            targetEntityId = string.Empty;
+            targetFamily = string.Empty;
+            targetPolicy = string.Empty;
+            goalId = string.Empty;
+            requestId = string.Empty;
+            targetX = 0;
+            targetY = 0;
+            targetZ = 0;
+            return HasAction(normalized, PrioritisedObjectWorkResultV1Action)
+                && TryReadStringProperty(normalized, "workerEntityId", out workerEntityId)
+                && !string.IsNullOrWhiteSpace(workerEntityId)
+                && workerEntityId.Length <= 256
+                && TryReadLongProperty(normalized, "targetHostId", out targetHostId)
+                && targetHostId >= 0L
+                && TryReadStringProperty(normalized, "targetEntityId", out targetEntityId)
+                && targetEntityId.Length <= 256
+                && (targetHostId > 0L || !string.IsNullOrWhiteSpace(targetEntityId))
+                && TryReadStringProperty(normalized, "targetFamily", out targetFamily)
+                && !string.IsNullOrWhiteSpace(targetFamily)
+                && targetFamily.Length <= 64
+                && TryReadStringProperty(normalized, "targetPolicy", out targetPolicy)
+                && targetPolicy.Length <= 64
+                && TryReadStringProperty(normalized, "goalId", out goalId)
+                && !string.IsNullOrWhiteSpace(goalId)
+                && goalId.Length <= 128
+                && TryReadStringProperty(normalized, "requestId", out requestId)
+                && !string.IsNullOrWhiteSpace(requestId)
+                && requestId.Length <= 128
+                && TryReadIntProperty(normalized, "targetX", out targetX)
+                && TryReadIntProperty(normalized, "targetY", out targetY)
+                && TryReadIntProperty(normalized, "targetZ", out targetZ);
+        }
+
+        public static bool TryCreateStoragePolicyUpdatePayload(StoragePolicyUpdate update, out string payloadJson)
+        {
+            return StoragePolicyPayloadCodec.TryCreateUpdatePayload(update, out payloadJson);
+        }
+
+        public static bool TryReadStoragePolicyUpdatePayload(string payloadJson, out StoragePolicyUpdate update)
+        {
+            return StoragePolicyPayloadCodec.TryReadUpdatePayload(payloadJson, out update);
+        }
+
+        public static bool TryCreateStoragePolicyStatePayload(StoragePolicyState state, out string payloadJson)
+        {
+            return StoragePolicyPayloadCodec.TryCreateStatePayload(state, out payloadJson);
+        }
+
+        public static bool TryReadStoragePolicyStatePayload(string payloadJson, out StoragePolicyState state)
+        {
+            return StoragePolicyPayloadCodec.TryReadStatePayload(payloadJson, out state);
+        }
 
         public static string CreateTraderTradeOpenRequestPayload(
             long epoch,

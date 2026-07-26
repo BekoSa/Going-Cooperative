@@ -1226,6 +1226,13 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var methodName = __originalMethod?.Name ?? string.Empty;
             var typeName = __originalMethod?.DeclaringType?.FullName ?? string.Empty;
+            if (replicationConfigPrioritisedObjectWorkV1
+                && IsReplicationPrioritisedObjectWorkV1MenuType(typeName))
+            {
+                // The typed lane owns exact worker-to-target prioritize commands.
+                // Never also degrade them into coordinate-only RegionOrder state.
+                return;
+            }
             if (IsReplicationStockpileAreaSelectionActive()
                 && string.Equals(methodName, "OnForceOrderOnResource", StringComparison.Ordinal))
             {

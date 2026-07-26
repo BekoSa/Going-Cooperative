@@ -965,6 +965,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
+            RegisterReplicationBuildingHostIdentity(
+                delta.UniqueId,
+                candidate,
+                "building-lifecycle-v2-client-apply");
+
             applyingRuntimeCommandDepth++;
             try
             {
@@ -1004,6 +1009,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     buildingInstance,
                     phase,
                     out var phaseDetail);
+                var socketableShelfDetail = "not-finishing";
+                var socketableShelfApplied = !finishing
+                    || TryRepairReplicationFinishedSocketableShelfV2(
+                        candidate,
+                        buildingInstance,
+                        out socketableShelfDetail);
                 bool progressingApplied;
                 string progressingDetail;
                 if (finishing)
@@ -1039,12 +1050,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     markedForDestruction,
                     out var markDetail);
                 if (!phaseApplied
+                    || !socketableShelfApplied
                     || !progressingApplied
                     || !remainingApplied
                     || !forbiddenApplied
                     || !markApplied)
                 {
                     detail = "native-state-apply-failed phase=" + phaseDetail
+                        + " socketableShelf=" + socketableShelfDetail
                         + " progressing=" + progressingDetail
                         + " remaining=" + remainingDetail
                         + " forbid=" + forbidDetail
@@ -1054,6 +1067,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 detail = lookupDetail
                     + " phase=" + phaseDetail
+                    + " socketableShelf=" + socketableShelfDetail
                     + " progressing=" + progressingDetail
                     + " remaining=" + remainingDetail
                     + " forbid=" + forbidDetail
@@ -1063,6 +1077,126 @@ namespace GoingCooperative.Plugin.BepInEx
             finally
             {
                 applyingRuntimeCommandDepth--;
+            }
+        }
+
+        private static bool TryRepairReplicationFinishedSocketableShelfV2(
+            object candidate,
+            object buildingInstance,
+            out string detail)
+        {
+            detail = "not-applicable";
+            if (!replicationConfigSocketablePlacementReplication
+                || !TryReadReplicationBoolMember(
+                    buildingInstance,
+                    "AttachedToSocketComponent",
+                    "attachedToSocketComponent",
+                    out var attachedToSocket)
+                || !attachedToSocket)
+            {
+                return true;
+            }
+
+            var viewType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BaseBuildingViewComponent");
+            var shelfComponentType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.ShelfComponent");
+            if (viewType == null || shelfComponentType == null)
+            {
+                detail = "native-type-missing view=" + (viewType == null ? "missing" : "ok")
+                    + " shelf=" + (shelfComponentType == null ? "missing" : "ok");
+                return false;
+            }
+
+            object? view = viewType.IsInstanceOfType(candidate) ? candidate : null;
+            if (view == null && candidate is Component candidateComponent)
+            {
+                view = candidateComponent.gameObject.GetComponent(viewType);
+            }
+
+            if (view == null
+                && TryResolveReplicationBuildingsManagerMain(out var manager, out _)
+                && manager != null
+                && TryReadInstanceMemberValue(
+                    buildingInstance,
+                    "BuildingType",
+                    out var buildingType)
+                && buildingType != null
+                && TryReadInstanceMemberValue(
+                    manager,
+                    "TypeInstanceView",
+                    out var typeInstanceViewValue)
+                && typeInstanceViewValue is IDictionary typeInstanceView
+                && typeInstanceView.Contains(buildingType)
+                && typeInstanceView[buildingType] is IDictionary instanceView
+                && instanceView.Contains(buildingInstance))
+            {
+                view = instanceView[buildingInstance];
+            }
+
+            if (!(view is Component viewComponent))
+            {
+                detail = "view-missing";
+                return false;
+            }
+
+            // Building feature components are not guaranteed to live on the root
+            // BaseBuildingViewComponent GameObject. Wall-mounted shelves use a
+            // child component in the live prefab hierarchy.
+            var shelfComponent = viewComponent.GetComponentInChildren(
+                shelfComponentType,
+                includeInactive: true);
+            if (shelfComponent == null)
+            {
+                // Most socketables are not storage. Their lifecycle remains entirely
+                // owned by the normal building path.
+                detail = "no-shelf-component";
+                return true;
+            }
+
+            if (TryReadInstanceMemberValue(
+                    shelfComponent,
+                    "ComponentInstance",
+                    out var existingInstance)
+                && existingInstance != null)
+            {
+                detail = "already-initialized";
+                return true;
+            }
+
+            var enterFinished = FindReplicationInstanceMethod(
+                shelfComponent.GetType(),
+                "OnBaseBuildingEnterFinishedState",
+                new[] { typeof(bool) });
+            if (enterFinished == null)
+            {
+                detail = "finish-callback-missing";
+                return false;
+            }
+
+            try
+            {
+                // False is the native newly-constructed branch. It creates the
+                // ShelfComponentInstance, initializes UniversalStorage slots, and
+                // registers both component and storage managers.
+                enterFinished.Invoke(shelfComponent, new object[] { false });
+                if (!TryReadInstanceMemberValue(
+                        shelfComponent,
+                        "ComponentInstance",
+                        out var repairedInstance)
+                    || repairedInstance == null)
+                {
+                    detail = "finish-callback-did-not-create-instance";
+                    return false;
+                }
+
+                detail = "initialized-via-native-finish";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                detail = "finish-callback-failed " + FormatReflectionExceptionDetail(ex);
+                return false;
             }
         }
 

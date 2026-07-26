@@ -189,15 +189,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 state.SpeedBucket = speedBucket;
                 state.Gait = gait;
 
-                if (!TryCollectReplicationSemanticMotionCorners(
+                var cornerStarted = BeginReplicationPathingPerfSample();
+                var cornersCollected = TryCollectReplicationSemanticMotionCorners(
                         driver,
                         accessors,
                         pathIdentity,
                         currentNodeIndex,
                         transform.position,
                         out var cornerCount,
-                        out var cornerSignature)
-                    || cornerCount <= 0)
+                        out var cornerSignature);
+                RecordReplicationPathingCornerExtraction(
+                    cornerStarted,
+                    cornersCollected && cornerCount > 0);
+                if (!cornersCollected || cornerCount <= 0)
                 {
                     if (state.Active)
                     {
@@ -586,6 +590,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var uniqueId = TryParseReplicationEntityNumericId(entityId, out var parsedId) ? parsedId : 0L;
+            RecordReplicationPathingMotionEvent(phase, cornerCount);
             current.SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
                 ++replicationWorldObjectDeltaSequence,
                 Time.realtimeSinceStartup,
@@ -646,6 +651,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 reason);
 
             var uniqueId = TryParseReplicationEntityNumericId(entityId, out var parsedId) ? parsedId : 0L;
+            RecordReplicationPathingMotionEvent("End", 0);
             current.SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
                 ++replicationWorldObjectDeltaSequence,
                 Time.realtimeSinceStartup,

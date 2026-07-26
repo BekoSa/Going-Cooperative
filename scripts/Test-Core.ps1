@@ -22,6 +22,8 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportChunkCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DirectTransportSecurity.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\LockstepCommandPayloads.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\StoragePolicyContracts.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MedicalReplicationPayloads.cs"),
     (Join-Path $repositoryRoot "tests\BuildingReplicationV2PolicyTests.cs"),
     (Join-Path $repositoryRoot "tests\DirectTransportSecurityTests.cs"),
     (Join-Path $repositoryRoot "tests\CorePolicyTests.cs")
@@ -52,10 +54,13 @@ foreach ($testedGate in @(
     "semanticanimalpresentationv2",
     "semanticworkcycledriver",
     "hostsleeppresentationv2",
+    "disableautomaticsleepspeed",
     "uiv3",
     "buildingreplicationv2",
     "eventreplication",
     "eventtraderauthority",
+    "eventrecruitmentauthorityv1",
+    "eventrunawayauthorityv1",
     "synchronizedtrading",
     "eventlifecyclereplication",
     "eventdialogreplication",
@@ -67,10 +72,12 @@ foreach ($testedGate in @(
     "productionstatev2",
     "productionticketordersv2",
     "workstationruntimepresentation",
-    "resourcecontainerreplication")) {
+    "resourcecontainerreplication",
+    "storagepolicyv4",
+    "shelfstoragemanifestv1")) {
     if ($settings[$testedGate] -ne "true") { throw "Committed test config must enable $testedGate." }
 }
-if ($settings["directtransportsecurityv1"] -ne "true") { throw "Committed test config must enable directTransportSecurityV1." }
+if ($settings["directtransportsecurityv1"] -ne "false") { throw "Committed test config must leave directTransportSecurityV1 disabled." }
 foreach ($disabledGate in @(
     "eventschedulerauthority",
     "eventwarningreplication",

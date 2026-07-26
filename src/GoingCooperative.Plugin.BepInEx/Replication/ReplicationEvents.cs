@@ -66,6 +66,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static int replicationEventApplicationDepth;
         private static bool replicationEventHooksReady;
         private static bool replicationTraderEventStartHooksReady;
+        private static bool replicationRecruitmentEventHooksReady;
         private static bool replicationEventSpeedHookReady;
         private static bool replicationEventNoticeHooksReady;
         private static bool replicationEventWarningSurfacesReady;
@@ -137,6 +138,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationEventHooksReady = eventHookCount == 17;
             replicationTraderEventStartHooksReady = traderStartEventHookCount == 1
                 && traderInstanceStartHookCount == 1;
+            replicationRecruitmentEventHooksReady = traderStartEventHookCount == 1
+                && traderInstanceStartHookCount == 1
+                && TryInstallReplicationRecruitmentEventHooks(harmonyInstance) == 1
+                && ValidateReplicationRecruitmentNativeSurfaces();
             replicationEventWarningSurfacesReady = ValidateReplicationEventWarningSurfaces();
             var noticeHookCount = TryInstallReplicationEventNoticeHooks(harmonyInstance);
             count += noticeHookCount;
@@ -150,6 +155,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " traderAuthorityConfigured=" + replicationConfigEventTraderAuthority
                 + " traderStartHooks=" + replicationTraderEventStartHooksReady
                 + " traderAuthority=" + TraderEventAuthorityEnabled()
+                + " recruitmentAuthorityConfigured=" + replicationConfigEventRecruitmentAuthorityV1
+                + " recruitmentAuthority=" + RecruitmentEventAuthorityV1Enabled()
+                + " runawayAuthorityConfigured=" + replicationConfigEventRunawayAuthorityV1
+                + " runawayAuthority=" + RunawayEventAuthorityV1Enabled()
                 + " fullGraphAuthority=" + FullEventGraphAuthorityEnabled()
                 + " lifecycle=" + replicationConfigEventLifecycleReplication
                 + " dialogs=" + replicationConfigEventDialogReplication
@@ -158,6 +167,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 LogReplicationWarning("Going Cooperative event authority failed closed because critical hooks are incomplete expected=17 actual=" + eventHookCount.ToString(CultureInfo.InvariantCulture));
             if (replicationConfigEventTraderAuthority && !replicationTraderEventStartHooksReady)
                 LogReplicationWarning("Going Cooperative trader event authority failed closed because its exact StartEvent/instance Start hooks are incomplete.");
+            if (replicationConfigEventRecruitmentAuthorityV1 && !RecruitmentEventAuthorityV1Enabled())
+                LogReplicationWarning("Going Cooperative recruitment event authority V1 failed closed because its exact hooks, native worker serializer/adoption surfaces, or event dependencies are incomplete.");
+            if (replicationConfigEventRunawayAuthorityV1 && !RunawayEventAuthorityV1Enabled())
+                LogReplicationWarning("Going Cooperative runaway event authority V1 failed closed because its exact hooks, native worker serializer/adoption surfaces, or event dependencies are incomplete.");
             if (!replicationEventWarningSurfacesReady)
                 LogReplicationWarning("Going Cooperative event warning replication failed closed because native warning surfaces are incomplete.");
         }
@@ -303,7 +316,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool EventRegistryReplicationLaneEnabled()
         {
-            return EventLifecycleLaneEnabled() || TraderEventAuthorityEnabled();
+            return EventLifecycleLaneEnabled()
+                || TraderEventAuthorityEnabled()
+                || RecruitmentEventAuthorityV1Enabled()
+                || RunawayEventAuthorityV1Enabled();
         }
 
         // This lane is intentionally exact: only trader events whose complete party
@@ -385,7 +401,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool EventDialogLaneEnabled()
         {
-            return FullEventGraphAuthorityEnabled() && replicationConfigEventDialogReplication;
+            return replicationConfigEventDialogReplication
+                && (FullEventGraphAuthorityEnabled()
+                    || RecruitmentEventAuthorityV1Enabled()
+                    || RunawayEventAuthorityV1Enabled());
         }
 
         private static bool EventChoiceLaneEnabled()
@@ -502,10 +521,15 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ReplicationEventStartEventPrefix(string __0, ref bool __result)
         {
-            if (!ShouldSuppressReplicationClientTraderEventStart(IsReplicationTraderEventBlueprintId(__0))) return true;
+            var trader = ShouldSuppressReplicationClientTraderEventStart(IsReplicationTraderEventBlueprintId(__0));
+            var recruitment = ShouldSuppressReplicationClientRecruitmentEventStart(IsReplicationRecruitmentEventBlueprintId(__0));
+            var runaway = ShouldSuppressReplicationClientRunawayEventStart(IsReplicationRunawayEventBlueprintId(__0));
+            if (!trader && !recruitment && !runaway) return true;
             __result = false;
             replicationEventsSuppressed++;
-            replicationLastEventSummary = "client-native-trader-start-suppressed blueprintId=" + __0;
+            replicationLastEventSummary = "client-native-"
+                + (runaway ? "runaway" : recruitment ? "recruitment" : "trader")
+                + "-start-suppressed blueprintId=" + __0;
             return false;
         }
 
@@ -522,15 +546,23 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool ReplicationEventInstanceStartPrefix(object __instance, ref bool __result)
         {
             var traderEvent = IsReplicationTraderEventInstance(__instance);
-            if (ShouldSuppressReplicationClientTraderEventStart(traderEvent))
+            var recruitmentEvent = IsReplicationRecruitmentEventInstance(__instance);
+            var runawayEvent = IsReplicationRunawayEventInstance(__instance);
+            if (ShouldSuppressReplicationClientTraderEventStart(traderEvent)
+                || ShouldSuppressReplicationClientRecruitmentEventStart(recruitmentEvent)
+                || ShouldSuppressReplicationClientRunawayEventStart(runawayEvent))
             {
                 __result = false;
                 replicationEventsSuppressed++;
-                replicationLastEventSummary = "client-native-trader-instance-start-suppressed type=" + __instance.GetType().Name;
+                replicationLastEventSummary = "client-native-"
+                    + (runawayEvent ? "runaway" : recruitmentEvent ? "recruitment" : "trader")
+                    + "-instance-start-suppressed type=" + __instance.GetType().Name;
                 return false;
             }
             if (replicationConfigHostMode
-                && (EventLifecycleLaneEnabled() || (traderEvent && TraderEventAuthorityEnabled())))
+                && (EventLifecycleLaneEnabled()
+                    || (traderEvent && TraderEventAuthorityEnabled())
+                    || (runawayEvent && RunawayEventAuthorityV1Enabled())))
                 EnsureHostReplicationEventRecord(__instance, "start-prefix");
             return true;
         }
@@ -790,6 +822,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     replicationNextClientEventQuarantineRealtime = Time.realtimeSinceStartup + ReplicationEventPollSeconds;
                     QuarantineReplicationClientNativeEvents(null, "runtime");
                 }
+                else if ((RecruitmentEventAuthorityV1Enabled() || RunawayEventAuthorityV1Enabled())
+                    && Time.realtimeSinceStartup >= replicationNextClientEventQuarantineRealtime)
+                {
+                    replicationNextClientEventQuarantineRealtime = Time.realtimeSinceStartup + ReplicationEventPollSeconds;
+                    QuarantineReplicationClientNativeRecruitmentEvents("runtime");
+                }
                 RetryPendingReplicationEventChoiceIfDue();
             }
 
@@ -966,7 +1004,9 @@ namespace GoingCooperative.Plugin.BepInEx
             if (!replicationConfigHostMode
                 || nativeEvent == null
                 || (!EventLifecycleLaneEnabled()
-                    && !(IsReplicationTraderEventInstance(nativeEvent) && TraderEventAuthorityEnabled()))) return false;
+                    && !(IsReplicationTraderEventInstance(nativeEvent) && TraderEventAuthorityEnabled())
+                    && !(IsReplicationRecruitmentEventInstance(nativeEvent) && RecruitmentEventAuthorityV1Enabled())
+                    && !(IsReplicationRunawayEventInstance(nativeEvent) && RunawayEventAuthorityV1Enabled()))) return false;
             return TryPrepareHostReplicationEvent(nativeEvent, source, out var prepared)
                 && prepared != null
                 && CommitAndSendPreparedHostReplicationEvent(prepared, source, force, snapshotId);
@@ -1712,6 +1752,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(deltaKind, GameEventTombstoneDeltaKind, StringComparison.Ordinal)
                 || string.Equals(deltaKind, GameEventSpeedStateDeltaKind, StringComparison.Ordinal)
                 || string.Equals(deltaKind, GameEventNoticeDeltaKind, StringComparison.Ordinal)
+                || IsReplicationRecruitmentEventDeltaKind(deltaKind)
                 || IsReplicationTraderPartyDeltaKind(deltaKind)
                 || IsReplicationWeatherDeltaKind(deltaKind);
         }
@@ -1719,6 +1760,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool TryApplyReplicationEventWorldDelta(ReplicationWorldObjectDelta delta, out string detail)
         {
             if (IsReplicationWeatherDeltaKind(delta.DeltaKind)) return TryApplyReplicationWeatherWorldDelta(delta, out detail);
+            if (IsReplicationRecruitmentEventDeltaKind(delta.DeltaKind)) return TryApplyReplicationRecruitmentEventWorldDelta(delta, out detail);
             if (!EventRegistryReplicationLaneEnabled())
             {
                 detail = "event-lane-disabled";
@@ -1731,7 +1773,8 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             if (!EventLifecycleLaneEnabled()
                 && string.Equals(delta.DeltaKind, GameEventStateDeltaKind, StringComparison.Ordinal)
-                && !IsReplicationTraderEventBlueprintId(delta.BlueprintId))
+                && !IsReplicationTraderEventBlueprintId(delta.BlueprintId)
+                && !IsReplicationRecruitmentEventBlueprintId(delta.BlueprintId))
             {
                 detail = "event-state-unsupported-by-trader-only-lane";
                 return false;
@@ -2452,6 +2495,13 @@ namespace GoingCooperative.Plugin.BepInEx
                     + " actualRevision=" + eventRevision.ToString(CultureInfo.InvariantCulture);
                 return false;
             }
+            if (!FullEventGraphAuthorityEnabled()
+                && !IsReplicationAuthoritativeWorkerOfferEvent(record.NativeEvent))
+            {
+                replicationEventChoicesRejected++;
+                detail = "event-choice-family-not-authoritative eventId=" + eventId;
+                return false;
+            }
             if (!TryBuildHostReplicationEventState(record.NativeEvent, record, out var current, out _)
                 || !current.IsDialog
                 || current.DialogClosed
@@ -2526,8 +2576,15 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool CanSendReplicationEventChoice(ClientReplicationEventState state)
         {
+            // Runaway choices are fully determined by the authoritative label,
+            // disabled bit and option index. The native Humanoid tooltip cannot be
+            // serialized by the generic dialog lane, but its absence must not force
+            // the second player back to the host for this exact gated family.
+            var choiceContextComplete = state.ChoiceContextComplete
+                || (RunawayEventAuthorityV1Enabled()
+                    && IsReplicationRunawayEventBlueprintId(state.BlueprintId));
             return state.DialogProjectionComplete
-                && state.ChoiceContextComplete
+                && choiceContextComplete
                 && state.NativeOptionCount > 0
                 && state.NativeOptionCount <= 8
                 && (!phaseIsBranching(state.PhaseType) || state.NativeOptionCount <= 4)
@@ -2914,6 +2971,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 foreach (var state in ReplicationClientEvents.Values)
                 {
                     if (!state.Active || !state.IsDialog || state.DialogClosed) continue;
+                    if (!FullEventGraphAuthorityEnabled()
+                        && !((RecruitmentEventAuthorityV1Enabled()
+                                && string.Equals(state.Family, "Recruitment", StringComparison.Ordinal))
+                            || (RunawayEventAuthorityV1Enabled()
+                                && IsReplicationRunawayEventBlueprintId(state.BlueprintId)))) continue;
                     if (selected == null || state.ReceivedRealtime > selected.ReceivedRealtime) selected = state;
                 }
             }
@@ -2945,8 +3007,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 new Color(0.055f, 0.06f, 0.064f, 0.96f));
             SetMultiplayerCanvasRect(
                 multiplayerEventPresentationPanel.GetComponent<RectTransform>(),
-                new Vector2(0.6f, 0.16f),
-                new Vector2(0.98f, 0.84f),
+                new Vector2(0.31f, 0.16f),
+                new Vector2(0.69f, 0.84f),
                 Vector2.zero,
                 Vector2.zero);
 
@@ -3105,6 +3167,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 ReplicationEventNoticeCaptureContext.Clear();
             }
             ResetReplicationTraderParties(traderPartyResetContext);
+            ResetReplicationRecruitmentEventRuntimeState();
             replicationEventHostSessionNonce = string.Empty;
             replicationEventClientSessionNonce = string.Empty;
             replicationEventHostEpoch = -1;

@@ -133,7 +133,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var identityStarted = BeginReplicationPathingPerfSample();
             var hasStableEntityId = TryGetReplicationViewEntityId(view, seenEntityIds, out var entityId);
+            RecordReplicationPathingIdentity(identityStarted, hasStableEntityId);
             if (hasStableEntityId)
             {
                 stableCount++;
@@ -154,11 +156,28 @@ namespace GoingCooperative.Plugin.BepInEx
             var position = transform.position;
             var rotation = transform.rotation;
             ReplicationEntityMotionMetadata? motion = null;
-            if (replicationConfigSemanticAgentPresentation
-                && hasStableEntityId
-                && TryCollectReplicationSemanticMotionMetadata(view, behaviour, entityId, kind, out var capturedMotion))
+            if (replicationConfigSemanticAgentPresentation && hasStableEntityId)
             {
-                motion = capturedMotion;
+                var semanticStarted = BeginReplicationPathingPerfSample();
+                var emittedSemanticRow = TryCollectReplicationSemanticMotionMetadata(
+                    view,
+                    behaviour,
+                    entityId,
+                    kind,
+                    out var capturedMotion);
+                RecordReplicationPathingSemantic(
+                    semanticStarted,
+                    kind,
+                    emittedSemanticRow,
+                    emittedSemanticRow
+                        && (capturedMotion.IsMoving
+                            || capturedMotion.IsSwimming
+                            || capturedMotion.IsClimbing
+                            || capturedMotion.MovementSpeed >= 0.001f));
+                if (emittedSemanticRow)
+                {
+                    motion = capturedMotion;
+                }
             }
 
             AppendReplicationPositionSample(positionSample, kind, entityId, position);
@@ -483,6 +502,11 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             if (TryGetReplicationTraderPartyNetworkId(owner, out entityId))
+            {
+                return true;
+            }
+
+            if (TryGetReplicationRecruitmentWorkerNetworkId(owner, out entityId))
             {
                 return true;
             }

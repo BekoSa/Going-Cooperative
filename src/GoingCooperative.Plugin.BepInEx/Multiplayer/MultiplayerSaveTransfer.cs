@@ -14,7 +14,7 @@ namespace GoingCooperative.Plugin.BepInEx
 {
     internal sealed class MultiplayerSaveTransfer : IDisposable
     {
-        private const string Magic = "GOING_COOPERATIVE_CONTROL_V3";
+        private const string Magic = "GOING_COOPERATIVE_CONTROL_V4";
         private readonly object stateLock = new object();
         private readonly object writeLock = new object();
         private TcpListener? listener;
@@ -32,6 +32,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private volatile int loadGeneration;
         private volatile int resumeGeneration;
         private volatile int epoch;
+        private long sessionId;
         private string phase = "Idle";
         private string detail = "Select a save to host.";
         private float progress;
@@ -48,6 +49,7 @@ namespace GoingCooperative.Plugin.BepInEx
         public int LoadGeneration { get { return loadGeneration; } }
         public int ResumeGeneration { get { return resumeGeneration; } }
         public int Epoch { get { return epoch; } }
+        public long SessionId { get { return Interlocked.Read(ref sessionId); } }
         public bool ResyncCaptureRequested { get { return resyncCaptureRequested; } }
         public string ReceivedSavePath { get { lock (stateLock) return receivedSavePath; } }
         public string ReceivedVillageName { get { lock (stateLock) return receivedVillageName; } }
@@ -57,6 +59,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             if (save == null) throw new ArgumentNullException(nameof(save));
             Stop();
+            Interlocked.Exchange(ref sessionId, CreateSessionId());
             hostMode = true;
             stopping = false;
             ConfigureSecurity(securityEnabled, sessionCode);
@@ -144,6 +147,7 @@ namespace GoingCooperative.Plugin.BepInEx
             listener = null;
             localReady = remoteReady = localLoaded = remoteLoaded = resyncCaptureRequested = false;
             loadGeneration = resumeGeneration = epoch = 0;
+            Interlocked.Exchange(ref sessionId, 0L);
             receivedSavePath = receivedVillageName = string.Empty;
             failure = null;
             SetState("Idle", "Select a save to host.", 0f);
@@ -196,7 +200,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
                 }
                 if (stopping || client == null || controlStream == null) return;
-                SendCommand("HELLO", 0, Magic);
+                SendCommand("HELLO", 0, FormatHelloPayload(SessionId));
                 SendBundle(initialSave, false);
                 ReadHostCommands(new BinaryReader(controlStream, Encoding.UTF8, true));
             }
@@ -230,11 +234,37 @@ namespace GoingCooperative.Plugin.BepInEx
                 client.ReceiveTimeout = 0;
                 client.SendTimeout = 0;
                 var reader = new BinaryReader(controlStream, Encoding.UTF8, true);
-                if (reader.ReadString() != "HELLO" || reader.ReadInt32() != 0 || reader.ReadString() != Magic)
+                if (reader.ReadString() != "HELLO"
+                    || reader.ReadInt32() != 0
+                    || !TryReadHelloPayload(reader.ReadString(), out var remoteSessionId))
                     throw new InvalidDataException("The host control protocol is incompatible.");
+                Interlocked.Exchange(ref sessionId, remoteSessionId);
                 ReadClientCommands(reader);
             }
             catch (Exception ex) { Fail(ex); }
+        }
+
+        private static long CreateSessionId()
+        {
+            var bytes = new byte[8];
+            using (var random = RandomNumberGenerator.Create()) random.GetBytes(bytes);
+            var value = BitConverter.ToInt64(bytes, 0) & long.MaxValue;
+            return value == 0L ? 1L : value;
+        }
+
+        private static string FormatHelloPayload(long value)
+        {
+            return Magic + "|" + value.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static bool TryReadHelloPayload(string payload, out long value)
+        {
+            value = 0L;
+            var prefix = Magic + "|";
+            return payload != null
+                && payload.StartsWith(prefix, StringComparison.Ordinal)
+                && long.TryParse(payload.Substring(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out value)
+                && value > 0L;
         }
 
         private void ReadHostCommands(BinaryReader reader)

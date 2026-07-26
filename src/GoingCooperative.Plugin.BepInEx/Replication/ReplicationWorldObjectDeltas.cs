@@ -17,6 +17,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static readonly Dictionary<string, float> ReplicationWorldObjectDeltaLastSentAt = new Dictionary<string, float>(StringComparer.Ordinal);
         private static readonly HashSet<string> ReplicationWorldObjectDeltaAppliedSpawnKeys = new HashSet<string>(StringComparer.Ordinal);
         private static readonly Dictionary<string, float> ReplicationWorldObjectDeltaRecentSpawnLocationAt = new Dictionary<string, float>(StringComparer.Ordinal);
+        private static readonly HashSet<object> ReplicationClientGenericSpawnedResourcePiles =
+            new HashSet<object>(ReferenceObjectComparer.Instance);
         private static readonly Dictionary<long, PendingReplicationWorldObjectDelta> replicationPendingWorldObjectDeltas = new Dictionary<long, PendingReplicationWorldObjectDelta>();
         private static readonly Dictionary<string, long> ReplicationPendingSupersedableWorldDeltaSequenceByKey =
             new Dictionary<string, long>(StringComparer.Ordinal);
@@ -1852,6 +1854,24 @@ namespace GoingCooperative.Plugin.BepInEx
             if ((key.EndsWith(".SpawnNewPile", StringComparison.Ordinal)
                     || key.EndsWith(".SpawnResource", StringComparison.Ordinal)
                     || key.EndsWith(".ProducePile", StringComparison.Ordinal))
+                && ShouldSuppressReplicationShelfStorePileSpawn())
+            {
+                replicationShelfStorageSuppressedPileSpawns++;
+                if (replicationConfigVerboseReplicationLogging)
+                {
+                    current.LogReplicationInfo(
+                        "Going Cooperative shelf-storage suppressed coordinate pile spawn "
+                        + "source=" + key
+                        + " count=" + replicationShelfStorageSuppressedPileSpawns
+                            .ToString(CultureInfo.InvariantCulture));
+                }
+
+                return;
+            }
+
+            if ((key.EndsWith(".SpawnNewPile", StringComparison.Ordinal)
+                    || key.EndsWith(".SpawnResource", StringComparison.Ordinal)
+                    || key.EndsWith(".ProducePile", StringComparison.Ordinal))
                 && TryCreateReplicationWorldObjectDelta("ResourcePileSpawned", target, args, result, hasResult, key, out var pileDelta)
                 && pileDelta != null)
             {
@@ -2586,7 +2606,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReplicationWorldObjectDetailToken(result.Detail)));
         }
 
-        private void SendReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
+        private bool SendReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
         {
             if (!replicationConfigEnabled
                 || !replicationConfigHostMode
@@ -2596,7 +2616,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 || replicationTransport == null
                 || ShouldSkipDuplicateReplicationWorldObjectDelta(delta))
             {
-                return;
+                return false;
             }
 
             lock (ReplicationWorldObjectDeltaLock)
@@ -2621,12 +2641,17 @@ namespace GoingCooperative.Plugin.BepInEx
                         // only amplifies packet loss into another building storm.
                         SupersedePendingReplicationBuildingLifecycleDeltas(delta);
                     }
+                    if (IsReplicationStoragePolicyStateDelta(delta))
+                    {
+                        SupersedePendingReplicationStoragePolicyStateDeltas(delta);
+                    }
 
                     replicationPendingWorldObjectDeltas[delta.Sequence] = new PendingReplicationWorldObjectDelta(delta);
                 }
             }
 
             TrySendReplicationWorldObjectDelta(delta, isRetry: false);
+            return true;
         }
 
         private void SendReplicationWorldObjectSnapshotDelta(ReplicationWorldObjectDelta delta)
@@ -2658,6 +2683,23 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        private static bool IsReplicationStoragePolicyStateDelta(ReplicationWorldObjectDelta delta)
+        {
+            return string.Equals(delta.DeltaKind, ManagementDeltaKind, StringComparison.Ordinal)
+                && LockstepCommandPayloads.TryReadStoragePolicyStatePayload(delta.Detail, out _);
+        }
+
+        private static void PurgeReplicationStoragePolicyWorldObjectDeltas()
+        {
+            lock (ReplicationWorldObjectDeltaLock)
+            {
+                var remove = new List<long>();
+                foreach (var pair in replicationPendingWorldObjectDeltas)
+                    if (IsReplicationStoragePolicyStateDelta(pair.Value.Delta)) remove.Add(pair.Key);
+                for (var i = 0; i < remove.Count; i++) replicationPendingWorldObjectDeltas.Remove(remove[i]);
+            }
+        }
+
         private void SendHostReplicationResourcePileStateSnapshotIfDue()
         {
             if (!replicationConfigEnabled
@@ -2667,7 +2709,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 || !replicationRemoteHelloReceived
                 || replicationTransport == null
                 || replicationLastCollectedEntities <= 0
-                || !replicationConfigResourcePileStateSnapshots)
+                || !replicationConfigResourcePileStateSnapshots
+                || ReplicationGroundPileStateV2Enabled())
             {
                 return;
             }
@@ -2821,6 +2864,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private void SendHostReplicationAgentCarryStateSnapshotIfDue()
         {
             if (replicationConfigResourceContainerReplication
+                || ReplicationAgentInventoryStateV2Enabled()
                 || !replicationConfigEnabled
                 || !replicationConfigHostMode
                 || IsReplicationWorldObjectDeltaModeOff()
@@ -3338,6 +3382,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
+            if (string.Equals(delta.DeltaKind, ReplicationMedicalWoundStateDeltaKind, StringComparison.Ordinal))
+            {
+                // Medical state carries a per-pawn revision. Rapid wound/treatment
+                // transitions are legitimate and must not enter the generic time-key filter.
+                return false;
+            }
+
+            if (string.Equals(
+                    delta.DeltaKind,
+                    ReplicationPrioritisedObjectWorkResultV1DeltaKind,
+                    StringComparison.Ordinal))
+            {
+                // Request identity and the reliable delta sequence own deduplication.
+                // Two distinct exact-worker orders can legitimately target the same
+                // object inside the generic 500 ms window.
+                return false;
+            }
+
             if (string.Equals(delta.DeltaKind, ManagementDeltaKind, StringComparison.Ordinal))
             {
                 // Management rows are absolute state and already have payload-aware
@@ -3398,16 +3460,22 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var now = Time.realtimeSinceStartup;
+            var perfStarted = BeginReplicationPathingPerfSample();
+            var inspected = 0;
+            var pendingCount = 0;
             List<ReplicationWorldObjectDelta>? due = null;
             lock (ReplicationWorldObjectDeltaLock)
             {
+                pendingCount = replicationPendingWorldObjectDeltas.Count;
                 if (replicationPendingWorldObjectDeltas.Count == 0)
                 {
+                    RecordReplicationPathingRetryScan(perfStarted, 0, 0, 0);
                     return;
                 }
 
                 foreach (var pending in replicationPendingWorldObjectDeltas.Values)
                 {
+                    inspected++;
                     if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta))
                     {
                         due ??= new List<ReplicationWorldObjectDelta>();
@@ -3418,6 +3486,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (due == null)
             {
+                RecordReplicationPathingRetryScan(perfStarted, inspected, 0, pendingCount);
                 return;
             }
 
@@ -3430,6 +3499,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 TrySendReplicationWorldObjectDelta(due[i], isRetry: true);
             }
+
+            RecordReplicationPathingRetryScan(perfStarted, inspected, due.Count, pendingCount);
         }
 
         private static bool IsReplicationBuildingDurableBackpressured(out int pendingCount)
@@ -3507,6 +3578,63 @@ namespace GoingCooperative.Plugin.BepInEx
                 : string.Empty;
         }
 
+        // Caller holds ReplicationWorldObjectDeltaLock. Storage policy rows are full,
+        // revisioned target state; only the newest unacknowledged row per target is
+        // useful, and proofThrough on that row absorbs earlier client mutations.
+        private static void SupersedePendingReplicationStoragePolicyStateDeltas(
+            ReplicationWorldObjectDelta newest)
+        {
+            var newestKey = FormatReplicationStoragePolicyStateDeltaKey(newest);
+            if (newestKey.Length == 0)
+            {
+                return;
+            }
+
+            var obsolete = new List<long>();
+            foreach (var pair in replicationPendingWorldObjectDeltas)
+            {
+                if (pair.Key < newest.Sequence
+                    && string.Equals(
+                        FormatReplicationStoragePolicyStateDeltaKey(pair.Value.Delta),
+                        newestKey,
+                        StringComparison.Ordinal))
+                {
+                    obsolete.Add(pair.Key);
+                }
+            }
+            for (var i = 0; i < obsolete.Count; i++)
+            {
+                replicationPendingWorldObjectDeltas.Remove(obsolete[i]);
+            }
+        }
+
+        private static string FormatReplicationStoragePolicyStateDeltaKey(
+            ReplicationWorldObjectDelta delta)
+        {
+            return IsReplicationStoragePolicyStateDelta(delta)
+                && LockstepCommandPayloads.TryReadStoragePolicyStatePayload(
+                    delta.Detail, out var state)
+                ? ManagementDeltaKind
+                    + "|policy=StoragePolicyState|target="
+                    + FormatReplicationStoragePolicyWireTargetKey(state.Epoch, state.Target)
+                : string.Empty;
+        }
+
+        private static string FormatReplicationStoragePolicyWireTargetKey(
+            long epoch,
+            StoragePolicyTarget target)
+        {
+            return epoch.ToString(CultureInfo.InvariantCulture)
+                + ":" + ((int)target.Kind).ToString(CultureInfo.InvariantCulture)
+                + ":" + target.HostUidCandidate.ToString(CultureInfo.InvariantCulture)
+                + ":" + target.ComponentOrdinal.ToString(CultureInfo.InvariantCulture)
+                + ":" + target.BlueprintFingerprint.Length.ToString(CultureInfo.InvariantCulture)
+                + ":" + target.BlueprintFingerprint
+                + ":" + target.Anchor.X.ToString(CultureInfo.InvariantCulture)
+                + ":" + target.Anchor.Y.ToString(CultureInfo.InvariantCulture)
+                + ":" + target.Anchor.Z.ToString(CultureInfo.InvariantCulture);
+        }
+
         // Caller holds ReplicationWorldObjectDeltaLock.
         private static void ClearReplicationPendingBuildingLifecycleSupersessionIndex(
             ReplicationWorldObjectDelta delta)
@@ -3547,12 +3675,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 return ReplicationBuildingDurableRetrySeconds;
             }
 
+            if (IsReplicationStoragePolicyStateDelta(delta)
+                && replicationPendingWorldObjectDeltas.TryGetValue(delta.Sequence, out var storagePending)
+                && storagePending.SendCount >= ReplicationWorldObjectDeltaMaxSends)
+            {
+                return ReplicationStoragePolicyStateDurableRetrySeconds;
+            }
+
             return ReplicationWorldObjectDeltaRetrySeconds;
         }
 
         private void TrySendReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta, bool isRetry)
         {
-            if (replicationTransport == null)
+            if (replicationTransport == null
+                || (replicationStoragePolicyFailStopped
+                    && IsReplicationStoragePolicyStateDelta(delta)))
             {
                 return;
             }
@@ -3633,13 +3770,15 @@ namespace GoingCooperative.Plugin.BepInEx
                     || string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingRecoveryRequiredV2DeltaKind,
-                        StringComparison.Ordinal);
+                        StringComparison.Ordinal)
+                    || IsReplicationStoragePolicyStateDelta(delta);
                 if (durableTransaction)
                 {
                     // Placement/result is transaction state, not telemetry. Retain it
                     // with a slow retry until ACK or session reset and separately tell
                     // the client to recover instead of silently forgetting it.
-                    if (!string.Equals(
+                    if (!IsReplicationStoragePolicyStateDelta(delta)
+                        && !string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingRecoveryRequiredV2DeltaKind,
                         StringComparison.Ordinal))
@@ -4133,6 +4272,7 @@ namespace GoingCooperative.Plugin.BepInEx
             return string.Equals(delta.DeltaKind, CombatPresentationDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationPrioritisedObjectWorkResultV1DeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchPlacedDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
@@ -4480,6 +4620,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 return TryApplyReplicationManagementDelta(delta, out detail);
             }
 
+            if (string.Equals(delta.DeltaKind, ReplicationMedicalWoundStateDeltaKind, StringComparison.Ordinal))
+            {
+                return TryApplyReplicationMedicalWorldDelta(delta, out detail);
+            }
+
+            if (string.Equals(
+                    delta.DeltaKind,
+                    ReplicationPrioritisedObjectWorkResultV1DeltaKind,
+                    StringComparison.Ordinal))
+            {
+                return TryApplyReplicationPrioritisedObjectWorkResultV1(
+                    delta,
+                    out detail);
+            }
+
             if (!replicationConfigHostMode
                 && IsReplicationResourcePileStateSnapshotDelta(delta))
             {
@@ -4754,7 +4909,10 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 if (TryValidateReplicationProvisionalBuildView(provisionalView, delta, out provisionalMismatchDetail))
                 {
-                    RegisterReplicationHostIdentity(delta.UniqueId, provisionalView, "building-batch-provisional-result");
+                    RegisterReplicationBuildingHostIdentity(
+                        delta.UniqueId,
+                        provisionalView,
+                        "building-batch-provisional-result");
                     RemoveReplicationProvisionalBuildView(commandSequence, itemIndex);
                     MarkReplicationWorldObjectDeltaSpawnApplied(delta, spawnKey);
                     detail = "ok provisional-building-reconciled commandSequence="
@@ -5127,7 +5285,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         out var seededCommit)
                     && seededCommit != null)
                 {
-                    RegisterReplicationHostIdentity(
+                    RegisterReplicationBuildingHostIdentity(
                         delta.UniqueId,
                         seededCommit.View,
                         "building-state-exact-seed");
@@ -6222,7 +6380,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 out candidate,
                 out detail))
             {
-                RegisterReplicationHostIdentity(delta.UniqueId, candidate, "building-grid-fallback");
+                RegisterReplicationBuildingHostIdentity(
+                    delta.UniqueId,
+                    candidate,
+                    "building-grid-fallback");
                 return true;
             }
 
@@ -6785,12 +6946,14 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 RegisterReplicationHostIdentity(delta.UniqueId, recentPile, "resource-pile-spawn-recent");
                 RegisterReplicationResourcePileLocation(FormatReplicationWorldObjectDeltaLocationKey(delta), recentPile, "resource-pile-spawn-recent");
+                ReplicationClientGenericSpawnedResourcePiles.Add(recentPile);
                 identityDetail = " identity=" + recentLookupDetail;
             }
             else if (TryFindReplicationResourcePile(delta, out var spawnedPile, out var lookupDetail) && spawnedPile != null)
             {
                 RegisterReplicationHostIdentity(delta.UniqueId, spawnedPile, "resource-pile-spawn");
                 RegisterReplicationResourcePileLocation(FormatReplicationWorldObjectDeltaLocationKey(delta), spawnedPile, "resource-pile-spawn");
+                ReplicationClientGenericSpawnedResourcePiles.Add(spawnedPile);
                 identityDetail = " identity=" + lookupDetail;
             }
 
@@ -6810,18 +6973,39 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool TryApplyReplicationResourcePileAmountAdded(ReplicationWorldObjectDelta delta, out string detail)
         {
-            if (!TryResolveReplicationResourceModel(delta.BlueprintId, out var resource, out var resourceDetail) || resource == null)
-            {
-                detail = "resource-lookup-failed " + resourceDetail;
-                return false;
-            }
-
             var amount = TryReadReplicationWorldObjectDetailInt(delta.Detail, "amount", out var parsedAmount)
                 ? Math.Max(1, parsedAmount)
                 : 1;
             var hasExactPileAmount = TryReadReplicationWorldObjectDetailInt(delta.Detail, "pileAmount", out var exactPileAmount)
                 && exactPileAmount > 0;
             var resourceInstanceAmount = hasExactPileAmount ? exactPileAmount : amount;
+
+            if (hasExactPileAmount
+                && TryFindReplicationResourcePile(
+                    delta, out var matchingPile, out var matchingLookupDetail)
+                && matchingPile != null
+                && TryGetReplicationPileStoredResource(
+                    matchingPile, out var matchingResourceInstance, out _)
+                && matchingResourceInstance != null
+                && TryReadReplicationWorldObjectIntMember(
+                    matchingResourceInstance,
+                    "Amount",
+                    "amount",
+                    out var currentPileAmount)
+                && currentPileAmount == exactPileAmount)
+            {
+                detail = "ok authoritative-pile-state unchanged amount="
+                    + exactPileAmount.ToString(CultureInfo.InvariantCulture)
+                    + " lookup="
+                    + matchingLookupDetail;
+                return true;
+            }
+
+            if (!TryResolveReplicationResourceModel(delta.BlueprintId, out var resource, out var resourceDetail) || resource == null)
+            {
+                detail = "resource-lookup-failed " + resourceDetail;
+                return false;
+            }
 
             if (!TryCreateReplicationResourceInstance(resource, resourceInstanceAmount, out var resourceInstance, out var instanceDetail) || resourceInstance == null)
             {
@@ -7689,6 +7873,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 scanned++;
+                if (IsReplicationPileStoredOnShelf(candidate))
+                {
+                    // Shelf contents have a slot-aware authoritative lane. Sending
+                    // the same pile through the coordinate-only world-pile snapshot
+                    // would recreate it on the floor and establish two owners.
+                    skipped++;
+                    continue;
+                }
                 if (states.Count >= ReplicationResourcePileStateSnapshotMaxPiles)
                 {
                     skipped++;
@@ -9470,7 +9662,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         continue;
                     }
 
-                    RegisterReplicationHostIdentity(
+                    RegisterReplicationBuildingHostIdentity(
                         hostIds[pendingIndexes[pendingIndex]],
                         committed.View,
                         "host-local-building-batch");
@@ -9656,7 +9848,10 @@ namespace GoingCooperative.Plugin.BepInEx
                                 record,
                                 out _))
                         {
-                            RegisterReplicationHostIdentity(hostIds[i], provisional, "building-batch-provisional-result");
+                            RegisterReplicationBuildingHostIdentity(
+                                hostIds[i],
+                                provisional,
+                                "building-batch-provisional-result");
                             ClearReplicationBuildBatchReplayFailure(commandSequence, i);
                             RemoveReplicationProvisionalBuildView(commandSequence, i);
                             resolved++;
@@ -9779,7 +9974,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                         var originalIndex = pendingIndexes[pendingIndex];
                         ClearReplicationBuildBatchReplayFailure(commandSequence, originalIndex);
-                        RegisterReplicationHostIdentity(
+                        RegisterReplicationBuildingHostIdentity(
                             hostIds[originalIndex],
                             committed.View,
                             "building-batch-result-seed");
@@ -15156,6 +15351,12 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool TryFindReplicationAgentOwnerByEntityId(string entityId, out object? owner, out string detail)
         {
             owner = null;
+            if (TryGetReplicationRecruitmentWorker(entityId, out owner) && owner != null)
+            {
+                detail = "owner=event-recruit-registry";
+                return true;
+            }
+
             if (TryGetReplicationTraderPartyObject(entityId, out owner) && owner != null)
             {
                 detail = "owner=event-agent-registry";
@@ -15614,6 +15815,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 return FormatReplicationAbsoluteEntityStateKey("CombatHealth", delta);
             }
 
+            if (string.Equals(delta.DeltaKind, ReplicationMedicalWoundStateDeltaKind, StringComparison.Ordinal)
+                && MedicalReplicationPayloads.TryReadWoundState(delta.Detail, out var medicalState)
+                && medicalState != null)
+            {
+                return ReplicationMedicalWoundStateDeltaKind + "|entity=" + medicalState.EntityId;
+            }
+
             if (string.Equals(delta.DeltaKind, ManagementDeltaKind, StringComparison.Ordinal))
             {
                 return FormatReplicationWorldObjectDeltaCoalesceKey(delta);
@@ -15748,6 +15956,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 // Health is current authoritative state. Preserve only the newest
                 // unapplied sample per entity while keeping outcomes/death as events.
                 return FormatReplicationEntityWorldObjectDeltaCoalesceKey(delta);
+            }
+
+            if (string.Equals(delta.DeltaKind, ReplicationMedicalWoundStateDeltaKind, StringComparison.Ordinal)
+                && MedicalReplicationPayloads.TryReadWoundState(delta.Detail, out var medicalState)
+                && medicalState != null)
+            {
+                return ReplicationMedicalWoundStateDeltaKind + "|entity=" + medicalState.EntityId;
+            }
+
+            if (string.Equals(delta.DeltaKind, ManagementDeltaKind, StringComparison.Ordinal)
+                && IsReplicationStoragePolicyStateDelta(delta))
+            {
+                return FormatReplicationStoragePolicyStateDeltaKey(delta);
             }
 
             if (string.Equals(delta.DeltaKind, ManagementDeltaKind, StringComparison.Ordinal)
@@ -16036,6 +16257,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationWorldObjectDeltaRetrySeconds = 0.75f;
         private const float ReplicationBuildingStateSnapshotRetrySeconds = 3.0f;
         private const float ReplicationBuildingDurableRetrySeconds = 5.0f;
+        private const float ReplicationStoragePolicyStateDurableRetrySeconds = 5.0f;
         private const int ReplicationWorldObjectDeltaMaxSends = 5;
         private const int ReplicationBuildBatchWorldObjectDeltaMaxSends = 20;
         private const int ReplicationClientAppliedWorldObjectDeltaSequenceRetention = 65536;

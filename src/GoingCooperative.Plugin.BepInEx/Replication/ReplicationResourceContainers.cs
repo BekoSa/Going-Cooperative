@@ -36,7 +36,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void SendHostReplicationResourceContainersIfDue()
         {
-            if (!replicationConfigResourceContainerReplication
+            if (!HasLegacyReplicationResourceContainerPollingDomains()
                 || !replicationConfigEnabled
                 || !replicationConfigHostMode
                 || !replicationRuntimeStarted
@@ -192,7 +192,9 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             if (replicationConfigHostMode
                 || (!replicationConfigResourceContainerReplication
-                    && !replicationConfigBuildingConstructionMaterialsV2))
+                    && !replicationConfigBuildingConstructionMaterialsV2
+                    && !replicationConfigShelfStorageManifestV1
+                    && !AnyReplicationResourceStateV2Enabled()))
             {
                 return;
             }
@@ -227,7 +229,9 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             if (replicationConfigHostMode
                 || (!replicationConfigResourceContainerReplication
-                    && !replicationConfigBuildingConstructionMaterialsV2))
+                    && !replicationConfigBuildingConstructionMaterialsV2
+                    && !replicationConfigShelfStorageManifestV1
+                    && !AnyReplicationResourceStateV2Enabled()))
             {
                 return;
             }
@@ -299,17 +303,23 @@ namespace GoingCooperative.Plugin.BepInEx
             var agentContainers = 0;
             var pileContainers = 0;
             var productionContainers = 0;
+            var shelfSlots = 0;
             var skipped = 0;
 
-            if (Time.realtimeSinceStartup >= replicationResourceContainerNextViewRefreshRealtime
+            if (replicationConfigResourceContainerReplication
+                && !ReplicationAgentInventoryStateV2Enabled()
+                && (Time.realtimeSinceStartup >= replicationResourceContainerNextViewRefreshRealtime
                 || replicationResourceContainerCachedViews.Length == 0)
+                )
             {
                 replicationResourceContainerCachedViews = FindReplicationAnimatedAgentViews();
                 replicationResourceContainerNextViewRefreshRealtime =
                     Time.realtimeSinceStartup + ReplicationResourceContainerViewRefreshSeconds;
             }
 
-            for (var i = 0; i < replicationResourceContainerCachedViews.Length; i++)
+            for (var i = 0; replicationConfigResourceContainerReplication
+                && !ReplicationAgentInventoryStateV2Enabled()
+                && i < replicationResourceContainerCachedViews.Length; i++)
             {
                 var view = replicationResourceContainerCachedViews[i];
                 if (view == null
@@ -332,7 +342,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            if (TryCollectReplicationResourcePileStates(out var piles, out var pileDetail))
+            var pileDetail = "pile-lane-gated-off";
+            if (replicationConfigResourceContainerReplication
+                && !ReplicationGroundPileStateV2Enabled()
+                && TryCollectReplicationResourcePileStates(out var piles, out pileDetail))
             {
                 for (var i = 0; i < piles.Count; i++)
                 {
@@ -354,7 +367,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     pileContainers++;
                 }
             }
-            else
+            else if (replicationConfigResourceContainerReplication
+                && !ReplicationGroundPileStateV2Enabled())
             {
                 pileDetail = "pile-collect-failed " + pileDetail;
             }
@@ -362,9 +376,14 @@ namespace GoingCooperative.Plugin.BepInEx
             // Production V2 owns ticket Storage/SecondaryIngredientStorage using
             // stable ticket IDs. Running this legacy scan at the same time would give
             // the same native storages two authorities under different container IDs.
-            if (!replicationConfigProductionStateV2)
+            if (replicationConfigResourceContainerReplication
+                && !replicationConfigProductionStateV2)
             {
                 CollectReplicationProductionStorageContainers(states, ref productionContainers);
+            }
+            if (!ReplicationShelfStorageStateV2Enabled())
+            {
+                CollectReplicationShelfStorageManifestV1(states, ref shelfSlots);
             }
 
             states.Sort((left, right) => string.Compare(left.ContainerId, right.ContainerId, StringComparison.Ordinal));
@@ -374,6 +393,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 + pileContainers.ToString(CultureInfo.InvariantCulture)
                 + " production="
                 + productionContainers.ToString(CultureInfo.InvariantCulture)
+                + " shelfSlots="
+                + shelfSlots.ToString(CultureInfo.InvariantCulture)
                 + " skippedViews="
                 + skipped.ToString(CultureInfo.InvariantCulture)
                 + " "
@@ -557,35 +578,64 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             if (string.Equals(
                     state.ContainerKind,
+                    ReplicationShelfStorageSlotKindV1,
+                    StringComparison.Ordinal))
+            {
+                return TryApplyReplicationShelfStorageSlotV1(state, out detail);
+            }
+
+            if (string.Equals(
+                    state.ContainerKind,
                     ReplicationBuildingConstructionMaterialsKindV2,
                     StringComparison.Ordinal))
             {
                 return TryApplyReplicationBuildingConstructionMaterialsV2(state, out detail);
             }
 
-            if (!replicationConfigResourceContainerReplication)
-            {
-                detail = "resource-container-kind-gated-off kind=" + state.ContainerKind;
-                return true;
-            }
-
             if (string.Equals(state.ContainerKind, "pile", StringComparison.Ordinal))
             {
+                if (!replicationConfigResourceContainerReplication
+                    && !ReplicationGroundPileStateV2Enabled())
+                {
+                    detail = "resource-container-pile-gated-off";
+                    return true;
+                }
                 return TryApplyReplicationPileContainer(state, out detail);
             }
 
             if (state.ContainerKind.StartsWith("agent-", StringComparison.Ordinal))
             {
+                if (!replicationConfigResourceContainerReplication
+                    && !ReplicationAgentInventoryStateV2Enabled())
+                {
+                    detail = "resource-container-agent-gated-off";
+                    return true;
+                }
                 return TryApplyReplicationAgentStorageContainer(state, out detail);
             }
 
             if (state.ContainerKind.StartsWith("production-", StringComparison.Ordinal))
             {
+                if (!replicationConfigResourceContainerReplication)
+                {
+                    detail = "resource-container-production-gated-off";
+                    return true;
+                }
                 return TryApplyReplicationProductionStorageContainer(state, out detail);
             }
 
             detail = "unsupported-kind=" + state.ContainerKind;
             return false;
+        }
+
+        private static bool HasLegacyReplicationResourceContainerPollingDomains()
+        {
+            return replicationConfigResourceContainerReplication
+                    && (!ReplicationAgentInventoryStateV2Enabled()
+                        || !ReplicationGroundPileStateV2Enabled()
+                        || !replicationConfigProductionStateV2)
+                || replicationConfigShelfStorageManifestV1
+                    && !ReplicationShelfStorageStateV2Enabled();
         }
 
         private static bool TryApplyReplicationPileContainer(

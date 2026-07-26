@@ -233,15 +233,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 return true;
             }
 
-            if (TryReadInstanceMemberValue(value, "X", out var xValue)
-                && TryReadInstanceMemberValue(value, "Y", out var yValue)
-                && TryReadInstanceMemberValue(value, "Z", out var zValue)
-                && xValue != null && yValue != null && zValue != null)
+            // TryPlaceSocketable passes boxed NSMedieval.Vec3Int values. That
+            // struct stores lowercase x/y/z fields, while the old fallback only
+            // searched for uppercase X/Y/Z and therefore discarded the socket
+            // owner context before ObjectPlacedOnMap ran. Reuse the shared
+            // reader that deliberately supports both field conventions.
+            if (TryReadReplicationVec3Int(value, out x, out y, out z))
             {
-                position = new ReplicationBuildGridPosition(
-                    Convert.ToInt32(xValue, CultureInfo.InvariantCulture),
-                    Convert.ToInt32(yValue, CultureInfo.InvariantCulture),
-                    Convert.ToInt32(zValue, CultureInfo.InvariantCulture));
+                position = new ReplicationBuildGridPosition(x, y, z);
                 return true;
             }
 

@@ -66,6 +66,29 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        private static void RegisterReplicationBuildingHostIdentity(
+            long hostId,
+            object? localObject,
+            string source)
+        {
+            RegisterReplicationHostIdentity(hostId, localObject, source + "-view");
+            if (localObject == null
+                || !TryResolveReplicationBuildingCandidateInstance(
+                    localObject,
+                    out var buildingInstance,
+                    out _)
+                || buildingInstance == null
+                || ReferenceEquals(localObject, buildingInstance))
+            {
+                return;
+            }
+
+            // ShelfComponentInstance derives its canonical storage identity from
+            // OwnerBuilding, not from the Unity view returned by placement. Keep
+            // both reverse-map edges while making the model the primary host lookup.
+            RegisterReplicationHostIdentity(hostId, buildingInstance, source + "-instance");
+        }
+
         private static void RemoveReplicationHostIdentity(long hostId, object? localObject, string source)
         {
             if (hostId <= 0 && localObject == null)

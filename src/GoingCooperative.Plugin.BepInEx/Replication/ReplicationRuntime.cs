@@ -179,6 +179,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             replicationLastRuntimeUpdateFrame = frame;
             UpdateReplicationPerfFpsProbe();
+            UpdateReplicationPathingPerfDiagnostics();
 
             if (multiplayerLoadingInProgress)
             {
@@ -191,6 +192,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            // Commit synchronous shelf/stockpile UI edits before inbound state can
+            // be applied in this frame. This preserves the optimistic overlay until
+            // the host returns a complete authoritative proof row.
+            FlushReplicationStoragePolicyChanges();
             PumpReplicationTransport();
             WarnReplicationTransportDropsIfDue();
             SendReplicationHelloIfDue();
@@ -206,6 +211,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     // Pawn haul/food/medicine inventories still belong to the shared
                     // resource-container sender; filtering happens inside collection.
                     SendHostReplicationResourceContainersIfDue();
+                    UpdateReplicationResourceStateV2();
                     SendHostReplicationResourcePileStateSnapshotIfDue();
                     SendHostReplicationAgentCarryStateSnapshotIfDue();
                     SendHostReplicationAgentActionHeartbeatIfDue();
@@ -220,6 +226,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     SendHostReplicationGameTimeSnapshotIfDue();
                     UpdateReplicationAnimalState();
                     UpdateReplicationCropfieldPolicyV1Host();
+                    UpdateReplicationPrioritisedObjectWorkV1();
                     SendPendingReplicationWorldObjectDeltasIfDue();
                 }
             }
@@ -239,6 +246,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             UpdateReplicationProductionStateV2();
+            UpdateReplicationMedicalV1();
             ProcessReplicationSemanticAgentMotionPresentation();
             ProcessReplicationSemanticAgentWorkPresentation();
             ProcessReplicationCombatPresentationExpiry();
@@ -263,6 +271,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationRemoteCompatibilityRefused = false;
             replicationLocalBuildHash = string.Empty;
             ResetReplicationCombatRuntimeState();
+            ResetReplicationMedicalV1State();
             ResetReplicationEventRuntimeState(traderPartyResetContext);
             ResetReplicationSemanticAgentMotionPresentation();
             ResetReplicationSemanticAgentWorkPresentation();
@@ -270,6 +279,7 @@ namespace GoingCooperative.Plugin.BepInEx
             ResetReplicationAnimalStateRuntime();
             ResetReplicationCropfieldPolicyV1State();
             ResetReplicationPlantLifecycleV1State();
+            ResetReplicationPrioritisedObjectWorkV1State();
             ClearReplicationBuildBatchRuntimeState();
             replicationNextHelloLogRealtime = 0f;
             replicationLastTransportDecodeFailures = 0;
@@ -389,6 +399,9 @@ namespace GoingCooperative.Plugin.BepInEx
             ReplicationAgentProgressLoggedOwnerKeys.Clear();
             ReplicationWorldObjectDeltaAppliedSpawnKeys.Clear();
             ReplicationWorldObjectDeltaRecentSpawnLocationAt.Clear();
+            ReplicationClientGenericSpawnedResourcePiles.Clear();
+            replicationShelfStorageHostStoreDepth = 0;
+            replicationShelfStorageSuppressedPileSpawns = 0L;
             ReplicationResourcePileStateSnapshotContexts.Clear();
             ReplicationBuildingStateSnapshotContexts.Clear();
             ReplicationPendingResourcePileStateSnapshotApplies.Clear();
@@ -431,6 +444,8 @@ namespace GoingCooperative.Plugin.BepInEx
             ClearReplicationHostIdentityMap();
             ClearReplicationAgentCarryResourceVisuals();
             ClearReplicationResourceContainerState();
+            ClearReplicationResourceStateV2();
+            ResetReplicationStoragePolicyRuntimeState();
             ClearReplicationProductionStateV2();
             replicationVisualLocomotionByEntityId.Clear();
             replicationAnimatorParameterSupportByInstanceId.Clear();
@@ -446,8 +461,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var perfStarted = BeginReplicationPathingPerfSample();
+            var messageCount = 0;
             while (replicationTransport.TryReceive(out var envelope))
             {
+                messageCount++;
                 try
                 {
                 switch (envelope.Kind)
@@ -500,6 +518,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
                 }
             }
+
+            RecordReplicationPathingPump(perfStarted, messageCount);
         }
 
         private void SendReplicationHelloIfDue()
@@ -569,6 +589,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationNextWeatherEnvironmentRealtime = 0f;
                 replicationLastWeatherScheduleSignature = string.Empty;
                 replicationLastWeatherEnvironmentSignature = string.Empty;
+                if (replicationConfigHostMode)
+                {
+                    QueueReplicationStoragePolicyBaseline();
+                    QueueReplicationResourceStateV2Baseline();
+                }
             }
             replicationHellosReceived++;
             if (replicationHellosReceived == 1 || Time.realtimeSinceStartup >= replicationNextHelloLogRealtime)
@@ -633,6 +658,32 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
+            var localHasResourceStateV2Capability =
+                TryReadReplicationCapabilitySegment(
+                    localBuildHash, "resourcev2", out var localResourceStateV2Capability);
+            var remoteHasResourceStateV2Capability =
+                TryReadReplicationCapabilitySegment(
+                    hello.BuildHash, "resourcev2", out var remoteResourceStateV2Capability);
+            if ((localHasResourceStateV2Capability
+                    || remoteHasResourceStateV2Capability)
+                && (!localHasResourceStateV2Capability
+                    || !remoteHasResourceStateV2Capability
+                    || !string.Equals(
+                        localResourceStateV2Capability,
+                        remoteResourceStateV2Capability,
+                        StringComparison.Ordinal)))
+            {
+                error = "resource-state-v2-capability-mismatch local="
+                    + (localHasResourceStateV2Capability
+                        ? localResourceStateV2Capability
+                        : "missing")
+                    + " remote="
+                    + (remoteHasResourceStateV2Capability
+                        ? remoteResourceStateV2Capability
+                        : "missing");
+                return false;
+            }
+
             var localHasBuildingCapability = TryReadReplicationBuildingCapability(
                 localBuildHash,
                 out var localBuildingCapability);
@@ -669,6 +720,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 && !string.Equals(localCombatCapabilities, remoteCombatCapabilities, StringComparison.Ordinal))
             {
                 error = "combat-capabilities-mismatch local=" + localCombatCapabilities + " remote=" + remoteCombatCapabilities;
+                return false;
+            }
+
+            var localHasMedicalCapabilities = TryReadReplicationMedicalCapabilityFingerprint(localBuildHash, out var localMedicalCapabilities);
+            var remoteHasMedicalCapabilities = TryReadReplicationMedicalCapabilityFingerprint(hello.BuildHash, out var remoteMedicalCapabilities);
+            if (localHasMedicalCapabilities
+                && remoteHasMedicalCapabilities
+                && !string.Equals(localMedicalCapabilities, remoteMedicalCapabilities, StringComparison.Ordinal))
+            {
+                error = "medical-capabilities-mismatch local=" + localMedicalCapabilities + " remote=" + remoteMedicalCapabilities;
+                return false;
+            }
+            if (replicationConfigMedicalReplicationV1 && !remoteHasMedicalCapabilities)
+            {
+                error = "medical-capabilities-missing remote=<legacy>";
                 return false;
             }
 
@@ -715,6 +781,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
+            var localHasStorageCapability = TryReadReplicationCapabilitySegment(localBuildHash, "storage", out var localStorageCapability);
+            var remoteHasStorageCapability = TryReadReplicationCapabilitySegment(hello.BuildHash, "storage", out var remoteStorageCapability);
+            if (!localHasStorageCapability
+                || !remoteHasStorageCapability
+                || localStorageCapability.EndsWith(":unavailable", StringComparison.Ordinal)
+                || remoteStorageCapability.EndsWith(":unavailable", StringComparison.Ordinal)
+                || !string.Equals(localStorageCapability, remoteStorageCapability, StringComparison.Ordinal))
+            {
+                error = "storage-policy-capability-mismatch local="
+                    + (localHasStorageCapability ? localStorageCapability : "missing")
+                    + " remote="
+                    + (remoteHasStorageCapability ? remoteStorageCapability : "missing");
+                return false;
+            }
+
             var localHasGameAssemblyIdentity = TryReadReplicationGameAssemblyIdentity(
                 localBuildHash,
                 out var localGameAssemblyIdentity);
@@ -727,9 +808,13 @@ namespace GoingCooperative.Plugin.BepInEx
             // could accept a session and later deserialize an incompatible party after
             // one side recovers or is restaged.
             var traderSerializerCompatibilityRequired = replicationConfigEventTraderAuthority
+                || replicationConfigEventRecruitmentAuthorityV1
+                || replicationConfigEventRunawayAuthorityV1
                 || (remoteHasEventCapabilities
-                    && remoteEventCapabilities.Length > 2
-                    && remoteEventCapabilities[2] == '1');
+                    && remoteEventCapabilities.Length > 6
+                    && (remoteEventCapabilities[2] == '1'
+                        || remoteEventCapabilities[4] == '1'
+                        || remoteEventCapabilities[6] == '1'));
             var traderSerializerCompatibility = TraderSerializerCompatibilityPolicy.Evaluate(
                 traderSerializerCompatibilityRequired,
                 localHasGameAssemblyIdentity ? localGameAssemblyIdentity : string.Empty,
@@ -789,7 +874,9 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static string GetReplicationLocalBuildHash()
         {
-            if (string.IsNullOrEmpty(replicationLocalBuildHash))
+            if (string.IsNullOrEmpty(replicationLocalBuildHash)
+                || replicationLocalBuildHash.IndexOf("|storage=1:", StringComparison.Ordinal) >= 0
+                    && replicationLocalBuildHash.IndexOf(":unavailable", StringComparison.Ordinal) >= 0)
             {
                 replicationLocalBuildHash = ComputeReplicationLocalBuildHashWithCapabilities();
             }
@@ -810,8 +897,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 + (replicationConfigWorkstationRuntimePresentation ? "1" : "0")
                 + (replicationConfigResourceContainerReplication ? "1" : "0")
                 + ":1"
+                + "|resourcev2="
+                + FormatReplicationResourceStateV2Capability()
                 + "|combat="
                 + FormatReplicationCombatCapabilityFingerprint()
+                + "|medical="
+                + FormatReplicationMedicalCapabilityFingerprint()
                 + "|events="
                 + FormatReplicationEventCapabilityFingerprint()
                 + "|cropfield="
@@ -820,6 +911,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 + ":2"
                 + "|plants="
                 + (replicationConfigPlantLifecycleReplication ? "1:1" : "0:1")
+                + "|orders="
+                + (replicationConfigPrioritisedObjectWorkV1 ? "1:1" : "0:1")
+                + "|storage="
+                + (replicationConfigStoragePolicyV4 ? "1:" : "0:")
+                + (replicationConfigShelfStorageManifestV1 ? "1:" : "0:")
+                + FormatReplicationStoragePolicyCapabilityFingerprint()
                 + "|gameasm="
                 + GetReplicationGameAssemblyModuleVersionId();
         }
@@ -916,12 +1013,38 @@ namespace GoingCooperative.Plugin.BepInEx
             return true;
         }
 
+        private static string FormatReplicationMedicalCapabilityFingerprint()
+        {
+            return (replicationConfigMedicalReplicationV1 ? "1" : "0")
+                + (replicationConfigMedicalWoundStateV1 ? "1" : "0")
+                + (replicationConfigMedicalTreatmentOrdersV1 ? "1" : "0")
+                + (replicationConfigMedicalTreatmentPresentationV1 ? "1" : "0")
+                + (replicationConfigMedicalPanelRefreshV1 ? "1" : "0")
+                + (replicationConfigMedicalClientWoundTickSuppressionV1 ? "1" : "0")
+                + ":1";
+        }
+
+        private static bool TryReadReplicationMedicalCapabilityFingerprint(string buildHash, out string fingerprint)
+        {
+            if (!TryReadReplicationCapabilitySegment(buildHash, "medical", out fingerprint)) return false;
+            if (fingerprint.Length != 8 || fingerprint[6] != ':' || fingerprint[7] != '1') return false;
+            for (var i = 0; i < 6; i++)
+            {
+                if (fingerprint[i] != '0' && fingerprint[i] != '1') return false;
+            }
+            return true;
+        }
+
         private static string FormatReplicationEventCapabilityFingerprint()
         {
             return (replicationConfigEventReplication ? "1" : "0")
                 + (replicationConfigEventSchedulerAuthority ? "1" : "0")
                 + (replicationConfigEventTraderAuthority ? "1" : "0")
                 + (TraderEventAuthorityEnabled() ? "1" : "0")
+                + (replicationConfigEventRecruitmentAuthorityV1 ? "1" : "0")
+                + (RecruitmentEventAuthorityV1Enabled() ? "1" : "0")
+                + (replicationConfigEventRunawayAuthorityV1 ? "1" : "0")
+                + (RunawayEventAuthorityV1Enabled() ? "1" : "0")
                 + (replicationConfigEventLifecycleReplication ? "1" : "0")
                 + (replicationConfigEventDialogReplication ? "1" : "0")
                 + (replicationConfigEventChoiceCommands ? "1" : "0")
@@ -937,14 +1060,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 + (string.Equals(replicationConfigWorldObjectDeltaMode, "apply", StringComparison.OrdinalIgnoreCase) ? "1" : "0")
                 + (IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode) ? "1" : "0")
                 + (replicationConfigSynchronizedTrading ? "1" : "0")
-                + ":7";
+                + ":9";
         }
 
         private static bool TryReadReplicationEventCapabilityFingerprint(string buildHash, out string fingerprint)
         {
             if (!TryReadReplicationCapabilitySegment(buildHash, "events", out fingerprint)) return false;
-            if (fingerprint.Length != 21 || fingerprint[19] != ':' || fingerprint[20] != '7') return false;
-            for (var i = 0; i < 19; i++)
+            if (fingerprint.Length != 25 || fingerprint[23] != ':' || fingerprint[24] != '9') return false;
+            for (var i = 0; i < 23; i++)
             {
                 if (fingerprint[i] != '0' && fingerprint[i] != '1') return false;
             }
@@ -1219,10 +1342,16 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var interval = 1f / Math.Max(1, replicationConfigSnapshotHz);
             replicationNextSnapshotRealtime = Time.realtimeSinceStartup + interval;
+            var collectStarted = BeginReplicationPathingPerfSample();
             var snapshot = CollectReplicationTransformSnapshot(++replicationSnapshotSequence, replicationConfigMaxSnapshotEntities);
+            RecordReplicationPathingSnapshotCollection(collectStarted, snapshot.Entities.Count);
+            var encodeSendStarted = BeginReplicationPathingPerfSample();
+            var wireCharacters = 0;
             try
             {
-                replicationTransport.Send(ReplicationPayloadCodec.ForTransformSnapshot(ReplicationHostPeerId, snapshot));
+                var envelope = ReplicationPayloadCodec.ForTransformSnapshot(ReplicationHostPeerId, snapshot);
+                wireCharacters = envelope.Payload.Length;
+                replicationTransport.Send(envelope);
                 replicationSnapshotsSent++;
             }
             catch (Exception ex)
@@ -1231,6 +1360,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     + ex.GetType().Name
                     + ":"
                     + ex.Message);
+            }
+            finally
+            {
+                RecordReplicationPathingSnapshotEncodeSend(encodeSendStarted, wireCharacters);
             }
         }
 
@@ -1345,6 +1478,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationLastIntentSummary = "host-duplicate " + FormatRuntimeCommandSummary(command);
                 SendReplicationCommandAck(command, originalResult.Invoked, duplicate: true, detail: originalResult.Detail);
                 ResendReplicationBuildBatchResult(command, originalRecord.BuildBatchCommitManifest);
+                if (IsReplicationStoragePolicyUpdateCommand(command))
+                {
+                    SendReplicationManagementStateIfSupported(command, originalResult);
+                }
+                SendReplicationPrioritisedObjectWorkResultIfSupported(
+                    command,
+                    originalResult);
                 LogReplicationInfo("Going Cooperative replication intent duplicate ignored "
                     + FormatRuntimeCommandSummary(command));
                 return;
@@ -1371,6 +1511,7 @@ namespace GoingCooperative.Plugin.BepInEx
             else
             {
                 BeginReplicationRegionOrderStateCaptureSuppression();
+                replicationApplyingRemoteManagementCommandSequence = command.Sequence;
                 try
                 {
                     result = ApplyRuntimeCommand(this, command);
@@ -1392,6 +1533,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
                 finally
                 {
+                    replicationApplyingRemoteManagementCommandSequence = 0L;
                     EndReplicationRegionOrderStateCaptureSuppression();
                 }
             }
@@ -1408,6 +1550,7 @@ namespace GoingCooperative.Plugin.BepInEx
             SendReplicationBuildBlueprintResultDeltaIfSupported(command, result, buildBatchCommitManifest);
             SendReplicationManagementStateIfSupported(command, result);
             SendReplicationCombatStateIfSupported(command, result);
+            SendReplicationPrioritisedObjectWorkResultIfSupported(command, result);
 
             replicationLastIntentSummary = "host-applied invoked="
                 + (result.Invoked ? "yes" : "no")
@@ -1460,7 +1603,9 @@ namespace GoingCooperative.Plugin.BepInEx
             var pendingCommandKey = ack.PlayerId + ":" + ack.Sequence.ToString(CultureInfo.InvariantCulture);
             ReplicationPendingCommandIntents.TryGetValue(pendingCommandKey, out var pendingCommand);
             var pendingBuildBatch = pendingCommand != null && IsReplicationBuildBatchCommand(pendingCommand.Command);
-            if (pendingBuildBatch)
+            var pendingStoragePolicy = pendingCommand != null
+                && IsReplicationStoragePolicyUpdateCommand(pendingCommand.Command);
+            if (pendingBuildBatch || pendingStoragePolicy)
             {
                 // The command ACK is transaction-level receipt state; the durable result
                 // manifest owns per-item canonical truth for both accepted and rejected

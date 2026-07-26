@@ -50,6 +50,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 TryInstallReplicationHostMovementAuthority(harmony);
                 TryInstallReplicationGoapActionProbe(harmony);
                 TryInstallReplicationWorldObjectDeltaCapture(harmony);
+                TryInstallReplicationShelfStorageManifestHooks(harmony);
+                TryInstallReplicationResourceStateV2Hooks(harmony);
                 TryInstallReplicationWorldObjectDeltaClientHooks(harmony);
                 TryInstallReplicationBuildingLifecycleV2Hooks(harmony);
                 TryInstallReplicationBuildingConstructionMaterialsV2Hooks(harmony);
@@ -59,6 +61,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 TryInstallReplicationResultLifecycleProbes(harmony);
                 TryInstallReplicationCombatHooks(harmony);
                 TryInstallReplicationCombatDiagnostics(harmony);
+                TryInstallReplicationMedicalV1Hooks(harmony);
                 TryInstallReplicationEventHooks(harmony);
                 TryInstallReplicationExternalEventAgentHooks(harmony);
                 TryInstallMultiplayerUiLifecyclePatches(harmony);

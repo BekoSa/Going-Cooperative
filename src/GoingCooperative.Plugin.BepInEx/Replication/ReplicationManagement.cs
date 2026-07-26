@@ -18,6 +18,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationHostManagementExactDuplicateSeconds = 0.05f;
         private static bool replicationApplyingProductionRemoval;
         private static int replicationWorkerManageAuthoritativeApplyDepth;
+        private static long replicationApplyingRemoteManagementCommandSequence;
         private static string replicationLastHostManagementMutationPayload = string.Empty;
         private static float replicationLastHostManagementMutationRealtime;
         // Model mutations belonging to one native action commonly arrive as a short burst
@@ -33,6 +34,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private int TryInstallReplicationManagementCapture(Harmony harmony)
         {
             var count = 0;
+            count += TryInstallReplicationPrioritisedObjectWorkV1Hooks(harmony);
             count += TryInstallReplicationCropfieldPolicyV1Hooks(harmony);
             count += PatchReplicationCropfieldPanelActions(harmony);
             count += PatchReplicationCropfieldPanelUpdate(harmony);
@@ -44,8 +46,7 @@ namespace GoingCooperative.Plugin.BepInEx
             count += PatchManagementMethod(harmony, "NSMedieval.UI.ProductionLayoutItemView", "ChangeQuantity", new[] { typeof(int) }, nameof(ReplicationProductionTicketPrefix), nameof(ReplicationProductionTicketPostfix));
             count += PatchManagementMethod(harmony, "NSMedieval.UI.ProductionLayoutItemView", "OnTogglePauseProductionButtonPress", Type.EmptyTypes, nameof(ReplicationProductionTicketPrefix), nameof(ReplicationProductionTicketPostfix));
             count += PatchProductionRemovalMethod(harmony);
-            count += PatchManagementMethodByArity(harmony, "NSMedieval.UI.SelectionExtraStockpile", "OnResourceToggleChangeCallback", 2, nameof(ReplicationStockpileResourcePrefix), nameof(ReplicationStockpilePolicyPostfix));
-            count += PatchManagementMethod(harmony, "NSMedieval.UI.SelectionExtraStockpile", "OnPriorityChanged", Type.EmptyTypes, nameof(ReplicationStockpilePriorityPrefix), nameof(ReplicationStockpilePolicyPostfix));
+            count += TryInstallReplicationStoragePolicyCapture(harmony);
             var jobType = AccessTools.TypeByName("NSMedieval.State.WorkerJobs.JobType");
             if (jobType != null)
             {
@@ -594,9 +595,9 @@ namespace GoingCooperative.Plugin.BepInEx
             current.SendReplicationManagementDelta(payload, source);
         }
 
-        private void SendReplicationManagementDelta(string payload, string source)
+        private bool SendReplicationManagementDelta(string payload, string source, long originCommandSequence = 0L)
         {
-            SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
+            var queued = SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
                 ++replicationWorldObjectDeltaSequence,
                 Time.realtimeSinceStartup,
                 ManagementDeltaKind,
@@ -606,11 +607,32 @@ namespace GoingCooperative.Plugin.BepInEx
                 0,
                 0,
                 payload));
-            LogReplicationInfo("Going Cooperative replication management state sent source=" + source + " payload=" + payload);
+            if (LockstepCommandPayloads.TryReadStoragePolicyStatePayload(payload, out var storagePolicyState))
+            {
+                LogReplicationInfo("Going Cooperative replication management state sent source=" + source
+                    + " policy=StoragePolicyState targetUid=" + storagePolicyState.Target.HostUidCandidate.ToString(CultureInfo.InvariantCulture)
+                    + " revision=" + storagePolicyState.Revision.ToString(CultureInfo.InvariantCulture)
+                    + " proofThrough=" + storagePolicyState.ProofThroughClientSequence.ToString(CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                LogReplicationInfo("Going Cooperative replication management state sent source=" + source + " payload=" + payload);
+            }
+            return queued;
         }
 
         private void SendReplicationManagementStateIfSupported(LockstepCommand command, RuntimeCommandResult result)
         {
+            if (command.Kind == CommandKind.Custom
+                && LockstepCommandPayloads.TryReadStoragePolicyUpdatePayload(command.PayloadJson, out var storagePolicyUpdate))
+            {
+                SendReplicationStoragePolicyState(
+                    storagePolicyUpdate,
+                    result.Invoked ? "accepted-command" : "rejected-command-correction",
+                    command.Sequence);
+                return;
+            }
+
             if (result.Invoked && command.Kind == CommandKind.Custom
                 && (LockstepCommandPayloads.TryReadResearchActivatePayload(command.PayloadJson, out _)
                     || LockstepCommandPayloads.TryReadProductionQueuePayload(command.PayloadJson, out _, out _, out _, out _, out _, out _, out _)
@@ -630,6 +652,18 @@ namespace GoingCooperative.Plugin.BepInEx
             BeginReplicationRegionOrderStateCaptureSuppression();
             try
             {
+                if (LockstepCommandPayloads.TryReadStoragePolicyStatePayload(delta.Detail, out var storagePolicyState))
+                {
+                    if (!TryApplyReplicationStoragePolicyState(storagePolicyState, out detail)) return false;
+                    if (!CompleteReplicationStoragePolicyStateProof(storagePolicyState, out var proofDetail))
+                    {
+                        detail += " proof=" + proofDetail;
+                        return false;
+                    }
+                    detail += " proof=" + proofDetail;
+                    return true;
+                }
+
                 if (LockstepCommandPayloads.TryReadResearchActivatePayload(delta.Detail, out var nodeId))
                 {
                     return TryApplyReplicationResearchActivate(nodeId, out detail);

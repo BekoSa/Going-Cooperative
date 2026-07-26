@@ -522,7 +522,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     placementManagerType,
                     "SpawnBeamAxisZ",
                     new[] { blueprintType, typeof(object), typeof(object), baseBuildingInstanceType });
-                var objectSideType = AccessTools.TypeByName("NSMedieval.ObjectSide");
+                var objectSideType = AccessTools.TypeByName("NSMedieval.Construction.ObjectSide");
                 var tryPlaceSocketable = objectSideType == null
                     ? null
                     : AccessTools.Method(
@@ -801,6 +801,19 @@ namespace GoingCooperative.Plugin.BepInEx
                                 || objectSideType == null)
                             {
                                 rejected++;
+                                beamDiagnostics?.Add(
+                                    "kind=Socketable origin="
+                                        + record.X.ToString(CultureInfo.InvariantCulture)
+                                        + "," + record.Y.ToString(CultureInfo.InvariantCulture)
+                                        + "," + record.Z.ToString(CultureInfo.InvariantCulture)
+                                        + " owner=" + FormatReplicationBuildGridPosition(record.Start)
+                                        + " outcome=preinvoke gate=" + replicationConfigSocketablePlacementReplication
+                                        + " type=" + (objectSideType == null
+                                            ? "NSMedieval.Construction.ObjectSide-missing"
+                                            : objectSideType.FullName)
+                                        + " method=" + (tryPlaceSocketable == null
+                                            ? "TryPlaceSocketable-missing"
+                                            : tryPlaceSocketable.Name));
                                 continue;
                             }
 

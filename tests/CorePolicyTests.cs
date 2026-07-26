@@ -42,6 +42,36 @@ internal static class CorePolicyTests
         Equal(LockstepCommandPayloads.NormalSpeedIndex, normalSpeedIndex, "normal speed index");
         Equal(LockstepCommandPayloads.SetSpeedNormalAction, normalSpeedAction, "normal speed action");
 
+        var medicalOrder = MedicalReplicationPayloads.CreateTreatmentOrder("animal", "uid:doctor", "uid:patient", "request:1");
+        Equal(true, MedicalReplicationPayloads.TryReadTreatmentOrder(medicalOrder, out var medicalKind, out var medicalDoctor, out var medicalPatient, out var medicalRequest), "medical order parses");
+        Equal("animal", medicalKind, "medical order kind roundtrip");
+        Equal("uid:doctor", medicalDoctor, "medical order doctor roundtrip");
+        Equal("uid:patient", medicalPatient, "medical order patient roundtrip");
+        Equal("request:1", medicalRequest, "medical order request roundtrip");
+        Equal(false, MedicalReplicationPayloads.TryReadTreatmentOrder("medical-order-v1|bad", out _, out _, out _, out _), "medical order rejects malformed payload");
+
+        var medicalStatePayload = MedicalReplicationPayloads.CreateWoundState(new MedicalWoundState(
+            "uid:patient",
+            17L,
+            true,
+            true,
+            true,
+            new[]
+            {
+                new MedicalWoundRecord("Cut,Deep|Left", 1234L, 2, 48f, 1.25f, 12.5f, 1f, true, false, 1240L, 1239L, 0.73f, "Wolf\nAlpha", 4, "perk:sharp")
+            }));
+        Equal(true, MedicalReplicationPayloads.TryReadWoundState(medicalStatePayload, out var medicalState), "medical wound state parses");
+        Equal("uid:patient", medicalState == null ? string.Empty : medicalState.EntityId, "medical state entity roundtrip");
+        Equal(17L, medicalState == null ? -1L : medicalState.Revision, "medical state revision roundtrip");
+        Equal(true, medicalState != null && medicalState.Checkpoint, "medical state checkpoint roundtrip");
+        Equal(true, medicalState != null && medicalState.ReceivingTreatment, "medical state treatment roundtrip");
+        Equal(true, medicalState != null && medicalState.CanReceiveTreatment, "medical state treatment eligibility roundtrip");
+        Equal(1, medicalState == null ? -1 : medicalState.Wounds.Count, "medical wound count roundtrip");
+        Equal("Cut,Deep|Left", medicalState == null ? string.Empty : medicalState.Wounds[0].Name, "medical wound name roundtrip");
+        Equal(12.5f, medicalState == null ? -1f : medicalState.Wounds[0].CurrentSeverity, "medical wound severity roundtrip");
+        Equal("Wolf\nAlpha", medicalState == null ? string.Empty : medicalState.Wounds[0].CauseCreatureName, "medical wound cause roundtrip");
+        Equal(false, MedicalReplicationPayloads.TryReadWoundState(medicalStatePayload.Replace("|17|", "|0|"), out _), "medical state rejects nonpositive revision");
+
         var tradeCommit = LockstepCommandPayloads.CreateTraderTradeCommitPayload(
             "scope:trade:7",
             7L,
@@ -84,6 +114,90 @@ internal static class CorePolicyTests
         Equal("event:trader:1", tradeOpenTrader, "trade open trader roundtrip");
         Equal("uid:17", tradeOpenWorker, "trade open worker roundtrip");
         Equal("open-request-1", tradeOpenRequestId, "trade open request id roundtrip");
+
+        var prioritisedWork = LockstepCommandPayloads.CreatePrioritisedObjectWorkV1Payload(
+            "uid:worker-7",
+            441L,
+            "uid:441",
+            "PrioritiseChopMenuItem",
+            "Chopping",
+            "ChopTreeGoal",
+            "priority-17",
+            12,
+            3,
+            -8);
+        Equal(true, LockstepCommandPayloads.TryReadPrioritisedObjectWorkV1Payload(
+            prioritisedWork,
+            out var prioritisedWorker,
+            out var prioritisedTargetHostId,
+            out var prioritisedTargetEntity,
+            out var prioritisedTargetFamily,
+            out var prioritisedTargetPolicy,
+            out var prioritisedGoal,
+            out var prioritisedRequest,
+            out var prioritisedX,
+            out var prioritisedY,
+            out var prioritisedZ), "prioritised object work payload parses");
+        Equal("uid:worker-7", prioritisedWorker, "prioritised worker roundtrip");
+        Equal(441L, prioritisedTargetHostId, "prioritised target host id roundtrip");
+        Equal("uid:441", prioritisedTargetEntity, "prioritised target entity roundtrip");
+        Equal("PrioritiseChopMenuItem", prioritisedTargetFamily, "prioritised target family roundtrip");
+        Equal("Chopping", prioritisedTargetPolicy, "prioritised target policy roundtrip");
+        Equal("ChopTreeGoal", prioritisedGoal, "prioritised goal roundtrip");
+        Equal("priority-17", prioritisedRequest, "prioritised request roundtrip");
+        Equal(12, prioritisedX, "prioritised target x roundtrip");
+        Equal(3, prioritisedY, "prioritised target y roundtrip");
+        Equal(-8, prioritisedZ, "prioritised target z roundtrip");
+        Equal(false, LockstepCommandPayloads.TryReadPrioritisedObjectWorkV1Payload(
+            LockstepCommandPayloads.CreatePrioritisedObjectWorkV1Payload(
+                "uid:worker",
+                0L,
+                string.Empty,
+                "PrioritiseChopMenuItem",
+                "Chopping",
+                "ChopTreeGoal",
+                "priority-invalid",
+                0,
+                0,
+                0),
+            out _, out _, out _, out _, out _, out _, out _, out _, out _, out _),
+            "prioritised object work requires exact target identity");
+        var prioritisedWorkResult =
+            LockstepCommandPayloads.CreatePrioritisedObjectWorkResultV1Payload(
+                prioritisedWorker,
+                prioritisedTargetHostId,
+                prioritisedTargetEntity,
+                prioritisedTargetFamily,
+                prioritisedTargetPolicy,
+                prioritisedGoal,
+                prioritisedRequest,
+                prioritisedX,
+                prioritisedY,
+                prioritisedZ);
+        Equal(true,
+            LockstepCommandPayloads.TryReadPrioritisedObjectWorkResultV1Payload(
+                prioritisedWorkResult,
+                out var resultWorker,
+                out var resultTargetHostId,
+                out var resultTargetEntity,
+                out var resultTargetFamily,
+                out var resultTargetPolicy,
+                out var resultGoal,
+                out var resultRequest,
+                out var resultX,
+                out var resultY,
+                out var resultZ),
+            "prioritised object work result payload parses");
+        Equal(prioritisedWorker, resultWorker, "prioritised result worker roundtrip");
+        Equal(prioritisedTargetHostId, resultTargetHostId, "prioritised result host id roundtrip");
+        Equal(prioritisedTargetEntity, resultTargetEntity, "prioritised result entity roundtrip");
+        Equal(prioritisedTargetFamily, resultTargetFamily, "prioritised result family roundtrip");
+        Equal(prioritisedTargetPolicy, resultTargetPolicy, "prioritised result policy roundtrip");
+        Equal(prioritisedGoal, resultGoal, "prioritised result goal roundtrip");
+        Equal(prioritisedRequest, resultRequest, "prioritised result request roundtrip");
+        Equal(prioritisedX, resultX, "prioritised result x roundtrip");
+        Equal(prioritisedY, resultY, "prioritised result y roundtrip");
+        Equal(prioritisedZ, resultZ, "prioritised result z roundtrip");
 
         var buildBatchRecords = new[]
         {

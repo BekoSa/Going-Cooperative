@@ -37,6 +37,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var patchedCount = 0;
             patchedCount += TryPatchReplicationCommandCaptureMethod(harmonyInstance, instancePostfix, "NSMedieval.Manager.GameSpeedManager", "Start", Type.EmptyTypes);
             patchedCount += TryPatchReplicationCommandCaptureMethod(harmonyInstance, instancePostfix, "NSMedieval.Manager.GameSpeedManager", "OnUIInitComplete", Type.EmptyTypes);
+            patchedCount += TryInstallDisableAutomaticSleepSpeed(harmonyInstance);
             patchedCount += TryInstallReplicationManagementCapture(harmonyInstance);
 
             if (replicationConfigHostMode && !replicationConfigMultiplayerMenuEnabled)
@@ -81,6 +82,46 @@ namespace GoingCooperative.Plugin.BepInEx
 
             LogReplicationInfo("Going Cooperative replication command capture patches="
                 + patchedCount.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private int TryInstallDisableAutomaticSleepSpeed(Harmony harmonyInstance)
+        {
+            try
+            {
+                var speedManagerType = AccessTools.TypeByName("NSMedieval.Manager.GameSpeedManager");
+                var enable = speedManagerType == null
+                    ? null
+                    : AccessTools.Method(speedManagerType, "EnableSleepSpeed", Type.EmptyTypes);
+                var disable = speedManagerType == null
+                    ? null
+                    : AccessTools.Method(speedManagerType, "DisableSpeedSleep", Type.EmptyTypes);
+                if (enable == null || disable == null)
+                {
+                    LogReplicationWarning("Going Cooperative automatic sleep-speed suppression failed closed because native GameSpeedManager surfaces are missing.");
+                    return 0;
+                }
+
+                var prefix = new HarmonyMethod(typeof(GoingCooperativePlugin).GetMethod(
+                    nameof(ReplicationAutomaticSleepSpeedPrefix),
+                    BindingFlags.Static | BindingFlags.NonPublic));
+                harmonyInstance.Patch(enable, prefix: prefix);
+                harmonyInstance.Patch(disable, prefix: prefix);
+                AppendPluginLog("Automatic sleep-speed suppression patched: GameSpeedManager.EnableSleepSpeed/DisableSpeedSleep");
+                return 2;
+            }
+            catch (Exception ex)
+            {
+                LogReplicationWarning("Going Cooperative automatic sleep-speed suppression hook failed error="
+                    + FormatReflectionExceptionDetail(ex));
+                return 0;
+            }
+        }
+
+        private static bool ReplicationAutomaticSleepSpeedPrefix()
+        {
+            // Suppress both halves as a pair. Allowing the wake half to execute after
+            // blocking sleep entry could restore a stale preSleepSpeedIndex.
+            return !replicationConfigDisableAutomaticSleepSpeed;
         }
 
         private static void ReplicationGameSpeedManagerInstancePostfix(MethodBase __originalMethod, object __instance)
@@ -266,20 +307,26 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void SendReplicationLocalCommandIntent(LockstepCommand command, string source)
         {
-            PendingReplicationCommandIntent? pendingBuild = null;
-            var pendingBuildKey = string.Empty;
-            if (command.Kind == CommandKind.Build
-                && IsReplicationBuildBatchCommand(command))
+            if (IsReplicationStoragePolicyUpdateCommand(command))
             {
-                pendingBuildKey = BuildReplicationCommandIntentKey(command);
+                command = CoalesceReplicationPendingStoragePolicyIntent(command);
+            }
+
+            PendingReplicationCommandIntent? pendingDurable = null;
+            var pendingDurableKey = string.Empty;
+            var durableStoragePolicy = IsReplicationStoragePolicyUpdateCommand(command);
+            if ((command.Kind == CommandKind.Build && IsReplicationBuildBatchCommand(command))
+                || durableStoragePolicy)
+            {
+                pendingDurableKey = BuildReplicationCommandIntentKey(command);
                 var now = Time.realtimeSinceStartup;
-                pendingBuild = new PendingReplicationCommandIntent(
+                pendingDurable = new PendingReplicationCommandIntent(
                     command,
                     source,
                     now,
                     now - ReplicationCommandIntentRetrySeconds,
                     0);
-                ReplicationPendingCommandIntents[pendingBuildKey] = pendingBuild;
+                ReplicationPendingCommandIntents[pendingDurableKey] = pendingDurable;
             }
 
             try
@@ -290,10 +337,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(ReplicationClientPeerId, new ReplicationCommandIntent(command)));
-                if (pendingBuild != null)
+                if (pendingDurable != null)
                 {
-                    pendingBuild.LastSentRealtime = Time.realtimeSinceStartup;
-                    pendingBuild.SendCount = 1;
+                    pendingDurable.LastSentRealtime = Time.realtimeSinceStartup;
+                    pendingDurable.SendCount = 1;
                 }
                 replicationIntentsSent++;
                 replicationLastIntentSummary = "captured source="
@@ -307,18 +354,18 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             catch (Exception ex)
             {
-                if (pendingBuild != null)
+                if (pendingDurable != null)
                 {
                     // A throwing transport is still an attempted delivery. Without this
                     // accounting, an unaccepted BuildBatch and its provisional views can
                     // retry forever while never reaching the deterministic rollback cap.
-                    pendingBuild.LastSentRealtime = Time.realtimeSinceStartup;
-                    pendingBuild.SendCount = Math.Max(1, pendingBuild.SendCount + 1);
+                    pendingDurable.LastSentRealtime = Time.realtimeSinceStartup;
+                    pendingDurable.SendCount = Math.Max(1, pendingDurable.SendCount + 1);
                 }
                 instance?.LogReplicationWarning("Going Cooperative replication local command intent send failed source="
                     + source
                     + " attempts="
-                    + (pendingBuild?.SendCount ?? 0).ToString(CultureInfo.InvariantCulture)
+                    + (pendingDurable?.SendCount ?? 0).ToString(CultureInfo.InvariantCulture)
                     + " error="
                     + ex.GetType().Name
                     + ":"
@@ -339,10 +386,14 @@ namespace GoingCooperative.Plugin.BepInEx
             foreach (var pair in ReplicationPendingCommandIntents)
             {
                 var pending = pair.Value;
+                var storagePolicy = IsReplicationStoragePolicyUpdateCommand(pending.Command);
                 var resultRequestWindowExpired = pending.HostResponded
+                    && !storagePolicy
                     && now - pending.AwaitingResultStartedRealtime >= ReplicationBuildBatchResultRequestWindowSeconds;
                 var retrySeconds = pending.HostResponded
-                    ? resultRequestWindowExpired
+                    ? storagePolicy
+                        ? ReplicationStoragePolicyStateProofRetrySeconds
+                        : resultRequestWindowExpired
                         ? ReplicationBuildBatchResultDormantRetrySeconds
                         : ReplicationBuildBatchResultRequestRetrySeconds
                     : ReplicationCommandIntentRetrySeconds;
@@ -371,7 +422,9 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
-                if (!pending.HostResponded && pending.SendCount >= ReplicationCommandIntentMaxSends)
+                if (!storagePolicy
+                    && !pending.HostResponded
+                    && pending.SendCount >= ReplicationCommandIntentMaxSends)
                 {
                     var rolledBack = RollbackReplicationProvisionalBuildViews(
                         pending.Command,
@@ -461,6 +514,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildBatchResultRequestRetrySeconds = 2f;
         private const float ReplicationBuildBatchResultRequestWindowSeconds = 120f;
         private const float ReplicationBuildBatchResultDormantRetrySeconds = 15f;
+        private const float ReplicationStoragePolicyStateProofRetrySeconds = 2f;
 
         private static bool IsReplicationBuildBatchCommand(LockstepCommand command)
         {

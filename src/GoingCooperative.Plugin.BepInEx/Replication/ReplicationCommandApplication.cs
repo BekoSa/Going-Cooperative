@@ -101,6 +101,53 @@ namespace GoingCooperative.Plugin.BepInEx
 
         bool IRuntimeCommandActions.ApplyCustom(string payloadJson, out string detail)
         {
+            if (LockstepCommandPayloads.TryReadPrioritisedObjectWorkV1Payload(
+                payloadJson,
+                out var prioritisedWorkerEntityId,
+                out var prioritisedTargetHostId,
+                out var prioritisedTargetEntityId,
+                out var prioritisedTargetFamily,
+                out var prioritisedTargetPolicy,
+                out var prioritisedGoalId,
+                out var prioritisedRequestId,
+                out var prioritisedTargetX,
+                out var prioritisedTargetY,
+                out var prioritisedTargetZ))
+            {
+                return TryApplyReplicationPrioritisedObjectWorkV1(
+                    prioritisedWorkerEntityId,
+                    prioritisedTargetHostId,
+                    prioritisedTargetEntityId,
+                    prioritisedTargetFamily,
+                    prioritisedTargetPolicy,
+                    prioritisedGoalId,
+                    prioritisedRequestId,
+                    prioritisedTargetX,
+                    prioritisedTargetY,
+                    prioritisedTargetZ,
+                    out detail);
+            }
+
+            if (MedicalReplicationPayloads.TryReadTreatmentOrder(
+                payloadJson,
+                out var medicalOrderKind,
+                out var medicalDoctorId,
+                out var medicalPatientId,
+                out var medicalRequestId))
+            {
+                return TryApplyReplicationMedicalTreatmentOrder(
+                    medicalOrderKind,
+                    medicalDoctorId,
+                    medicalPatientId,
+                    medicalRequestId,
+                    out detail);
+            }
+
+            if (MedicalReplicationPayloads.TryReadStateRequest(payloadJson, out var medicalEntityId, out var medicalStateRequestId))
+            {
+                return TryApplyReplicationMedicalStateRequest(medicalEntityId, medicalStateRequestId, out detail);
+            }
+
             if (LockstepCommandPayloads.TryReadTraderTradeOpenRequestPayload(
                 payloadJson,
                 out var tradeOpenEpoch,
@@ -206,6 +253,11 @@ namespace GoingCooperative.Plugin.BepInEx
             if (LockstepCommandPayloads.TryReadCombatCancelPayload(payloadJson, out var cancellingEntityIds))
             {
                 return TryApplyReplicationCombatCancel(cancellingEntityIds, authoritativeExecution: true, out detail);
+            }
+
+            if (LockstepCommandPayloads.TryReadStoragePolicyUpdatePayload(payloadJson, out var storagePolicyUpdate))
+            {
+                return TryApplyReplicationStoragePolicyUpdate(storagePolicyUpdate, out detail);
             }
 
             if (LockstepCommandPayloads.TryReadManagementPolicyPayload(payloadJson, out var policy, out var targetId, out var key, out var index, out var policyValue, out var policyEnabled))

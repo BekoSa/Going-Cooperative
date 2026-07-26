@@ -42,6 +42,9 @@ namespace GoingCooperative.Plugin.BepInEx
         // Client-only rollback gate for host-authored sleep presentation through
         // CreatureBase.IsSleeping instead of replaying LifeController global events.
         private static bool replicationConfigHostSleepPresentationV2;
+        // Local gameplay preference applied identically on both peers. Suppresses
+        // only the game's all-workers-sleeping speed override and its wake restore.
+        private static bool replicationConfigDisableAutomaticSleepSpeed;
         // Master rollback gate for the event-driven production registry and
         // scheduler. Sub-gates below remain independently reversible.
         private static bool replicationConfigProductionStateV2;
@@ -77,6 +80,9 @@ namespace GoingCooperative.Plugin.BepInEx
         // reconcile remain active when this diagnostic-only gate is disabled.
         private static bool replicationConfigCropfieldPolicyDiagnostics;
         private static bool replicationConfigPlantLifecycleReplication;
+        // Exact selected-worker to exact-world-target right-click work requests.
+        // False preserves the legacy coordinate-only RegionOrder behavior.
+        private static bool replicationConfigPrioritisedObjectWorkV1;
         // Focused beam capture/replay tracing. This is intentionally independent
         // from the high-volume world-delta and transport diagnostic gates.
         private static bool replicationConfigBeamReplicationDiagnostics;
@@ -103,8 +109,24 @@ namespace GoingCooperative.Plugin.BepInEx
         // save/control records for Direct (IP) sessions. Steam keeps its own trust lane.
         private static bool replicationConfigDirectTransportSecurityV1;
         private static bool replicationConfigPerfFpsProbe = true;
+        // Aggregate-only attribution for host FPS under movement/path churn.
+        // Disabled by default; it does no scene discovery or per-entity logging.
+        private static bool replicationConfigPathingPerfDiagnostics;
         private static bool replicationConfigResourcePileStateSnapshots;
         private static bool replicationConfigResourceContainerReplication;
+        // Event-dirty replacement for the legacy 0.5 second resource-container
+        // rebuild. The master and each authority domain are independently
+        // rollback-gated; all default off until two-machine certification.
+        private static bool replicationConfigResourceStateV2;
+        private static bool replicationConfigAgentInventoryStateV2;
+        private static bool replicationConfigGroundPileStateV2;
+        private static bool replicationConfigShelfStorageStateV2;
+        private static bool replicationConfigResourceStateV2Diagnostics;
+        // Complete ground-stockpile and shelf policy authority (filters, ranges,
+        // priority, name, and production eligibility).
+        private static bool replicationConfigStoragePolicyV4;
+        // Canonical per-slot shelf contents/presentation manifest.
+        private static bool replicationConfigShelfStorageManifestV1;
         // Combat is intentionally split into independently reversible layers. The
         // master gate must be on before any future authoritative combat mutation
         // path is allowed to run; diagnostics remain separately controllable.
@@ -119,12 +141,27 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationConfigCombatProjectileReplication;
         private static bool replicationConfigCombatExternalAgentLifecycle;
         private static bool replicationConfigCombatDiagnostics;
+        // Medical V1 owns live wound effectors and medical intents. Combat keeps
+        // sole ownership of health/blood/pain/consciousness scalar outcomes.
+        private static bool replicationConfigMedicalReplicationV1;
+        private static bool replicationConfigMedicalWoundStateV1;
+        private static bool replicationConfigMedicalTreatmentOrdersV1;
+        private static bool replicationConfigMedicalTreatmentPresentationV1;
+        private static bool replicationConfigMedicalPanelRefreshV1;
+        private static bool replicationConfigMedicalClientWoundTickSuppressionV1;
+        private static bool replicationConfigMedicalDiagnostics;
         // Scripted events and ambient weather are split into independently reversible
         // layers. Trader starts have a narrow authority gate; replacing the complete
         // scheduler or loaded/running event graph remains separately fail-closed.
         private static bool replicationConfigEventReplication;
         private static bool replicationConfigEventSchedulerAuthority;
         private static bool replicationConfigEventTraderAuthority;
+        // Exact NewWorkerEvent authority pilot. This does not enable scheduler-wide
+        // authority or any other visitor, raid, weather, or environment event family.
+        private static bool replicationConfigEventRecruitmentAuthorityV1;
+        // Exact RunawayEvent opening/recruitment authority. Kept independent from
+        // NewWorkerEvent because RunawayEvent is a derived threat graph.
+        private static bool replicationConfigEventRunawayAuthorityV1;
         private static bool replicationConfigSynchronizedTrading;
         private static bool replicationConfigEventLifecycleReplication;
         private static bool replicationConfigEventDialogReplication;
@@ -249,6 +286,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigNeedsReplication
                     + " hostSleepPresentationV2="
                     + replicationConfigHostSleepPresentationV2
+                    + " disableAutomaticSleepSpeed="
+                    + replicationConfigDisableAutomaticSleepSpeed
                     + " productionStateV2="
                     + replicationConfigProductionStateV2
                     + " productionTicketOrdersV2="
@@ -287,6 +326,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigMultiplayerMenuEnabled
                     + " perfFpsProbe="
                     + replicationConfigPerfFpsProbe
+                    + " pathingPerfDiagnostics="
+                    + replicationConfigPathingPerfDiagnostics
                     + " worldObjectDeltaDiagnostics="
                     + replicationConfigWorldObjectDeltaDiagnostics
                     + " verboseReplicationLogging="
@@ -309,12 +350,28 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigCropfieldPolicyDiagnostics
                     + " plantLifecycleReplication="
                     + replicationConfigPlantLifecycleReplication
+                    + " prioritisedObjectWorkV1="
+                    + replicationConfigPrioritisedObjectWorkV1
                     + " beamReplicationDiagnostics="
                     + replicationConfigBeamReplicationDiagnostics
                     + " resourcePileStateSnapshots="
                     + replicationConfigResourcePileStateSnapshots
                     + " resourceContainerReplication="
                     + replicationConfigResourceContainerReplication
+                    + " resourceStateV2="
+                    + replicationConfigResourceStateV2
+                    + " agentInventoryStateV2="
+                    + replicationConfigAgentInventoryStateV2
+                    + " groundPileStateV2="
+                    + replicationConfigGroundPileStateV2
+                    + " shelfStorageStateV2="
+                    + replicationConfigShelfStorageStateV2
+                    + " resourceStateV2Diagnostics="
+                    + replicationConfigResourceStateV2Diagnostics
+                    + " storagePolicyV4="
+                    + replicationConfigStoragePolicyV4
+                    + " shelfStorageManifestV1="
+                    + replicationConfigShelfStorageManifestV1
                     + " combatReplication="
                     + replicationConfigCombatReplication
                     + " combatDraftCommands="
@@ -337,12 +394,30 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigCombatExternalAgentLifecycle
                     + " combatDiagnostics="
                     + replicationConfigCombatDiagnostics
+                    + " medicalReplicationV1="
+                    + replicationConfigMedicalReplicationV1
+                    + " medicalWoundStateV1="
+                    + replicationConfigMedicalWoundStateV1
+                    + " medicalTreatmentOrdersV1="
+                    + replicationConfigMedicalTreatmentOrdersV1
+                    + " medicalTreatmentPresentationV1="
+                    + replicationConfigMedicalTreatmentPresentationV1
+                    + " medicalPanelRefreshV1="
+                    + replicationConfigMedicalPanelRefreshV1
+                    + " medicalClientWoundTickSuppressionV1="
+                    + replicationConfigMedicalClientWoundTickSuppressionV1
+                    + " medicalDiagnostics="
+                    + replicationConfigMedicalDiagnostics
                     + " eventReplication="
                     + replicationConfigEventReplication
                     + " eventSchedulerAuthority="
                     + replicationConfigEventSchedulerAuthority
                     + " eventTraderAuthority="
                     + replicationConfigEventTraderAuthority
+                    + " eventRecruitmentAuthorityV1="
+                    + replicationConfigEventRecruitmentAuthorityV1
+                    + " eventRunawayAuthorityV1="
+                    + replicationConfigEventRunawayAuthorityV1
                     + " synchronizedTrading="
                     + replicationConfigSynchronizedTrading
                     + " eventLifecycleReplication="
@@ -382,6 +457,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     + " maxSnapshotEntities="
                     + replicationConfigMaxSnapshotEntities.ToString(CultureInfo.InvariantCulture));
                 LogReplicationInventoryAuthority(current);
+                LogReplicationMedicalAuthority(current);
 
                 current.Logger.LogInfo("Going Cooperative replication config ui="
                     + (replicationConfigUiV3 ? "v3" : replicationConfigUiV2 ? "v2" : "classic")
@@ -404,6 +480,18 @@ namespace GoingCooperative.Plugin.BepInEx
                         || !string.Equals(replicationConfigWorldObjectDeltaMode, "apply", StringComparison.OrdinalIgnoreCase)))
                 {
                     current.Logger.LogWarning("Going Cooperative trader event authority is dependency-gated off: eventLifecycleReplication=true and worldObjectDeltaMode=apply are required. Native trader events remain enabled.");
+                }
+
+                if (replicationConfigEventRecruitmentAuthorityV1
+                    && !RecruitmentEventAuthorityV1Enabled())
+                {
+                    current.Logger.LogWarning("Going Cooperative recruitment event authority V1 is configured but failed closed; native recruitment events remain enabled on the client.");
+                }
+
+                if (replicationConfigEventRunawayAuthorityV1
+                    && !RunawayEventAuthorityV1Enabled())
+                {
+                    current.Logger.LogWarning("Going Cooperative runaway event authority V1 is configured but failed closed; native runaway events remain enabled on the client.");
                 }
 
                 if (replicationConfigEventReplication
@@ -443,6 +531,23 @@ namespace GoingCooperative.Plugin.BepInEx
                         || !ReplicationEventNoticeReplicationImplemented()))
                 {
                     current.Logger.LogWarning("Going Cooperative full scripted-event graph authority remains source-gated off: external roster, environment mutation, warning, or notice implementations are not present in this build. Trader authority is controlled independently by eventTraderAuthority.");
+                }
+
+                if (!replicationConfigMedicalReplicationV1
+                    && (replicationConfigMedicalWoundStateV1
+                        || replicationConfigMedicalTreatmentOrdersV1
+                        || replicationConfigMedicalTreatmentPresentationV1
+                        || replicationConfigMedicalPanelRefreshV1
+                        || replicationConfigMedicalClientWoundTickSuppressionV1))
+                {
+                    current.Logger.LogWarning("Going Cooperative medical sub-gates are inert because medicalReplicationV1=false.");
+                }
+
+                if (replicationConfigMedicalReplicationV1
+                    && replicationConfigMedicalWoundStateV1
+                    && !string.Equals(replicationConfigWorldObjectDeltaMode, "apply", StringComparison.OrdinalIgnoreCase))
+                {
+                    current.Logger.LogWarning("Going Cooperative medical wound state requires worldObjectDeltaMode=apply on both peers; current mode will not provide live client reconciliation.");
                 }
 
                 if (replicationConfigWeatherReplication
@@ -488,6 +593,27 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 current.Logger.LogWarning(
                     "Going Cooperative replication authority invalid agent-inventory=none; pawn inventory will not converge.");
+            }
+        }
+
+        private static void LogReplicationMedicalAuthority(GoingCooperativePlugin current)
+        {
+            var woundOwner = replicationConfigMedicalReplicationV1 && replicationConfigMedicalWoundStateV1
+                ? "medical-v1"
+                : "local-simulation";
+            var scalarOwner = replicationConfigCombatReplication && replicationConfigCombatHealthReplication
+                ? "combat-health"
+                : "local-simulation";
+            var orderOwner = replicationConfigMedicalReplicationV1 && replicationConfigMedicalTreatmentOrdersV1
+                ? "medical-v1"
+                : "local-only";
+            current.Logger.LogInfo("Going Cooperative replication authority wounds=" + woundOwner
+                + " health-scalars=" + scalarOwner
+                + " treatment-orders=" + orderOwner);
+            if (replicationConfigMedicalClientWoundTickSuppressionV1
+                && (!replicationConfigMedicalReplicationV1 || !replicationConfigMedicalWoundStateV1))
+            {
+                current.Logger.LogWarning("Going Cooperative medical client wound tick suppression is dependency-gated off: medicalReplicationV1=true and medicalWoundStateV1=true are required.");
             }
         }
 
@@ -694,6 +820,41 @@ namespace GoingCooperative.Plugin.BepInEx
                     if (TryParseConfigBool(value, out var combatDiagnostics)) replicationConfigCombatDiagnostics = combatDiagnostics;
                     else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
                     break;
+                case "medicalreplicationv1":
+                case "medicalenabled":
+                    if (TryParseConfigBool(value, out var medicalReplicationV1)) replicationConfigMedicalReplicationV1 = medicalReplicationV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicalwoundstatev1":
+                case "medicalwoundsv1":
+                    if (TryParseConfigBool(value, out var medicalWoundStateV1)) replicationConfigMedicalWoundStateV1 = medicalWoundStateV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicaltreatmentordersv1":
+                case "medicalordersv1":
+                    if (TryParseConfigBool(value, out var medicalTreatmentOrdersV1)) replicationConfigMedicalTreatmentOrdersV1 = medicalTreatmentOrdersV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicaltreatmentpresentationv1":
+                case "medicalpresentationv1":
+                    if (TryParseConfigBool(value, out var medicalTreatmentPresentationV1)) replicationConfigMedicalTreatmentPresentationV1 = medicalTreatmentPresentationV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicalpanelrefreshv1":
+                case "medicaluiv1":
+                    if (TryParseConfigBool(value, out var medicalPanelRefreshV1)) replicationConfigMedicalPanelRefreshV1 = medicalPanelRefreshV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicalclientwoundticksuppressionv1":
+                case "medicalwoundticksuppressionv1":
+                    if (TryParseConfigBool(value, out var medicalClientWoundTickSuppressionV1)) replicationConfigMedicalClientWoundTickSuppressionV1 = medicalClientWoundTickSuppressionV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "medicaldiagnostics":
+                case "medicalprobes":
+                    if (TryParseConfigBool(value, out var medicalDiagnostics)) replicationConfigMedicalDiagnostics = medicalDiagnostics;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
                 case "eventreplication":
                 case "eventenabled":
                     if (TryParseConfigBool(value, out var eventReplication)) replicationConfigEventReplication = eventReplication;
@@ -707,6 +868,16 @@ namespace GoingCooperative.Plugin.BepInEx
                 case "eventtraderauthority":
                 case "traderauthority":
                     if (TryParseConfigBool(value, out var eventTraderAuthority)) replicationConfigEventTraderAuthority = eventTraderAuthority;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "eventrecruitmentauthorityv1":
+                case "recruitmenteventauthorityv1":
+                    if (TryParseConfigBool(value, out var eventRecruitmentAuthorityV1)) replicationConfigEventRecruitmentAuthorityV1 = eventRecruitmentAuthorityV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "eventrunawayauthorityv1":
+                case "runawayeventauthorityv1":
+                    if (TryParseConfigBool(value, out var eventRunawayAuthorityV1)) replicationConfigEventRunawayAuthorityV1 = eventRunawayAuthorityV1;
                     else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
                     break;
                 case "synchronizedtrading":
@@ -1048,6 +1219,19 @@ namespace GoingCooperative.Plugin.BepInEx
 
                     break;
 
+                case "disableautomaticsleepspeed":
+                case "disableallsleepingspeed":
+                    if (TryParseConfigBool(value, out var disableAutomaticSleepSpeed))
+                    {
+                        replicationConfigDisableAutomaticSleepSpeed = disableAutomaticSleepSpeed;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+
                 case "verbosereplicationlogging":
                 case "verbosereplicationlogs":
                 case "verbosetransportlogging":
@@ -1135,6 +1319,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     if (TryParseConfigBool(value, out var plantLifecycleReplication))
                     {
                         replicationConfigPlantLifecycleReplication = plantLifecycleReplication;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "prioritisedobjectworkv1":
+                case "prioritizedobjectworkv1":
+                    if (TryParseConfigBool(value, out var prioritisedObjectWorkV1))
+                    {
+                        replicationConfigPrioritisedObjectWorkV1 = prioritisedObjectWorkV1;
                     }
                     else
                     {
@@ -1341,6 +1537,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
 
                     break;
+                case "pathingperfdiagnostics":
+                case "pathingperformanceprobe":
+                    if (TryParseConfigBool(value, out var pathingPerfDiagnostics))
+                    {
+                        replicationConfigPathingPerfDiagnostics = pathingPerfDiagnostics;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
                 case "resourcepilestatesnapshots":
                 case "resourcepilesnapshots":
                 case "sendresourcepilestatesnapshots":
@@ -1366,6 +1574,35 @@ namespace GoingCooperative.Plugin.BepInEx
                         LogReplicationConfigInvalidValue(current, lineNumber, key, value);
                     }
 
+                    break;
+                case "resourcestatev2":
+                    if (TryParseConfigBool(value, out var resourceStateV2)) replicationConfigResourceStateV2 = resourceStateV2;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "agentinventorystatev2":
+                    if (TryParseConfigBool(value, out var agentInventoryStateV2)) replicationConfigAgentInventoryStateV2 = agentInventoryStateV2;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "groundpilestatev2":
+                    if (TryParseConfigBool(value, out var groundPileStateV2)) replicationConfigGroundPileStateV2 = groundPileStateV2;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "shelfstoragestatev2":
+                    if (TryParseConfigBool(value, out var shelfStorageStateV2)) replicationConfigShelfStorageStateV2 = shelfStorageStateV2;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "resourcestatev2diagnostics":
+                    if (TryParseConfigBool(value, out var resourceStateV2Diagnostics)) replicationConfigResourceStateV2Diagnostics = resourceStateV2Diagnostics;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "storagepolicyv4":
+                    if (TryParseConfigBool(value, out var storagePolicyV4)) replicationConfigStoragePolicyV4 = storagePolicyV4;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    break;
+                case "shelfstoragemanifestv1":
+                case "shelfcontainerreplicationv1":
+                    if (TryParseConfigBool(value, out var shelfStorageManifestV1)) replicationConfigShelfStorageManifestV1 = shelfStorageManifestV1;
+                    else LogReplicationConfigInvalidValue(current, lineNumber, key, value);
                     break;
                 case "worldobjectdeltaapplybudgetperframe":
                 case "worlddeltaapplybudgetperframe":
