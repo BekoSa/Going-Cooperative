@@ -49,6 +49,33 @@ internal static class DirectTransportSecurityTests
             failures++;
         }
 
+        if (!string.Equals(
+                DirectTransportSecurity.NormalizeCode("o1il-2345-6789"),
+                "011123456789",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine("FAIL direct security Crockford ambiguity normalization");
+            failures++;
+        }
+
+        var vectorKey = new byte[32];
+        for (var i = 0; i < vectorKey.Length; i++) vectorKey[i] = (byte)i;
+        var vectorTag = DirectTransportSecurity.Mac(
+            vectorKey,
+            "UDP-DATA2",
+            new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+            BitConverter.GetBytes(42L),
+            BitConverter.GetBytes(5),
+            Encoding.ASCII.GetBytes("hello"));
+        if (!string.Equals(
+                DirectTransportSecurity.ToHex(vectorTag),
+                "31C64F6F62B60EAD5EBFB4DF115E7DE778820E02D2CD54EC1F2CAA3BB1C5930A",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine("FAIL direct security streaming HMAC compatibility vector");
+            failures++;
+        }
+
         var payload = Encoding.UTF8.GetBytes("authenticated save and control data");
         var wire = new MemoryStream();
         var sender = new AuthenticatedRecordStream(wire, key, "C2H", "H2C");
