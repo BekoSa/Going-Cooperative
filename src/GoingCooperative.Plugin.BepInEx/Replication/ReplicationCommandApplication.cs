@@ -325,7 +325,17 @@ namespace GoingCooperative.Plugin.BepInEx
                 return TryApplyReplicationEquipOrder(entityId, blueprintId, x, y, z, out detail);
             }
 
-            detail = "custom-payload-unsupported";
+            if (LockstepCommandPayloads.TryReadActionName(payloadJson, out var unsupportedAction))
+            {
+                detail = MultiplayerActionRegistry.IsKnownCustomClientIntent(unsupportedAction)
+                    ? "known-client-action-unhandled action=" + unsupportedAction
+                    : "custom-action-unsupported action=" + unsupportedAction;
+            }
+            else
+            {
+                detail = "custom-payload-unsupported";
+            }
+
             return false;
         }
 
