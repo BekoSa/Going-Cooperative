@@ -13,14 +13,66 @@ internal static class DirectTransportSecurityTests
         var failures = 0;
         var code = DirectTransportSecurity.GenerateSessionCode();
         var key = new byte[0];
-        if (code.Length != 32 || !DirectTransportSecurity.TryDeriveKey(code, out key, out _))
+        if (code.Length != 14
+            || code[4] != '-'
+            || code[9] != '-'
+            || !DirectTransportSecurity.TryDeriveKey(code, out key, out _))
         {
-            Console.Error.WriteLine("FAIL direct security generated code");
+            Console.Error.WriteLine("FAIL direct security generated short code");
+            failures++;
+        }
+
+        var normalizedCode = DirectTransportSecurity.NormalizeCode(code);
+        if (normalizedCode.Length != 12
+            || !DirectTransportSecurity.TryDeriveKey(
+                normalizedCode.ToLowerInvariant(),
+                out var normalizedKey,
+                out _)
+            || !DirectTransportSecurity.FixedTimeEquals(key, normalizedKey))
+        {
+            Console.Error.WriteLine("FAIL direct security short-code normalization");
+            failures++;
+        }
+
+        var legacyCode = "00112233445566778899AABBCCDDEEFF";
+        if (!DirectTransportSecurity.TryDeriveKey(
+                legacyCode,
+                out _,
+                out _))
+        {
+            Console.Error.WriteLine("FAIL direct security legacy code compatibility");
             failures++;
         }
         if (DirectTransportSecurity.TryDeriveKey("1234", out _, out _))
         {
             Console.Error.WriteLine("FAIL direct security rejects weak code");
+            failures++;
+        }
+
+        if (!string.Equals(
+                DirectTransportSecurity.NormalizeCode("o1il-2345-6789"),
+                "011123456789",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine("FAIL direct security Crockford ambiguity normalization");
+            failures++;
+        }
+
+        var vectorKey = new byte[32];
+        for (var i = 0; i < vectorKey.Length; i++) vectorKey[i] = (byte)i;
+        var vectorTag = DirectTransportSecurity.Mac(
+            vectorKey,
+            "UDP-DATA2",
+            new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+            BitConverter.GetBytes(42L),
+            BitConverter.GetBytes(5),
+            Encoding.ASCII.GetBytes("hello"));
+        if (!string.Equals(
+                DirectTransportSecurity.ToHex(vectorTag),
+                "31C64F6F62B60EAD5EBFB4DF115E7DE778820E02D2CD54EC1F2CAA3BB1C5930A",
+                StringComparison.Ordinal))
+        {
+            Console.Error.WriteLine("FAIL direct security streaming HMAC compatibility vector");
             failures++;
         }
 
@@ -62,7 +114,7 @@ internal static class DirectTransportSecurityTests
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(1);
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Exception hostFailure = null;
+        Exception? hostFailure = null;
         var host = new Thread(() =>
         {
             try

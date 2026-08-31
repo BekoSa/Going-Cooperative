@@ -155,6 +155,15 @@ namespace GoingCooperative.Plugin.BepInEx
             var transform = behaviour.transform;
             var position = transform.position;
             var rotation = transform.rotation;
+            if (ShouldPrefilterReplicationUnchangedTransform(
+                    entityId,
+                    position,
+                    rotation,
+                    Time.realtimeSinceStartup))
+            {
+                return;
+            }
+
             ReplicationEntityMotionMetadata? motion = null;
             if (replicationConfigSemanticAgentPresentation && hasStableEntityId)
             {

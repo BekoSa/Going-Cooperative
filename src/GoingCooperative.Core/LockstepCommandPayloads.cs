@@ -1339,6 +1339,19 @@ namespace GoingCooperative.Core
             return normalized.ToString();
         }
 
+        public static bool TryReadActionName(string payloadJson, out string action)
+        {
+            action = string.Empty;
+            if (string.IsNullOrWhiteSpace(payloadJson))
+            {
+                return false;
+            }
+
+            var normalizedJson = Normalize(payloadJson);
+            return TryReadStringProperty(normalizedJson, "action", out action)
+                && !string.IsNullOrWhiteSpace(action);
+        }
+
         private static bool HasAction(string normalizedJson, string action)
         {
             return TryReadStringProperty(normalizedJson, "action", out var actualAction)

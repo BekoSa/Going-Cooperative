@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$GameRoot
+)
 
 $ErrorActionPreference = "Stop"
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -8,7 +10,22 @@ $dotnetRoot = Split-Path -Parent $dotnet
 $compiler = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot "sdk") -Recurse -Filter "csc.dll" |
     Sort-Object FullName -Descending |
     Select-Object -First 1 -ExpandProperty FullName
-$managed = Join-Path (Split-Path -Parent $repositoryRoot) "Going Medieval_Data\Managed"
+if ([string]::IsNullOrWhiteSpace($GameRoot)) {
+    $legacyManaged = Join-Path (Split-Path -Parent $repositoryRoot) "Going Medieval_Data\Managed"
+    if (-not (Test-Path -LiteralPath $legacyManaged -PathType Container)) {
+        throw 'Going Medieval managed assemblies were not found. Pass -GameRoot, for example: -GameRoot "C:\GOG Games\Going Medieval"'
+    }
+
+    $managed = $legacyManaged
+}
+else {
+    $gameRootPath = (Resolve-Path -LiteralPath $GameRoot).Path
+    $managed = Join-Path $gameRootPath "Going Medieval_Data\Managed"
+    if (-not (Test-Path -LiteralPath $managed -PathType Container)) {
+        throw "Going Medieval managed directory not found: $managed"
+    }
+}
+
 $outputDirectory = Join-Path $repositoryRoot "artifacts\tests"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $output = Join-Path $outputDirectory "CorePolicyTests.exe"
@@ -21,7 +38,9 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportEnvelopeCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportChunkCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DirectTransportSecurity.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\DeterminismHash.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\LockstepCommandPayloads.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerActionRegistry.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\StoragePolicyContracts.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MedicalReplicationPayloads.cs"),
     (Join-Path $repositoryRoot "tests\BuildingReplicationV2PolicyTests.cs"),

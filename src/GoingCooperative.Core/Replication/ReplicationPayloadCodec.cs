@@ -7,10 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // Building snapshot scheduling changed in REPL-2. Keep this a hard wire
-        // compatibility boundary: an older peer can otherwise accept a session yet
-        // disagree about when authoritative building state is allowed to replay.
-        public const string ProtocolVersion = "GCOOP-REPL-2";
+        // REPL-5 moves Direct transport encode/auth/receive/send off the Unity main
+        // thread, adds coalesced presence state, and negotiates the client-action registry.
+        public const string ProtocolVersion = "GCOOP-REPL-5";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {

@@ -13,6 +13,9 @@ namespace GoingCooperative.Core
         ReplicationWorldObjectDeltaAck = 26,
         ReplicationResyncControl = 27,
         ReplicationResourceContainerBatch = 28,
+        ReplicationPlayerPresence = 29,
+        ReplicationPlayerPing = 30,
+        ReplicationPlayerSelection = 31,
         Chunk = 100
     }
 
