@@ -181,6 +181,22 @@ namespace GoingCooperative.Core
             }
         }
 
+        public int PendingOutgoingMessages
+        {
+            get
+            {
+                var pending = outbox.Count;
+                lock (latestStateLock)
+                {
+                    if (latestOutgoingTransformSnapshot != null) pending++;
+                    if (latestOutgoingPlayerPresence != null) pending++;
+                    if (latestOutgoingPlayerSelection != null) pending++;
+                }
+
+                return pending;
+            }
+        }
+
         public int LocalPort
         {
             get
