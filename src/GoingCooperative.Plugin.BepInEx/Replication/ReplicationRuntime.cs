@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
@@ -197,8 +198,10 @@ namespace GoingCooperative.Plugin.BepInEx
             // the host returns a complete authoritative proof row.
             FlushReplicationStoragePolicyChanges();
             PumpReplicationTransport();
+            LogReplicationDirectTransportPerfIfDue();
             WarnReplicationTransportDropsIfDue();
             SendReplicationHelloIfDue();
+            UpdateReplicationPresence();
             if (replicationConfigHostMode)
             {
                 // All host channels gate on the same handshake state. Previously only some
@@ -280,6 +283,9 @@ namespace GoingCooperative.Plugin.BepInEx
             ResetReplicationCropfieldPolicyV1State();
             ResetReplicationPlantLifecycleV1State();
             ResetReplicationPrioritisedObjectWorkV1State();
+            ResetReplicationPresence();
+            ResetReplicationSparseTransformState();
+            ResetReplicationDirectPerfState();
             ClearReplicationBuildBatchRuntimeState();
             replicationNextHelloLogRealtime = 0f;
             replicationLastTransportDecodeFailures = 0;
@@ -462,47 +468,58 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var perfStarted = BeginReplicationPathingPerfSample();
+            var pumpStarted = Stopwatch.GetTimestamp();
             var messageCount = 0;
-            while (replicationTransport.TryReceive(out var envelope))
+            TransportEnvelope? latestTransformSnapshot = null;
+            while (messageCount < 64
+                && GetReplicationPumpElapsedMilliseconds(pumpStarted) < 3.0
+                && replicationTransport.TryReceive(out var envelope))
             {
                 messageCount++;
+                if (envelope.Kind == TransportMessageKind.ReplicationTransformSnapshot)
+                {
+                    latestTransformSnapshot = envelope;
+                    continue;
+                }
+
                 try
                 {
-                switch (envelope.Kind)
-                {
-                    case TransportMessageKind.ReplicationHello:
-                        HandleReplicationHello(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationTransformSnapshot:
-                        HandleReplicationTransformSnapshot(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationIntent:
-                        HandleReplicationCommandIntent(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationCommandAck:
-                        HandleReplicationCommandAck(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationRegionOrderState:
-                        HandleReplicationRegionOrderState(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationWorldObjectDelta:
-                        HandleReplicationWorldObjectDelta(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationWorldObjectDeltaAck:
-                        HandleReplicationWorldObjectDeltaAck(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationResyncControl:
-                        HandleReplicationResyncControl(envelope);
-                        break;
-                    case TransportMessageKind.ReplicationResourceContainerBatch:
-                        HandleReplicationResourceContainerBatch(envelope);
-                        break;
-                }
+                    switch (envelope.Kind)
+                    {
+                        case TransportMessageKind.ReplicationHello:
+                            HandleReplicationHello(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationIntent:
+                            HandleReplicationCommandIntent(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationCommandAck:
+                            HandleReplicationCommandAck(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationRegionOrderState:
+                            HandleReplicationRegionOrderState(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationWorldObjectDelta:
+                            HandleReplicationWorldObjectDelta(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationWorldObjectDeltaAck:
+                            HandleReplicationWorldObjectDeltaAck(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationResyncControl:
+                            HandleReplicationResyncControl(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationResourceContainerBatch:
+                            HandleReplicationResourceContainerBatch(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationPlayerPresence:
+                            HandleReplicationPlayerPresence(envelope);
+                            break;
+                        case TransportMessageKind.ReplicationPlayerPing:
+                            HandleReplicationPlayerPing(envelope);
+                            break;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    // One bad message must not abort the remaining receives this frame -
-                    // that pattern silently starves later channels and looks like packet loss.
                     replicationPumpHandlerExceptions++;
                     if (Time.realtimeSinceStartup >= replicationNextPumpExceptionWarnRealtime)
                     {
@@ -519,7 +536,34 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
+            if (latestTransformSnapshot != null)
+            {
+                try
+                {
+                    HandleReplicationTransformSnapshot(latestTransformSnapshot);
+                }
+                catch (Exception ex)
+                {
+                    replicationPumpHandlerExceptions++;
+                    if (Time.realtimeSinceStartup >= replicationNextPumpExceptionWarnRealtime)
+                    {
+                        replicationNextPumpExceptionWarnRealtime = Time.realtimeSinceStartup + 10f;
+                        LogReplicationWarning("Going Cooperative replication latest snapshot handler threw total="
+                            + replicationPumpHandlerExceptions.ToString(CultureInfo.InvariantCulture)
+                            + " error="
+                            + ex.GetType().Name
+                            + ":"
+                            + ex.Message);
+                    }
+                }
+            }
+
             RecordReplicationPathingPump(perfStarted, messageCount);
+        }
+
+        private static double GetReplicationPumpElapsedMilliseconds(long started)
+        {
+            return (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
         }
 
         private void SendReplicationHelloIfDue()
@@ -581,6 +625,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var firstCompatibleHello = !replicationRemoteHelloReceived;
             replicationRemoteCompatibilityRefused = false;
             replicationRemoteHelloReceived = true;
+            replicationTransport?.EnableBinarySecurityData();
             if (firstCompatibleHello)
             {
                 replicationNextAnimalAppearanceSnapshotRealtime = 0f;
@@ -1343,8 +1388,13 @@ namespace GoingCooperative.Plugin.BepInEx
             var interval = 1f / Math.Max(1, replicationConfigSnapshotHz);
             replicationNextSnapshotRealtime = Time.realtimeSinceStartup + interval;
             var collectStarted = BeginReplicationPathingPerfSample();
-            var snapshot = CollectReplicationTransformSnapshot(++replicationSnapshotSequence, replicationConfigMaxSnapshotEntities);
-            RecordReplicationPathingSnapshotCollection(collectStarted, snapshot.Entities.Count);
+            var collectedSnapshot = CollectReplicationTransformSnapshot(++replicationSnapshotSequence, replicationConfigMaxSnapshotEntities);
+            RecordReplicationPathingSnapshotCollection(collectStarted, collectedSnapshot.Entities.Count);
+            var snapshot = PrepareReplicationTransformSnapshotForWire(collectedSnapshot);
+            if (snapshot.Entities.Count == 0)
+            {
+                return;
+            }
             var encodeSendStarted = BeginReplicationPathingPerfSample();
             var wireCharacters = 0;
             try
