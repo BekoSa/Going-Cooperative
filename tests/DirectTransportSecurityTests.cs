@@ -13,9 +13,34 @@ internal static class DirectTransportSecurityTests
         var failures = 0;
         var code = DirectTransportSecurity.GenerateSessionCode();
         var key = new byte[0];
-        if (code.Length != 32 || !DirectTransportSecurity.TryDeriveKey(code, out key, out _))
+        if (code.Length != 14
+            || code[4] != '-'
+            || code[9] != '-'
+            || !DirectTransportSecurity.TryDeriveKey(code, out key, out _))
         {
-            Console.Error.WriteLine("FAIL direct security generated code");
+            Console.Error.WriteLine("FAIL direct security generated short code");
+            failures++;
+        }
+
+        var normalizedCode = DirectTransportSecurity.NormalizeCode(code);
+        if (normalizedCode.Length != 12
+            || !DirectTransportSecurity.TryDeriveKey(
+                normalizedCode.ToLowerInvariant(),
+                out var normalizedKey,
+                out _)
+            || !DirectTransportSecurity.FixedTimeEquals(key, normalizedKey))
+        {
+            Console.Error.WriteLine("FAIL direct security short-code normalization");
+            failures++;
+        }
+
+        var legacyCode = "00112233445566778899AABBCCDDEEFF";
+        if (!DirectTransportSecurity.TryDeriveKey(
+                legacyCode,
+                out _,
+                out _))
+        {
+            Console.Error.WriteLine("FAIL direct security legacy code compatibility");
             failures++;
         }
         if (DirectTransportSecurity.TryDeriveKey("1234", out _, out _))
