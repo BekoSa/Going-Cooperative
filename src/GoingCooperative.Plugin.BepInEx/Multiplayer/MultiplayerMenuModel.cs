@@ -1,4 +1,5 @@
 using System;
+using GoingCooperative.Core;
 
 namespace GoingCooperative.Plugin.BepInEx
 {
@@ -36,6 +37,9 @@ namespace GoingCooperative.Plugin.BepInEx
         public string SessionName { get; set; } = Environment.UserName + "'s Settlement";
 
         public string DirectSessionCode { get; set; } = string.Empty;
+
+        public int RequestedPlayerLimit { get; set; } =
+            MultiplayerPeerLimits.StableTargetPlayers;
 
         public string StatusMessage { get; set; } = "Choose Host or Join to begin.";
 
