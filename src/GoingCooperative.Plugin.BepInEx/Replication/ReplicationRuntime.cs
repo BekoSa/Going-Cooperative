@@ -19,6 +19,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationRuntimeStartAttempted;
         private static bool replicationRemoteHelloReceived;
         private static bool replicationRemoteCompatibilityRefused;
+        private static readonly HashSet<string> ReplicationCompatiblePeerIds =
+            new HashSet<string>(StringComparer.Ordinal);
         private static string replicationLocalBuildHash = string.Empty;
         private static string replicationGameAssemblyModuleVersionId = string.Empty;
         private static float replicationNextHelloRealtime;
@@ -272,6 +274,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationRuntimeStartAttempted = false;
             replicationRemoteHelloReceived = false;
             replicationRemoteCompatibilityRefused = false;
+            ReplicationCompatiblePeerIds.Clear();
             replicationLocalBuildHash = string.Empty;
             ResetReplicationCombatRuntimeState();
             ResetReplicationMedicalV1State();
@@ -603,17 +606,80 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void HandleReplicationHello(TransportEnvelope envelope)
         {
-            if (!ReplicationPayloadCodec.TryReadHello(envelope, out var hello, out var error) || hello == null)
+            if (!ReplicationPayloadCodec.TryReadHello(
+                    envelope,
+                    out var hello,
+                    out var error)
+                || hello == null)
             {
-                LogReplicationWarning("Going Cooperative replication hello decode failed error=" + error);
+                LogReplicationWarning(
+                    "Going Cooperative replication hello decode failed error="
+                    + error);
                 return;
             }
 
-            if (!IsReplicationHelloCompatible(hello, out var compatibilityError))
+            if (!string.Equals(
+                    envelope.SenderId,
+                    hello.PeerId,
+                    StringComparison.Ordinal))
             {
-                replicationRemoteHelloReceived = false;
-                replicationRemoteCompatibilityRefused = true;
-                LogReplicationWarning("Going Cooperative replication hello refused peer="
+                LogReplicationWarning(
+                    "[MP/SESSION] hello sender mismatch envelope="
+                    + envelope.SenderId
+                    + " payload="
+                    + hello.PeerId);
+                if (replicationConfigHostMode)
+                {
+                    replicationTransport?.RemovePeer(envelope.SenderId);
+                }
+                return;
+            }
+
+            var identityValid = replicationConfigHostMode
+                ? string.Equals(hello.Mode, "client", StringComparison.Ordinal)
+                    && MultiplayerPeerIds.TryParseClientSlot(
+                        hello.PeerId,
+                        out _)
+                : string.Equals(hello.Mode, "host", StringComparison.Ordinal)
+                    && string.Equals(
+                        hello.PeerId,
+                        ReplicationHostPeerId,
+                        StringComparison.Ordinal);
+            if (!identityValid)
+            {
+                LogReplicationWarning(
+                    "[MP/SESSION] hello identity refused peer="
+                    + hello.PeerId
+                    + " mode="
+                    + hello.Mode);
+                if (replicationConfigHostMode)
+                {
+                    replicationTransport?.RemovePeer(hello.PeerId);
+                }
+                return;
+            }
+
+            if (!IsReplicationHelloCompatible(
+                    hello,
+                    out var compatibilityError))
+            {
+                if (replicationConfigHostMode)
+                {
+                    ReplicationCompatiblePeerIds.Remove(hello.PeerId);
+                    replicationRemoteHelloReceived =
+                        ReplicationCompatiblePeerIds.Count > 0;
+                    replicationTransport?.RemovePeer(hello.PeerId);
+                }
+                else
+                {
+                    ReplicationCompatiblePeerIds.Clear();
+                    replicationRemoteHelloReceived = false;
+                }
+
+                replicationRemoteCompatibilityRefused =
+                    !replicationRemoteHelloReceived;
+                LogReplicationWarning(
+                    "Going Cooperative replication hello refused peer="
                     + hello.PeerId
                     + " mode="
                     + hello.Mode
@@ -630,13 +696,25 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            var firstCompatibleHello = !replicationRemoteHelloReceived;
+            var newlyCompatible =
+                ReplicationCompatiblePeerIds.Add(hello.PeerId);
             replicationRemoteCompatibilityRefused = false;
-            replicationRemoteHelloReceived = true;
-            replicationRemoteDisplayName =
-                MultiplayerNickname.Normalize(hello.DisplayName);
-            replicationTransport?.EnableBinarySecurityData();
-            if (firstCompatibleHello)
+            replicationRemoteHelloReceived =
+                ReplicationCompatiblePeerIds.Count > 0;
+            SetReplicationRemotePeerDisplayName(
+                hello.PeerId,
+                hello.DisplayName);
+            if (replicationConfigHostMode)
+            {
+                replicationTransport?.EnableBinarySecurityData(
+                    hello.PeerId);
+            }
+            else
+            {
+                replicationTransport?.EnableBinarySecurityData();
+            }
+
+            if (newlyCompatible)
             {
                 replicationNextAnimalAppearanceSnapshotRealtime = 0f;
                 replicationNextEventCheckpointRealtime = 0f;
@@ -646,26 +724,37 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationLastWeatherEnvironmentSignature = string.Empty;
                 if (replicationConfigHostMode)
                 {
+                    // Baselines are absolute/idempotent. Broadcasting them is safe and
+                    // ensures a newly joined peer is not dependent on an old session's
+                    // baseline timing.
                     QueueReplicationStoragePolicyBaseline();
                     QueueReplicationResourceStateV2Baseline();
                 }
             }
+
             replicationHellosReceived++;
-            if (replicationHellosReceived == 1 || Time.realtimeSinceStartup >= replicationNextHelloLogRealtime)
+            if (replicationHellosReceived == 1
+                || newlyCompatible
+                || Time.realtimeSinceStartup
+                    >= replicationNextHelloLogRealtime)
             {
-                replicationNextHelloLogRealtime = Time.realtimeSinceStartup + 30f;
-                LogReplicationInfo("Going Cooperative replication hello received peer="
+                replicationNextHelloLogRealtime =
+                    Time.realtimeSinceStartup + 30f;
+                LogReplicationInfo(
+                    "[MP/SESSION] hello compatible peer="
                     + hello.PeerId
                     + " nickname="
-                    + replicationRemoteDisplayName
+                    + MultiplayerNickname.Normalize(hello.DisplayName)
                     + " mode="
                     + hello.Mode
                     + " protocol="
                     + hello.ProtocolVersion
-                    + " buildHash="
-                    + hello.BuildHash
+                    + " peers="
+                    + ReplicationCompatiblePeerIds.Count.ToString(
+                        CultureInfo.InvariantCulture)
                     + " count="
-                    + replicationHellosReceived.ToString(CultureInfo.InvariantCulture));
+                    + replicationHellosReceived.ToString(
+                        CultureInfo.InvariantCulture));
             }
         }
 
@@ -1537,6 +1626,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationLastIntentSummary = "ignored-nonhost " + FormatRuntimeCommandSummary(command);
                 LogReplicationWarning("Going Cooperative replication intent ignored on non-host "
                     + FormatRuntimeCommandSummary(command));
+                return;
+            }
+
+            if (!MultiplayerPeerIds.TryParseClientSlot(
+                    envelope.SenderId,
+                    out _)
+                || !string.Equals(
+                    envelope.SenderId,
+                    command.PlayerId,
+                    StringComparison.Ordinal)
+                || !ReplicationCompatiblePeerIds.Contains(
+                    envelope.SenderId))
+            {
+                replicationLastIntentSummary =
+                    "rejected-sender peer="
+                    + envelope.SenderId
+                    + " commandPlayer="
+                    + command.PlayerId;
+                LogReplicationWarning(
+                    "[MP/CMD] intent sender rejected "
+                    + replicationLastIntentSummary);
                 return;
             }
 
