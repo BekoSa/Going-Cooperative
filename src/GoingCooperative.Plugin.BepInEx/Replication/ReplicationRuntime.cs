@@ -21,6 +21,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationRemoteCompatibilityRefused;
         private static readonly HashSet<string> ReplicationCompatiblePeerIds =
             new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, ReplicationHello>
+            ReplicationCompatiblePeerHellos =
+                new Dictionary<string, ReplicationHello>(StringComparer.Ordinal);
         private static string replicationLocalBuildHash = string.Empty;
         private static string replicationGameAssemblyModuleVersionId = string.Empty;
         private static float replicationNextHelloRealtime;
@@ -275,6 +278,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationRemoteHelloReceived = false;
             replicationRemoteCompatibilityRefused = false;
             ReplicationCompatiblePeerIds.Clear();
+            ReplicationCompatiblePeerHellos.Clear();
             replicationLocalBuildHash = string.Empty;
             ResetReplicationCombatRuntimeState();
             ResetReplicationMedicalV1State();
@@ -635,16 +639,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var remoteIsClient =
+                string.Equals(hello.Mode, "client", StringComparison.Ordinal)
+                && MultiplayerPeerIds.TryParseClientSlot(
+                    hello.PeerId,
+                    out _);
+            var remoteIsHost =
+                string.Equals(hello.Mode, "host", StringComparison.Ordinal)
+                && string.Equals(
+                    hello.PeerId,
+                    ReplicationHostPeerId,
+                    StringComparison.Ordinal);
+            var peerAnnouncement =
+                !replicationConfigHostMode
+                && remoteIsClient
+                && !string.Equals(
+                    hello.PeerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal);
             var identityValid = replicationConfigHostMode
-                ? string.Equals(hello.Mode, "client", StringComparison.Ordinal)
-                    && MultiplayerPeerIds.TryParseClientSlot(
-                        hello.PeerId,
-                        out _)
-                : string.Equals(hello.Mode, "host", StringComparison.Ordinal)
-                    && string.Equals(
-                        hello.PeerId,
-                        ReplicationHostPeerId,
-                        StringComparison.Ordinal);
+                ? remoteIsClient
+                : remoteIsHost || peerAnnouncement;
             if (!identityValid)
             {
                 LogReplicationWarning(
@@ -666,13 +681,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (replicationConfigHostMode)
                 {
                     ReplicationCompatiblePeerIds.Remove(hello.PeerId);
+                    ReplicationCompatiblePeerHellos.Remove(hello.PeerId);
                     replicationRemoteHelloReceived =
                         ReplicationCompatiblePeerIds.Count > 0;
                     replicationTransport?.RemovePeer(hello.PeerId);
                 }
-                else
+                else if (!peerAnnouncement)
                 {
                     ReplicationCompatiblePeerIds.Clear();
+                    ReplicationCompatiblePeerHellos.Clear();
                     replicationRemoteHelloReceived = false;
                 }
 
@@ -696,11 +713,36 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (peerAnnouncement)
+            {
+                ReplicationCompatiblePeerIds.Add(hello.PeerId);
+                ReplicationCompatiblePeerHellos[hello.PeerId] = hello;
+                SetReplicationRemotePeerDisplayName(
+                    hello.PeerId,
+                    hello.DisplayName);
+                LogReplicationInfo(
+                    "[MP/SESSION] peer announced peer="
+                    + hello.PeerId
+                    + " nickname="
+                    + MultiplayerNickname.Normalize(hello.DisplayName));
+                return;
+            }
+
             var newlyCompatible =
                 ReplicationCompatiblePeerIds.Add(hello.PeerId);
+            ReplicationCompatiblePeerHellos[hello.PeerId] = hello;
             replicationRemoteCompatibilityRefused = false;
             replicationRemoteHelloReceived =
-                ReplicationCompatiblePeerIds.Count > 0;
+                ReplicationCompatiblePeerIds.Contains(
+                    replicationConfigHostMode
+                        ? hello.PeerId
+                        : ReplicationHostPeerId);
+            if (replicationConfigHostMode)
+            {
+                replicationRemoteHelloReceived =
+                    ReplicationCompatiblePeerIds.Count > 0;
+            }
+
             SetReplicationRemotePeerDisplayName(
                 hello.PeerId,
                 hello.DisplayName);
@@ -724,11 +766,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationLastWeatherEnvironmentSignature = string.Empty;
                 if (replicationConfigHostMode)
                 {
-                    // Baselines are absolute/idempotent. Broadcasting them is safe and
-                    // ensures a newly joined peer is not dependent on an old session's
-                    // baseline timing.
                     QueueReplicationStoragePolicyBaseline();
                     QueueReplicationResourceStateV2Baseline();
+                    AnnounceReplicationPeersToNewClient(
+                        hello.PeerId,
+                        envelope);
                 }
             }
 
@@ -755,6 +797,57 @@ namespace GoingCooperative.Plugin.BepInEx
                     + " count="
                     + replicationHellosReceived.ToString(
                         CultureInfo.InvariantCulture));
+            }
+        }
+
+        private void AnnounceReplicationPeersToNewClient(
+            string newPeerId,
+            TransportEnvelope newPeerHelloEnvelope)
+        {
+            if (!replicationConfigHostMode
+                || replicationTransport == null)
+            {
+                return;
+            }
+
+            try
+            {
+                // Existing players learn about the newcomer.
+                replicationTransport.SendToAllExcept(
+                    newPeerId,
+                    newPeerHelloEnvelope);
+
+                // The newcomer learns display names/IDs of existing clients.
+                foreach (var pair in ReplicationCompatiblePeerHellos)
+                {
+                    if (string.Equals(
+                            pair.Key,
+                            newPeerId,
+                            StringComparison.Ordinal)
+                        || string.Equals(
+                            pair.Key,
+                            ReplicationHostPeerId,
+                            StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    replicationTransport.SendToPeer(
+                        newPeerId,
+                        ReplicationPayloadCodec.ForHello(
+                            pair.Key,
+                            pair.Value));
+                }
+            }
+            catch (Exception ex)
+            {
+                LogReplicationWarning(
+                    "[MP/SESSION] peer announcement failed peer="
+                    + newPeerId
+                    + " error="
+                    + ex.GetType().Name
+                    + ":"
+                    + ex.Message);
             }
         }
 
