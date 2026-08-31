@@ -13,7 +13,7 @@ namespace GoingCooperative.Core
         public const string UdpData = "GCOOP-AUTH-D1";
         private static readonly byte[] TcpMagic = Encoding.ASCII.GetBytes("GCOOP-TCP-AUTH-1");
 
-        private const string ShortSessionAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+        private const string ShortSessionAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
         private const int ShortSessionCodeLength = 12;
 
         public static string GenerateSessionCode()
@@ -88,7 +88,10 @@ namespace GoingCooperative.Core
                 .Replace("-", string.Empty)
                 .Replace(" ", string.Empty)
                 .Trim()
-                .ToUpperInvariant();
+                .ToUpperInvariant()
+                .Replace('O', '0')
+                .Replace('I', '1')
+                .Replace('L', '1');
         }
 
         private static bool IsLegacyHexCode(string value)
