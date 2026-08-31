@@ -585,7 +585,7 @@ namespace GoingCooperative.Plugin.BepInEx
             try
             {
                 var mode = replicationConfigHostMode ? "host" : "client";
-                var peerId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var peerId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 replicationTransport.Send(ReplicationPayloadCodec.ForHello(
                     peerId,
                     new ReplicationHello(
@@ -1279,7 +1279,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 + "-"
                 + (++replicationResyncControlSequence).ToString(CultureInfo.InvariantCulture);
             SendReplicationResyncControl(
-                ReplicationClientPeerId,
+                GetReplicationLocalPeerId(),
                 "Request",
                 requestId,
                 string.Empty,
@@ -1483,7 +1483,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
-                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(ReplicationClientPeerId, intent));
+                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(GetReplicationLocalPeerId(), intent));
                 replicationProofIntentSent = true;
                 replicationIntentsSent++;
                 replicationLastIntentSummary = "sent " + FormatRuntimeCommandSummary(intent.Command);
@@ -1509,7 +1509,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(replicationConfigProofIntent, "speed", StringComparison.OrdinalIgnoreCase))
             {
                 intent = new ReplicationCommandIntent(new LockstepCommand(
-                    ReplicationClientPeerId,
+                    GetReplicationLocalPeerId(),
                     ++replicationIntentSequence,
                     0L,
                     CommandKind.Speed,
