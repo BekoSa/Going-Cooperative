@@ -194,7 +194,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static int replicationConfigProofIntentDelaySeconds = 5;
         private static int replicationConfigWorldObjectDeltaApplyBudgetPerFrame = 12;
         private static int replicationConfigWorldObjectDeltaApplyQueueMax = 2048;
-        private static float replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = 8f;
+        private static float replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = 2f;
 
         private static void TryLoadReplicationConfig(GoingCooperativePlugin current)
         {
