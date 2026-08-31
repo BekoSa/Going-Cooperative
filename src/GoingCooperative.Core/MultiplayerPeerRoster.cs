@@ -13,6 +13,59 @@ namespace GoingCooperative.Core
         public const int ExperimentalMaximumPlayers = 8;
     }
 
+    public static class MultiplayerNickname
+    {
+        public const int MaxLength = 24;
+        public const string DefaultNickname = "Player";
+
+        public static string Normalize(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return DefaultNickname;
+            }
+
+            var buffer = new char[Math.Min(value.Length, MaxLength)];
+            var length = 0;
+            var previousWhitespace = false;
+            for (var i = 0; i < value.Length && length < buffer.Length; i++)
+            {
+                var character = value[i];
+                if (char.IsControl(character))
+                {
+                    continue;
+                }
+
+                if (char.IsWhiteSpace(character))
+                {
+                    if (length == 0 || previousWhitespace)
+                    {
+                        continue;
+                    }
+
+                    buffer[length++] = ' ';
+                    previousWhitespace = true;
+                    continue;
+                }
+
+                buffer[length++] = character;
+                previousWhitespace = false;
+            }
+
+            while (length > 0 && buffer[length - 1] == ' ')
+            {
+                length--;
+            }
+
+            if (length == 0)
+            {
+                return DefaultNickname;
+            }
+
+            return new string(buffer, 0, length);
+        }
+    }
+
     public static class MultiplayerPeerIds
     {
         public const string Host = "host";
