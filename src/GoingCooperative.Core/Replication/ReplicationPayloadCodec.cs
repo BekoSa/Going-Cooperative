@@ -7,9 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // REPL-5 moves Direct transport encode/auth/receive/send off the Unity main
-        // thread, adds coalesced presence state, and negotiates the client-action registry.
-        public const string ProtocolVersion = "GCOOP-REPL-5";
+        // REPL-6 adds stable peer display names for multi-peer UI/presence while
+        // retaining technical peer IDs for authority, ACKs and resync addressing.
+        public const string ProtocolVersion = "GCOOP-REPL-6";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
@@ -28,7 +28,8 @@ namespace GoingCooperative.Core.Replication
                     EncodeText(hello.PeerId),
                     EncodeText(hello.Mode),
                     EncodeText(hello.ProtocolVersion),
-                    EncodeText(hello.BuildHash)
+                    EncodeText(hello.BuildHash),
+                    EncodeText(hello.DisplayName)
                 }));
         }
 
@@ -44,9 +45,9 @@ namespace GoingCooperative.Core.Replication
             }
 
             var parts = envelope.Payload.Split(new[] { '|' }, StringSplitOptions.None);
-            if (parts.Length != 5)
+            if (parts.Length != 6)
             {
-                error = "expected hello payload with 5 fields";
+                error = "expected hello payload with 6 fields";
                 return false;
             }
 
@@ -54,12 +55,18 @@ namespace GoingCooperative.Core.Replication
                 || !TryDecodeText(parts[1], out var peerId, out error)
                 || !TryDecodeText(parts[2], out var mode, out error)
                 || !TryDecodeText(parts[3], out var protocolVersion, out error)
-                || !TryDecodeText(parts[4], out var buildHash, out error))
+                || !TryDecodeText(parts[4], out var buildHash, out error)
+                || !TryDecodeText(parts[5], out var displayName, out error))
             {
                 return false;
             }
 
-            hello = new ReplicationHello(peerId, mode, protocolVersion, buildHash);
+            hello = new ReplicationHello(
+                peerId,
+                mode,
+                protocolVersion,
+                buildHash,
+                displayName);
             return true;
         }
 
