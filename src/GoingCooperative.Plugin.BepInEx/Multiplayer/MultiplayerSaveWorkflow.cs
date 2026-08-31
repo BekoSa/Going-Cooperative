@@ -112,6 +112,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
                 else
                 {
+                    SetReplicationLocalPeerId(MultiplayerPeerIds.Host);
                     replicationConfigEnabled = true;
                     TryStartReplicationRuntime();
                     detail = "Hosting the current world. Players may join at any time.";
@@ -195,6 +196,10 @@ namespace GoingCooperative.Plugin.BepInEx
             if (multiplayerSaveTransfer.ResumeGeneration > multiplayerHandledResumeGeneration)
             {
                 multiplayerHandledResumeGeneration = multiplayerSaveTransfer.ResumeGeneration;
+                if (!replicationConfigHostMode)
+                {
+                    SetReplicationLocalPeerId(multiplayerSaveTransfer.AssignedPeerId);
+                }
                 replicationConfigEnabled = true;
                 TryStartReplicationRuntime();
                 LogReplicationInfo("Going Cooperative replication resumed epoch="
