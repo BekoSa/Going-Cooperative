@@ -129,9 +129,10 @@ namespace GoingCooperative.Core
             }
 
             PeerId = peerId.Trim();
-            DisplayName = string.IsNullOrWhiteSpace(displayName)
-                ? PeerId
-                : displayName.Trim();
+            DisplayName = MultiplayerNickname.Normalize(
+                string.IsNullOrWhiteSpace(displayName)
+                    ? PeerId
+                    : displayName);
             IsHost = isHost;
             Connected = connected;
         }
