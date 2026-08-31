@@ -43,7 +43,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " coalescedTx=" + replicationTransport.OutgoingCoalescedStateReplacements.ToString(CultureInfo.InvariantCulture)
                 + " sendFailures=" + replicationTransport.SendFailures.ToString(CultureInfo.InvariantCulture)
                 + " sparseSent=" + replicationSparseTransformRowsSent.ToString(CultureInfo.InvariantCulture)
-                + " sparseSuppressed=" + replicationSparseTransformRowsSuppressed.ToString(CultureInfo.InvariantCulture));
+                + " sparseSuppressed=" + replicationSparseTransformRowsSuppressed.ToString(CultureInfo.InvariantCulture)
+                + " sparsePrefiltered=" + replicationSparseTransformRowsPrefiltered.ToString(CultureInfo.InvariantCulture)
+                + " idlePresentationSkipped=" + replicationPresentationIdleTracksSkipped.ToString(CultureInfo.InvariantCulture));
 
             replicationLastPerfDatagramsSent = txd;
             replicationLastPerfDatagramsReceived = rxd;
