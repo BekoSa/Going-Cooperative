@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using GoingCooperative.Core;
 using NSMedieval;
 using NSMedieval.Managers;
 using NSMedieval.Controllers;
@@ -70,19 +71,59 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private bool StartMultiplayerSaveHost(int port, out string detail)
         {
-            var save = GetSelectedMultiplayerSave();
-            if (save == null) { detail = "No local save is available to host."; return false; }
             try
             {
                 multiplayerLoadInvoked = false;
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
-                multiplayerHostCheckpointToLoad = save;
-                multiplayerSaveTransfer.StartHost(port, save, replicationDirectSecurityActive, replicationDirectSessionCode);
-                detail = "Waiting for Connections. Selected load: " + save.VillageName + " / " + save.FileName;
+
+                VillageSaveInfo? save = null;
+                if (multiplayerMainMenuActive)
+                {
+                    save = GetSelectedMultiplayerSave();
+                    if (save == null)
+                    {
+                        detail = "No local save is available to host.";
+                        return false;
+                    }
+
+                    multiplayerHostCheckpointToLoad = save;
+                }
+                else
+                {
+                    multiplayerHostCheckpointToLoad = null;
+                }
+
+                multiplayerSaveTransfer.StartHost(
+                    port,
+                    replicationDirectSecurityActive,
+                    replicationDirectSessionCode,
+                    MultiplayerMenu.Nickname,
+                    MultiplayerMenu.RequestedPlayerLimit);
+
+                if (save != null)
+                {
+                    multiplayerSaveTransfer.BeginHostWorldLoad();
+                    detail = "Hosting started. Loading "
+                        + save.VillageName
+                        + " / "
+                        + save.FileName
+                        + "; players may connect while the host world loads.";
+                }
+                else
+                {
+                    replicationConfigEnabled = true;
+                    TryStartReplicationRuntime();
+                    detail = "Hosting the current world. Players may join at any time.";
+                }
+
                 return true;
             }
-            catch (Exception ex) { detail = "Save host failed: " + ex.Message; return false; }
+            catch (Exception ex)
+            {
+                detail = "Save host failed: " + ex.Message;
+                return false;
+            }
         }
 
         private bool StartMultiplayerSaveClient(string host, int port, out string detail)
@@ -93,22 +134,17 @@ namespace GoingCooperative.Plugin.BepInEx
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
                 var saveRoot = Path.Combine(Application.persistentDataPath, "VillageSaves");
-                multiplayerSaveTransfer.StartClient(host, port, saveRoot, replicationDirectSecurityActive, replicationDirectSessionCode);
-                detail = "Connecting and waiting to receive the host load.";
+                multiplayerSaveTransfer.StartClient(
+                    host,
+                    port,
+                    saveRoot,
+                    replicationDirectSecurityActive,
+                    replicationDirectSessionCode,
+                    MultiplayerMenu.Nickname);
+                detail = "Connecting. The host will send a current-world checkpoint automatically.";
                 return true;
             }
             catch (Exception ex) { detail = "Save connection failed: " + ex.Message; return false; }
-        }
-
-        private void MarkMultiplayerReadyToPlay()
-        {
-            if (!multiplayerSaveTransfer.TransferComplete)
-            {
-                MultiplayerMenu.StatusMessage = "Play is available after the load is transferred and verified.";
-                return;
-            }
-            multiplayerSaveTransfer.MarkReadyToPlay();
-            MultiplayerMenu.StatusMessage = multiplayerSaveTransfer.Detail;
         }
 
         private void UpdateMultiplayerSaveWorkflow()
@@ -141,9 +177,19 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 OnMultiplayerNativeLoadFailed("Timed out after 180 seconds.");
             }
-            if (replicationConfigHostMode && multiplayerSaveTransfer.ResyncCaptureRequested && !multiplayerResyncCaptureInProgress)
+            if (replicationConfigHostMode
+                && !multiplayerResyncCaptureInProgress
+                && !multiplayerLoadingInProgress
+                && replicationRuntimeStarted)
             {
-                CaptureAndQueueMultiplayerResync();
+                if (multiplayerSaveTransfer.TryDequeueJoinCapture(out var joinPeerId))
+                {
+                    CaptureAndQueueMultiplayerJoin(joinPeerId);
+                }
+                else if (multiplayerSaveTransfer.TryDequeueResyncCapture(out var resyncPeerId))
+                {
+                    CaptureAndQueueMultiplayerResync(resyncPeerId);
+                }
             }
 
             if (multiplayerSaveTransfer.ResumeGeneration > multiplayerHandledResumeGeneration)
@@ -151,12 +197,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 multiplayerHandledResumeGeneration = multiplayerSaveTransfer.ResumeGeneration;
                 replicationConfigEnabled = true;
                 TryStartReplicationRuntime();
-                if (replicationConfigHostMode)
-                {
-                    TryInvokeStoredGameSpeedManagerMethod("SetSpeedNormal", out var resumeDetail);
-                    LogReplicationInfo("Going Cooperative host simulation resumed detail=" + resumeDetail);
-                }
-                LogReplicationInfo("Going Cooperative replication resumed epoch=" + multiplayerSaveTransfer.Epoch);
+                LogReplicationInfo("Going Cooperative replication resumed epoch="
+                    + multiplayerSaveTransfer.Epoch
+                    + " peer="
+                    + multiplayerSaveTransfer.AssignedPeerId);
             }
 
             if (multiplayerSaveTransfer.LoadGeneration <= multiplayerHandledLoadGeneration || multiplayerLoadInvoked) return;
@@ -258,31 +302,126 @@ namespace GoingCooperative.Plugin.BepInEx
             LogReplicationWarning(MultiplayerMenu.StatusMessage);
         }
 
-        private void CaptureAndQueueMultiplayerResync()
+        private void CaptureAndQueueMultiplayerJoin(string peerId)
         {
             multiplayerResyncCaptureInProgress = true;
+            var paused = false;
             try
             {
                 if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
-                    throw new InvalidOperationException("Trader abort cleanup is incomplete before checkpoint: " + abortFlushDetail);
-                replicationConfigEnabled = false;
-                StopReplicationRuntime(ReplicationTraderPartyResetContext.WorldReloadPending);
-                TryInvokeStoredGameSpeedManagerMethod("SetSpeedPause", out var pauseDetail);
-                var filename = "GoingCooperative_Resync_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
-                var checkpoint = GlobalSaveController.Instance.SaveCurrentVillage(filename);
-                if (checkpoint == null) throw new InvalidOperationException("Going Medieval did not create the resync checkpoint.");
-                multiplayerHostCheckpointToLoad = checkpoint;
-                LogReplicationInfo("Going Cooperative full resync checkpoint created path=" + checkpoint.FilePath + " pause=" + pauseDetail);
-                multiplayerSaveTransfer.QueueResyncCheckpoint(checkpoint);
+                {
+                    throw new InvalidOperationException(
+                        "Trader abort cleanup is incomplete before join checkpoint: "
+                        + abortFlushDetail);
+                }
+
+                paused = TryInvokeStoredGameSpeedManagerMethod(
+                    "SetSpeedPause",
+                    out var pauseDetail);
+                var filename = "GoingCooperative_Join_"
+                    + peerId.Replace("-", "_")
+                    + "_"
+                    + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+                var checkpoint =
+                    GlobalSaveController.Instance.SaveCurrentVillage(filename);
+                if (checkpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "Going Medieval did not create the join checkpoint.");
+                }
+
+                LogReplicationInfo("[MP/SAVE] join checkpoint created peer="
+                    + peerId
+                    + " path="
+                    + checkpoint.FilePath
+                    + " pause="
+                    + pauseDetail);
+                multiplayerSaveTransfer.QueueJoinCheckpoint(peerId, checkpoint);
             }
             catch (Exception ex)
             {
-                MultiplayerMenu.StatusMessage = "Full resync capture failed: " + FormatReflectionExceptionDetail(ex);
-                LogReplicationWarning(MultiplayerMenu.StatusMessage);
-                multiplayerSaveTransfer.RejectResync(MultiplayerMenu.StatusMessage);
+                var reason = "Join checkpoint capture failed: "
+                    + FormatReflectionExceptionDetail(ex);
+                MultiplayerMenu.StatusMessage = reason;
+                LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
+                multiplayerSaveTransfer.RejectJoin(peerId, reason);
             }
             finally
             {
+                if (paused)
+                {
+                    TryInvokeStoredGameSpeedManagerMethod(
+                        "SetSpeedNormal",
+                        out var resumeDetail);
+                    LogReplicationInfo("[MP/SAVE] host resumed after join checkpoint peer="
+                        + peerId
+                        + " detail="
+                        + resumeDetail);
+                }
+
+                multiplayerResyncCaptureInProgress = false;
+            }
+        }
+
+        private void CaptureAndQueueMultiplayerResync(string peerId)
+        {
+            multiplayerResyncCaptureInProgress = true;
+            var paused = false;
+            try
+            {
+                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Trader abort cleanup is incomplete before checkpoint: "
+                        + abortFlushDetail);
+                }
+
+                paused = TryInvokeStoredGameSpeedManagerMethod(
+                    "SetSpeedPause",
+                    out var pauseDetail);
+                var filename = "GoingCooperative_Resync_"
+                    + peerId.Replace("-", "_")
+                    + "_"
+                    + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+                var checkpoint =
+                    GlobalSaveController.Instance.SaveCurrentVillage(filename);
+                if (checkpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "Going Medieval did not create the resync checkpoint.");
+                }
+
+                LogReplicationInfo("[MP/SAVE] targeted resync checkpoint created peer="
+                    + peerId
+                    + " path="
+                    + checkpoint.FilePath
+                    + " pause="
+                    + pauseDetail);
+                multiplayerSaveTransfer.QueueResyncCheckpoint(
+                    peerId,
+                    checkpoint);
+            }
+            catch (Exception ex)
+            {
+                var reason = "Full resync capture failed: "
+                    + FormatReflectionExceptionDetail(ex);
+                MultiplayerMenu.StatusMessage = reason;
+                LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
+                multiplayerSaveTransfer.RejectResync(peerId, reason);
+            }
+            finally
+            {
+                if (paused)
+                {
+                    TryInvokeStoredGameSpeedManagerMethod(
+                        "SetSpeedNormal",
+                        out var resumeDetail);
+                    LogReplicationInfo("[MP/SAVE] host resumed after resync checkpoint peer="
+                        + peerId
+                        + " detail="
+                        + resumeDetail);
+                }
+
                 multiplayerResyncCaptureInProgress = false;
             }
         }
