@@ -13,7 +13,7 @@ $compiler = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot "sdk") -Recurse -F
 if ([string]::IsNullOrWhiteSpace($GameRoot)) {
     $legacyManaged = Join-Path (Split-Path -Parent $repositoryRoot) "Going Medieval_Data\Managed"
     if (-not (Test-Path -LiteralPath $legacyManaged -PathType Container)) {
-        throw "Going Medieval managed assemblies were not found. Pass -GameRoot, for example: -GameRoot \"C:\GOG Games\Going Medieval\""
+        throw 'Going Medieval managed assemblies were not found. Pass -GameRoot, for example: -GameRoot "C:\GOG Games\Going Medieval"'
     }
 
     $managed = $legacyManaged
