@@ -389,7 +389,10 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Preflight", "Share this address: " + GetMultiplayerLanAddressSummary() + ":" + MultiplayerMenu.PortText
                 + "\nPlugin " + GoingCooperativeConstants.Version + "  ·  Protocol " + GetMultiplayerProtocolLabel()
-                + "\nThe selected load will be checksummed, transferred, verified, and staged separately on the client.", 14, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.27f), new Vector2(0.92f, 0.42f));
+                + "\nPlayers: current runtime " + MultiplayerPeerLimits.CurrentDirectRuntimePlayers.ToString(CultureInfo.InvariantCulture)
+                + " · target " + MultiplayerPeerLimits.StableTargetPlayers.ToString(CultureInfo.InvariantCulture)
+                + " · experimental max " + MultiplayerPeerLimits.ExperimentalMaximumPlayers.ToString(CultureInfo.InvariantCulture)
+                + "\nThe selected load will be checksummed, transferred, verified, and staged separately on each client.", 14, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.25f), new Vector2(0.92f, 0.43f));
             var start = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Start", "HOST", StartMultiplayerCanvasHost, MultiplayerCanvasAccent);
             SetMultiplayerCanvasRect(start.GetComponent<RectTransform>(), new Vector2(0.08f, 0.17f), new Vector2(0.34f, 0.26f), Vector2.zero, Vector2.zero);
             CreateMultiplayerTransferProgressUi(0.04f, 0.14f);
@@ -416,7 +419,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private void BuildMultiplayerCanvasStatusPage()
         {
             CreateMultiplayerCanvasHeading("Session Status", "Live replication and compatibility state.");
-            var status = "Connection\nRole\nEndpoint\nProtocol\nPlugin\nHandshake";
+            var status = "Connection\nRole\nEndpoint\nPlayers\nProtocol\nPlugin\nHandshake";
             CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Labels", status, 15, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.33f), new Vector2(0.3f, 0.72f));
             multiplayerCanvasStatusValuesText = CreateMultiplayerCanvasText(multiplayerCanvasContent.transform, "Values", BuildMultiplayerCanvasStatusValues(), 15, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasText, new Vector2(0.31f, 0.33f), new Vector2(0.92f, 0.72f));
             var disconnect = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Disconnect", "DISCONNECT", () => { StopMultiplayerSession(); ShowMultiplayerCanvasPage(MultiplayerMenuPage.Status); }, MultiplayerCanvasCard);
@@ -795,6 +798,8 @@ namespace GoingCooperative.Plugin.BepInEx
             return GetMultiplayerConnectionLabel() + "\n"
                 + (replicationConfigHostMode ? "Host" : "Client") + "\n"
                 + replicationConfigHost + ":" + replicationConfigPort.ToString(CultureInfo.InvariantCulture) + "\n"
+                + "1/" + MultiplayerPeerLimits.CurrentDirectRuntimePlayers.ToString(CultureInfo.InvariantCulture)
+                + " runtime · 4 target · 8 experimental" + "\n"
                 + GetMultiplayerProtocolLabel() + "\n"
                 + GoingCooperativeConstants.Version + "\n"
                 + (replicationRemoteHelloReceived
