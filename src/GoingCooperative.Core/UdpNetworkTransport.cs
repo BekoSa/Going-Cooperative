@@ -932,10 +932,19 @@ namespace GoingCooperative.Core
             Dictionary<string, TransportEnvelope> states,
             out TransportEnvelope envelope)
         {
+            string? selectedKey = null;
+            TransportEnvelope? selected = null;
             foreach (var pair in states)
             {
-                envelope = pair.Value;
-                states.Remove(pair.Key);
+                selectedKey = pair.Key;
+                selected = pair.Value;
+                break;
+            }
+
+            if (selectedKey != null && selected != null)
+            {
+                states.Remove(selectedKey);
+                envelope = selected;
                 return true;
             }
 
