@@ -13,6 +13,55 @@ namespace GoingCooperative.Core
         public const int ExperimentalMaximumPlayers = 8;
     }
 
+    public static class MultiplayerPeerIds
+    {
+        public const string Host = "host";
+
+        public static string Client(int slot)
+        {
+            if (slot < 1
+                || slot >= MultiplayerPeerLimits.ExperimentalMaximumPlayers)
+            {
+                throw new ArgumentOutOfRangeException(nameof(slot));
+            }
+
+            return "client-" + slot.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        public static bool TryParseClientSlot(
+            string peerId,
+            out int slot)
+        {
+            slot = 0;
+            if (string.IsNullOrWhiteSpace(peerId)
+                || !peerId.StartsWith("client-", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (!int.TryParse(
+                    peerId.Substring("client-".Length),
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out slot)
+                || slot < 1
+                || slot >= MultiplayerPeerLimits.ExperimentalMaximumPlayers)
+            {
+                slot = 0;
+                return false;
+            }
+
+            return true;
+        }
+
+        public static bool IsValid(string peerId)
+        {
+            return string.Equals(peerId, Host, StringComparison.Ordinal)
+                || TryParseClientSlot(peerId, out _);
+        }
+    }
+
     public sealed class MultiplayerPeerInfo
     {
         public MultiplayerPeerInfo(
