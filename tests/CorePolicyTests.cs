@@ -57,6 +57,30 @@ internal static class CorePolicyTests
                 "future-unknown-action"),
             "unknown custom action rejected by registry");
 
+        foreach (var field in typeof(LockstepCommandPayloads).GetFields(
+            System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.Static))
+        {
+            if (!field.IsLiteral
+                || field.FieldType != typeof(string)
+                || !field.Name.EndsWith("Action", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var action = (string)(field.GetRawConstantValue() ?? string.Empty);
+            var clientAction =
+                MultiplayerActionRegistry.IsKnownClientPayloadAction(action);
+            var hostAction =
+                MultiplayerActionRegistry.IsKnownHostPayloadAction(action);
+            Equal(true,
+                clientAction || hostAction,
+                "payload action registry classifies " + field.Name);
+            Equal(false,
+                clientAction && hostAction,
+                "payload action registry has one owner " + field.Name);
+        }
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
