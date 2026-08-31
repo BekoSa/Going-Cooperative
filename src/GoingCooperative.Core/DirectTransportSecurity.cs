@@ -13,43 +13,102 @@ namespace GoingCooperative.Core
         public const string UdpData = "GCOOP-AUTH-D1";
         private static readonly byte[] TcpMagic = Encoding.ASCII.GetBytes("GCOOP-TCP-AUTH-1");
 
+        private const string ShortSessionAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+        private const int ShortSessionCodeLength = 12;
+
         public static string GenerateSessionCode()
         {
-            var bytes = new byte[16];
-            using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(bytes);
-            return ToHex(bytes);
+            // Twelve Crockford-style base32 characters provide 60 bits of entropy.
+            // This is dramatically easier to type than the legacy 32 hex characters
+            // while remaining far beyond practical guessing for a temporary co-op
+            // session. Six decimal digits would provide only about 20 bits and would
+            // be vulnerable to offline guessing from an observed authenticated hello.
+            var random = RandomBytes(ShortSessionCodeLength);
+            var characters = new char[ShortSessionCodeLength];
+            for (var i = 0; i < characters.Length; i++)
+            {
+                characters[i] = ShortSessionAlphabet[random[i] & 31];
+            }
+
+            var normalized = new string(characters);
+            return normalized.Substring(0, 4)
+                + "-"
+                + normalized.Substring(4, 4)
+                + "-"
+                + normalized.Substring(8, 4);
         }
 
-        public static bool TryDeriveKey(string code, out byte[] key, out string error)
+        public static bool TryDeriveKey(
+            string code,
+            out byte[] key,
+            out string error)
         {
             var normalized = NormalizeCode(code);
-            if (normalized.Length != 32)
+            string domain;
+            if (normalized.Length == ShortSessionCodeLength)
+            {
+                for (var i = 0; i < normalized.Length; i++)
+                {
+                    if (ShortSessionAlphabet.IndexOf(normalized[i]) < 0)
+                    {
+                        key = new byte[0];
+                        error = "Session code contains an invalid character.";
+                        return false;
+                    }
+                }
+
+                domain = "GOING-COOPERATIVE-DIRECT-SECURITY-V2\0";
+            }
+            else if (normalized.Length == 32 && IsLegacyHexCode(normalized))
+            {
+                // Keep accepting existing v0.3.0 codes so saved/copied session
+                // credentials remain usable while both peers migrate.
+                domain = "GOING-COOPERATIVE-DIRECT-SECURITY-V1\0";
+            }
+            else
             {
                 key = new byte[0];
-                error = "Session code must be the 32-character code shown by the host.";
+                error = "Session code must be the 12-character code shown by the host.";
                 return false;
             }
-            for (var i = 0; i < normalized.Length; i++)
-            {
-                var c = normalized[i];
-                if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')))
-                {
-                    key = new byte[0];
-                    error = "Session code contains an invalid character.";
-                    return false;
-                }
-            }
+
             using (var sha = SHA256.Create())
             {
-                key = sha.ComputeHash(Encoding.UTF8.GetBytes("GOING-COOPERATIVE-DIRECT-SECURITY-V1\0" + normalized));
+                key = sha.ComputeHash(
+                    Encoding.UTF8.GetBytes(domain + normalized));
             }
+
             error = string.Empty;
             return true;
         }
 
         public static string NormalizeCode(string code)
         {
-            return (code ?? string.Empty).Replace("-", string.Empty).Replace(" ", string.Empty).Trim().ToUpperInvariant();
+            return (code ?? string.Empty)
+                .Replace("-", string.Empty)
+                .Replace(" ", string.Empty)
+                .Trim()
+                .ToUpperInvariant();
+        }
+
+        private static bool IsLegacyHexCode(string value)
+        {
+            if (value.Length != 32)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < value.Length; i++)
+            {
+                var c = value[i];
+                if (!((c >= '0' && c <= '9')
+                    || (c >= 'A' && c <= 'F')))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public static byte[] RandomBytes(int count)
@@ -59,21 +118,58 @@ namespace GoingCooperative.Core
             return bytes;
         }
 
-        public static byte[] Mac(byte[] key, string domain, params byte[][] parts)
+        public static byte[] Mac(
+            byte[] key,
+            string domain,
+            params byte[][] parts)
         {
+            // Hot UDP path: hash incrementally instead of building a MemoryStream and
+            // copying it with ToArray() for every datagram.
             using (var hmac = new HMACSHA256(key))
-            using (var memory = new MemoryStream())
             {
                 var prefix = Encoding.UTF8.GetBytes(domain);
-                memory.Write(prefix, 0, prefix.Length);
+                HashBlock(hmac, prefix, prefix.Length);
+                var lengthBytes = new byte[4];
                 for (var i = 0; i < parts.Length; i++)
                 {
-                    var part = parts[i] ?? new byte[0];
-                    WriteInt32(memory, part.Length);
-                    memory.Write(part, 0, part.Length);
+                    var part = parts[i] ?? Array.Empty<byte>();
+                    WriteInt32LittleEndian(lengthBytes, part.Length);
+                    HashBlock(hmac, lengthBytes, lengthBytes.Length);
+                    if (part.Length > 0)
+                    {
+                        HashBlock(hmac, part, part.Length);
+                    }
                 }
-                return hmac.ComputeHash(memory.ToArray());
+
+                hmac.TransformFinalBlock(
+                    Array.Empty<byte>(),
+                    0,
+                    0);
+                return hmac.Hash ?? Array.Empty<byte>();
             }
+        }
+
+        private static void HashBlock(
+            HMAC hmac,
+            byte[] data,
+            int count)
+        {
+            hmac.TransformBlock(
+                data,
+                0,
+                count,
+                data,
+                0);
+        }
+
+        private static void WriteInt32LittleEndian(
+            byte[] buffer,
+            int value)
+        {
+            buffer[0] = (byte)(value & 0xff);
+            buffer[1] = (byte)((value >> 8) & 0xff);
+            buffer[2] = (byte)((value >> 16) & 0xff);
+            buffer[3] = (byte)((value >> 24) & 0xff);
         }
 
         public static bool FixedTimeEquals(byte[] left, byte[] right)
