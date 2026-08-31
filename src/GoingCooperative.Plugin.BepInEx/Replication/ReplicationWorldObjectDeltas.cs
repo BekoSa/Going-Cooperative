@@ -2606,22 +2606,33 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReplicationWorldObjectDetailToken(result.Detail)));
         }
 
-        private bool SendReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
+        private bool SendReplicationWorldObjectDelta(
+            ReplicationWorldObjectDelta delta)
         {
             if (!replicationConfigEnabled
                 || !replicationConfigHostMode
                 || IsReplicationWorldObjectDeltaModeOff()
                 || !replicationRuntimeStarted
-                || !replicationRemoteHelloReceived
                 || replicationTransport == null
                 || ShouldSkipDuplicateReplicationWorldObjectDelta(delta))
             {
                 return false;
             }
 
+            var transient = IsTransientReplicationWorldObjectDelta(delta);
+            var requiredPeers = transient
+                ? Array.Empty<string>()
+                : multiplayerSaveTransfer
+                    .GetReplicationRequiredClientPeerIds();
+            if (!replicationRemoteHelloReceived
+                && requiredPeers.Length == 0)
+            {
+                return false;
+            }
+
             lock (ReplicationWorldObjectDeltaLock)
             {
-                if (!IsTransientReplicationWorldObjectDelta(delta))
+                if (!transient)
                 {
                     if (string.Equals(
                             delta.DeltaKind,
@@ -2636,21 +2647,26 @@ namespace GoingCooperative.Plugin.BepInEx
                             ReplicationBuildingRecoveryRequiredV2DeltaKind,
                             StringComparison.Ordinal))
                     {
-                        // Lifecycle rows are absolute, revisioned state. Once a newer
-                        // row exists for a building, retaining/retrying every older row
-                        // only amplifies packet loss into another building storm.
-                        SupersedePendingReplicationBuildingLifecycleDeltas(delta);
-                    }
-                    if (IsReplicationStoragePolicyStateDelta(delta))
-                    {
-                        SupersedePendingReplicationStoragePolicyStateDeltas(delta);
+                        SupersedePendingReplicationBuildingLifecycleDeltas(
+                            delta);
                     }
 
-                    replicationPendingWorldObjectDeltas[delta.Sequence] = new PendingReplicationWorldObjectDelta(delta);
+                    if (IsReplicationStoragePolicyStateDelta(delta))
+                    {
+                        SupersedePendingReplicationStoragePolicyStateDeltas(
+                            delta);
+                    }
+
+                    replicationPendingWorldObjectDeltas[delta.Sequence] =
+                        new PendingReplicationWorldObjectDelta(
+                            delta,
+                            requiredPeers);
                 }
             }
 
-            TrySendReplicationWorldObjectDelta(delta, isRetry: false);
+            TrySendReplicationWorldObjectDelta(
+                delta,
+                isRetry: false);
             return true;
         }
 
@@ -3685,7 +3701,9 @@ namespace GoingCooperative.Plugin.BepInEx
             return ReplicationWorldObjectDeltaRetrySeconds;
         }
 
-        private void TrySendReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta, bool isRetry)
+        private void TrySendReplicationWorldObjectDelta(
+            ReplicationWorldObjectDelta delta,
+            bool isRetry)
         {
             if (replicationTransport == null
                 || (replicationStoragePolicyFailStopped
@@ -3694,41 +3712,115 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            PendingReplicationWorldObjectDelta? pending = null;
+            string[] targets = Array.Empty<string>();
             lock (ReplicationWorldObjectDeltaLock)
             {
-                if (replicationPendingWorldObjectDeltas.TryGetValue(delta.Sequence, out var pending))
+                if (replicationPendingWorldObjectDeltas.TryGetValue(
+                        delta.Sequence,
+                        out pending))
                 {
-                    pending.LastSentRealtime = Time.realtimeSinceStartup;
-                    pending.SendCount++;
+                    pending.PruneRequiredPeers(
+                        multiplayerSaveTransfer
+                            .GetReplicationRequiredClientPeerIds());
+                    targets = pending.GetUnacknowledgedPeerIds();
                 }
             }
 
             try
             {
-                replicationTransport.Send(ReplicationPayloadCodec.ForWorldObjectDelta(ReplicationHostPeerId, delta));
+                var envelope =
+                    ReplicationPayloadCodec.ForWorldObjectDelta(
+                        ReplicationHostPeerId,
+                        delta);
+                var sentTo = 0;
+
+                if (pending == null)
+                {
+                    // Transient/absolute snapshot presentation is broadcast only to
+                    // peers that have completed compatibility negotiation.
+                    replicationTransport.Send(envelope);
+                    sentTo = replicationTransport.BoundPeerCount;
+                }
+                else
+                {
+                    for (var i = 0; i < targets.Length; i++)
+                    {
+                        if (!replicationTransport.IsPeerApplicationReady(
+                                targets[i]))
+                        {
+                            continue;
+                        }
+
+                        replicationTransport.SendToPeer(
+                            targets[i],
+                            envelope);
+                        sentTo++;
+                    }
+
+                    if (sentTo > 0)
+                    {
+                        lock (ReplicationWorldObjectDeltaLock)
+                        {
+                            if (replicationPendingWorldObjectDeltas
+                                .TryGetValue(
+                                    delta.Sequence,
+                                    out var current))
+                            {
+                                current.LastSentRealtime =
+                                    Time.realtimeSinceStartup;
+                                current.SendCount++;
+                            }
+                        }
+                    }
+                }
+
+                if (sentTo <= 0)
+                {
+                    return;
+                }
 
                 if (isRetry)
                 {
-                    replicationWorldObjectDeltaRetriesSent++;
-                    replicationLastWorldObjectDeltaSummary = "retry " + FormatReplicationWorldObjectDelta(delta);
-                    if (replicationConfigVerboseReplicationLogging && !IsNoisyReplicationWorldObjectDelta(delta))
+                    replicationWorldObjectDeltaRetriesSent += sentTo;
+                    replicationLastWorldObjectDeltaSummary =
+                        "retry peers="
+                        + sentTo.ToString(CultureInfo.InvariantCulture)
+                        + " "
+                        + FormatReplicationWorldObjectDelta(delta);
+                    if (replicationConfigVerboseReplicationLogging
+                        && !IsNoisyReplicationWorldObjectDelta(delta))
                     {
-                        LogReplicationInfo("Going Cooperative replication world object delta retry " + FormatReplicationWorldObjectDelta(delta));
+                        LogReplicationInfo(
+                            "Going Cooperative replication world object delta retry peers="
+                            + sentTo.ToString(CultureInfo.InvariantCulture)
+                            + " "
+                            + FormatReplicationWorldObjectDelta(delta));
                     }
                 }
                 else
                 {
-                    replicationWorldObjectDeltasSent++;
-                    replicationLastWorldObjectDeltaSummary = "sent " + FormatReplicationWorldObjectDelta(delta);
-                    if (replicationConfigVerboseReplicationLogging && !IsNoisyReplicationWorldObjectDelta(delta))
+                    replicationWorldObjectDeltasSent += sentTo;
+                    replicationLastWorldObjectDeltaSummary =
+                        "sent peers="
+                        + sentTo.ToString(CultureInfo.InvariantCulture)
+                        + " "
+                        + FormatReplicationWorldObjectDelta(delta);
+                    if (replicationConfigVerboseReplicationLogging
+                        && !IsNoisyReplicationWorldObjectDelta(delta))
                     {
-                        LogReplicationInfo("Going Cooperative replication world object delta sent " + FormatReplicationWorldObjectDelta(delta));
+                        LogReplicationInfo(
+                            "Going Cooperative replication world object delta sent peers="
+                            + sentTo.ToString(CultureInfo.InvariantCulture)
+                            + " "
+                            + FormatReplicationWorldObjectDelta(delta));
                     }
                 }
             }
             catch (Exception ex)
             {
-                LogReplicationWarning("Going Cooperative replication world object delta send failed retry="
+                LogReplicationWarning(
+                    "Going Cooperative replication world object delta send failed retry="
                     + (isRetry ? "yes" : "no")
                     + " error="
                     + ex.GetType().Name
@@ -16375,15 +16467,99 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private sealed class PendingReplicationWorldObjectDelta
         {
-            public PendingReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
+            private readonly HashSet<string> requiredPeerIds =
+                new HashSet<string>(StringComparer.Ordinal);
+            private readonly HashSet<string> acknowledgedPeerIds =
+                new HashSet<string>(StringComparer.Ordinal);
+
+            public PendingReplicationWorldObjectDelta(
+                ReplicationWorldObjectDelta delta,
+                IEnumerable<string> requiredPeers)
             {
                 Delta = delta;
                 LastSentRealtime = -ReplicationWorldObjectDeltaRetrySeconds;
+                foreach (var peerId in requiredPeers)
+                {
+                    if (MultiplayerPeerIds.TryParseClientSlot(
+                            peerId,
+                            out _))
+                    {
+                        requiredPeerIds.Add(peerId);
+                    }
+                }
             }
 
             public ReplicationWorldObjectDelta Delta { get; }
             public float LastSentRealtime { get; set; }
             public int SendCount { get; set; }
+            public bool PositiveAckSeen { get; private set; }
+
+            public bool Acknowledge(
+                string peerId,
+                bool positive)
+            {
+                if (!requiredPeerIds.Contains(peerId))
+                {
+                    return false;
+                }
+
+                acknowledgedPeerIds.Add(peerId);
+                PositiveAckSeen |= positive;
+                return true;
+            }
+
+            public void PruneRequiredPeers(
+                IEnumerable<string> activePeers)
+            {
+                var active = new HashSet<string>(
+                    activePeers,
+                    StringComparer.Ordinal);
+                requiredPeerIds.RemoveWhere(
+                    peerId => !active.Contains(peerId));
+                acknowledgedPeerIds.RemoveWhere(
+                    peerId => !requiredPeerIds.Contains(peerId));
+            }
+
+            public string[] GetUnacknowledgedPeerIds()
+            {
+                var result = new List<string>();
+                foreach (var peerId in requiredPeerIds)
+                {
+                    if (!acknowledgedPeerIds.Contains(peerId))
+                    {
+                        result.Add(peerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+
+            public bool IsComplete
+            {
+                get
+                {
+                    foreach (var peerId in requiredPeerIds)
+                    {
+                        if (!acknowledgedPeerIds.Contains(peerId))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                }
+            }
+
+            public int RequiredPeerCount
+            {
+                get { return requiredPeerIds.Count; }
+            }
+
+            public int AcknowledgedPeerCount
+            {
+                get { return acknowledgedPeerIds.Count; }
+            }
         }
 
         private sealed class PendingReplicationClientWorldObjectDeltaApply
