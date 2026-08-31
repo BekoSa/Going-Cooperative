@@ -81,6 +81,26 @@ internal static class CorePolicyTests
                 "payload action registry has one owner " + field.Name);
         }
 
+        var roster = new MultiplayerPeerRoster(
+            "host",
+            "Host",
+            MultiplayerPeerLimits.StableTargetPlayers);
+        Equal(1, roster.Count, "peer roster starts with host");
+        Equal(4, roster.MaxPlayers, "stable peer target is four players");
+        Equal(true, roster.TryAddPeer("client-1", "Client 1", out _), "peer roster adds first client");
+        Equal(true, roster.TryAddPeer("client-2", "Client 2", out _), "peer roster adds second client");
+        Equal(true, roster.TryAddPeer("client-3", "Client 3", out _), "peer roster adds third client");
+        Equal(true, roster.IsFull, "four-player roster reaches capacity");
+        Equal(false, roster.TryAddPeer("client-4", "Client 4", out var fullError), "four-player roster rejects fifth player");
+        Equal("session-full", fullError, "peer roster reports full session");
+        Equal(false, roster.TryAddPeer("client-1", "Duplicate", out var duplicateError), "peer roster rejects duplicate id");
+        Equal("peer-id-already-present", duplicateError, "peer roster reports duplicate id");
+        Equal(true, roster.TrySetConnected("client-2", false), "peer roster tracks disconnect");
+        Equal(3, roster.ConnectedCount, "peer roster connected count excludes disconnected peer");
+        Equal(true, roster.RemovePeer("client-2"), "peer roster removes client");
+        Equal(false, roster.RemovePeer("host"), "peer roster never removes host");
+        Equal(8, MultiplayerPeerLimits.ExperimentalMaximumPlayers, "experimental peer ceiling is eight players");
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
