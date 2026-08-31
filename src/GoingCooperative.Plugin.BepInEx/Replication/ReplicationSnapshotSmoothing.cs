@@ -35,6 +35,8 @@ namespace GoingCooperative.Plugin.BepInEx
             public readonly List<ReplicationPresentationSample> Samples = new List<ReplicationPresentationSample>(8);
             public string Kind = string.Empty;
             public float LastReceivedRealtime;
+            public float ActiveUntilRealtime;
+            public bool Dirty;
             public bool Discontinuity;
         }
 
@@ -79,6 +81,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationPresentationTrackLifetimeSeconds = 3f;
         private const float ReplicationPresentationMaxExtrapolationSeconds = 0.2f;
         private const float ReplicationPresentationMaxSegmentSeconds = 0.5f;
+        private const float ReplicationPresentationActiveHoldSeconds = 0.65f;
+        private const float ReplicationPresentationIdleRefreshSeconds = 0.06f;
+        private const float ReplicationPresentationPosePositionEpsilonSqr = 0.0004f;
+        private const float ReplicationPresentationPoseRotationDot = 0.9998f;
         private const float ReplicationPresentationWorkerTeleportDistance = 3f;
         private const float ReplicationPresentationAnimalTeleportDistance = 6f;
         private const float ReplicationPresentationMovingSpeed = 0.08f;
@@ -118,6 +124,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static long replicationPresentationAnimalV2StopsHeld;
         private static long replicationPresentationAnimalV2IdleWritesAvoided;
         private static long replicationPresentationAnimalV2LowSpeedTangentsBypassed;
+        private static long replicationPresentationIdleTracksSkipped;
 
         private static void BufferReplicationTransformSnapshot(ReplicationTransformSnapshot snapshot, float receivedRealtime)
         {
@@ -185,6 +192,32 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
                 }
 
+                var poseChanged = samples.Count == 0;
+                var previousMotionActive = false;
+                if (samples.Count > 0)
+                {
+                    var previous = samples[samples.Count - 1];
+                    poseChanged = (position - previous.Position).sqrMagnitude
+                            >= ReplicationPresentationPosePositionEpsilonSqr
+                        || Mathf.Abs(Quaternion.Dot(rotation, previous.Rotation))
+                            < ReplicationPresentationPoseRotationDot;
+                    previousMotionActive =
+                        IsReplicationPresentationMotionActive(previous.Motion);
+                }
+
+                var motionActive =
+                    IsReplicationPresentationMotionActive(entity.Motion);
+                track.Dirty = true;
+                track.ActiveUntilRealtime = Mathf.Max(
+                    track.ActiveUntilRealtime,
+                    receivedRealtime
+                        + (motionActive
+                            || previousMotionActive
+                            || poseChanged
+                            || track.Discontinuity
+                                ? ReplicationPresentationActiveHoldSeconds
+                                : ReplicationPresentationIdleRefreshSeconds));
+
                 samples.Add(new ReplicationPresentationSample(
                     snapshot.Sequence,
                     snapshot.SentRealtime,
@@ -215,8 +248,18 @@ namespace GoingCooperative.Plugin.BepInEx
             foreach (var pair in ReplicationPresentationTracks)
             {
                 var track = pair.Value;
-                if (track.Samples.Count == 0
-                    || !viewsByEntityId.TryGetValue(pair.Key, out var view)
+                if (track.Samples.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!track.Dirty && now > track.ActiveUntilRealtime)
+                {
+                    replicationPresentationIdleTracksSkipped++;
+                    continue;
+                }
+
+                if (!viewsByEntityId.TryGetValue(pair.Key, out var view)
                     || view == null
                     || view.Transform == null)
                 {
@@ -246,14 +289,37 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (UpdateReplicationSmoothLocomotion(pair.Key, view.Animator, track.Kind, speed, motion))
                 {
                     moving++;
+                    track.ActiveUntilRealtime = Mathf.Max(
+                        track.ActiveUntilRealtime,
+                        now + ReplicationPresentationActiveHoldSeconds);
                 }
 
+                track.Dirty = false;
                 applied++;
             }
 
             replicationLastApplyVisualMoving = moving;
             PruneReplicationPresentationTracksIfDue(now);
             return applied;
+        }
+
+        private static bool IsReplicationPresentationMotionActive(
+            ReplicationEntityMotionMetadata? motion)
+        {
+            if (!motion.HasValue)
+            {
+                return false;
+            }
+
+            var value = motion.Value;
+            return value.IsMoving
+                || value.IsRunning
+                || value.IsSwimming
+                || value.IsClimbing
+                || value.MovementSpeed >= 0.01f
+                || value.VelocityX * value.VelocityX
+                    + value.VelocityY * value.VelocityY
+                    + value.VelocityZ * value.VelocityZ >= 0.0025f;
         }
 
         private static void EvaluateReplicationPresentationTrack(
