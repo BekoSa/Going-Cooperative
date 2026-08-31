@@ -552,7 +552,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void SendReplicationManagementIntent(string payload, string source)
         {
-            var command = new LockstepCommand(ReplicationClientPeerId, ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
+            var command = new LockstepCommand(GetReplicationLocalPeerId(), ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
             if (!ShouldSkipDuplicateReplicationLocalCommand(command))
             {
                 SendReplicationLocalCommandIntent(command, source);
