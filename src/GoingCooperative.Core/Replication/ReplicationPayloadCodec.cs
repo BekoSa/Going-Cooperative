@@ -7,10 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // REPL-3 keeps the existing replication contract and adds peer-presence messages.
-        // It also gates the compact authenticated Direct UDP data frame: peers first
-        // exchange the ordinary legacy-framed hello, then switch only after compatibility.
-        public const string ProtocolVersion = "GCOOP-REPL-3";
+        // REPL-4 adds remote player selection presentation on top of Direct presence.
+        // Peers still exchange the legacy-framed hello before enabling compact UDP data.
+        public const string ProtocolVersion = "GCOOP-REPL-4";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
