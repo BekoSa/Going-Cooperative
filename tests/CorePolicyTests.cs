@@ -106,6 +106,11 @@ internal static class CorePolicyTests
         Equal(3, peerSlot, "client peer id slot roundtrip");
         Equal(false, MultiplayerPeerIds.TryParseClientSlot("client-8", out _), "peer id rejects slot above eight-player ceiling");
         Equal(true, MultiplayerPeerIds.IsValid(MultiplayerPeerIds.Host), "host peer id valid");
+        Equal("Player", MultiplayerNickname.Normalize("   "), "blank nickname falls back");
+        Equal("Alice Bob", MultiplayerNickname.Normalize("  Alice   Bob  "), "nickname whitespace normalized");
+        Equal("AB", MultiplayerNickname.Normalize("A\u0001B"), "nickname control characters removed");
+        Equal(24, MultiplayerNickname.Normalize(new string('X', 40)).Length, "nickname length bounded");
+        Equal("Игрок 2", MultiplayerNickname.Normalize("Игрок 2"), "unicode nickname preserved");
 
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
