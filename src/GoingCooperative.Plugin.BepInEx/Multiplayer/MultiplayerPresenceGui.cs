@@ -53,7 +53,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (multiplayerPresenceCursorText != null)
                 {
                     multiplayerPresenceCursorText.text =
-                        (replicationConfigHostMode ? "CLIENT" : "HOST") + "\n◆";
+                        (replicationConfigHostMode ? "CLIENT" : "HOST") + "\n+";
                 }
             }
             else
@@ -88,7 +88,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 root.transform.SetAsLastSibling();
                 root.GetComponent<RectTransform>().anchoredPosition = position;
                 var text = multiplayerPresenceSelectionTexts[i];
-                text.text = "◆ OTHER PLAYER";
+                text.text = "[OTHER PLAYER]";
             }
         }
 
@@ -149,7 +149,7 @@ namespace GoingCooperative.Plugin.BepInEx
             multiplayerPresenceCursorText = CreateMultiplayerGameText(
                 multiplayerPresenceCursorRoot.transform,
                 "Label",
-                "PLAYER\n◆",
+                "PLAYER\n+",
                 16f,
                 TextAlignmentOptions.Center,
                 new Color(0.28f, 0.82f, 1f, 0.98f));
