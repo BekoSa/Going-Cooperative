@@ -5,18 +5,34 @@ namespace GoingCooperative.Core.Replication
 {
     public sealed class ReplicationHello
     {
-        public ReplicationHello(string peerId, string mode, string protocolVersion, string buildHash)
+        public ReplicationHello(
+            string peerId,
+            string mode,
+            string protocolVersion,
+            string buildHash)
+            : this(peerId, mode, protocolVersion, buildHash, peerId)
+        {
+        }
+
+        public ReplicationHello(
+            string peerId,
+            string mode,
+            string protocolVersion,
+            string buildHash,
+            string displayName)
         {
             PeerId = peerId ?? throw new ArgumentNullException(nameof(peerId));
             Mode = mode ?? throw new ArgumentNullException(nameof(mode));
             ProtocolVersion = protocolVersion ?? throw new ArgumentNullException(nameof(protocolVersion));
             BuildHash = buildHash ?? throw new ArgumentNullException(nameof(buildHash));
+            DisplayName = MultiplayerNickname.Normalize(displayName);
         }
 
         public string PeerId { get; }
         public string Mode { get; }
         public string ProtocolVersion { get; }
         public string BuildHash { get; }
+        public string DisplayName { get; }
     }
 
     public sealed class ReplicationCommandIntent
