@@ -588,7 +588,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 var peerId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
                 replicationTransport.Send(ReplicationPayloadCodec.ForHello(
                     peerId,
-                    new ReplicationHello(peerId, mode, ReplicationPayloadCodec.ProtocolVersion, GetReplicationLocalBuildHash())));
+                    new ReplicationHello(
+                        peerId,
+                        mode,
+                        ReplicationPayloadCodec.ProtocolVersion,
+                        GetReplicationLocalBuildHash(),
+                        MultiplayerNickname.Normalize(MultiplayerMenu.Nickname))));
             }
             catch (InvalidOperationException)
             {
@@ -628,6 +633,8 @@ namespace GoingCooperative.Plugin.BepInEx
             var firstCompatibleHello = !replicationRemoteHelloReceived;
             replicationRemoteCompatibilityRefused = false;
             replicationRemoteHelloReceived = true;
+            replicationRemoteDisplayName =
+                MultiplayerNickname.Normalize(hello.DisplayName);
             replicationTransport?.EnableBinarySecurityData();
             if (firstCompatibleHello)
             {
@@ -649,6 +656,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationNextHelloLogRealtime = Time.realtimeSinceStartup + 30f;
                 LogReplicationInfo("Going Cooperative replication hello received peer="
                     + hello.PeerId
+                    + " nickname="
+                    + replicationRemoteDisplayName
                     + " mode="
                     + hello.Mode
                     + " protocol="
