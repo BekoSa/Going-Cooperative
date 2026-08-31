@@ -53,7 +53,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (multiplayerPresenceCursorText != null)
                 {
                     multiplayerPresenceCursorText.text =
-                        (replicationConfigHostMode ? "CLIENT" : "HOST") + "\n+";
+                        GetReplicationRemoteDisplayName() + "\n+";
                 }
             }
             else
@@ -88,7 +88,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 root.transform.SetAsLastSibling();
                 root.GetComponent<RectTransform>().anchoredPosition = position;
                 var text = multiplayerPresenceSelectionTexts[i];
-                text.text = "[OTHER PLAYER]";
+                text.text = "[" + GetReplicationRemoteDisplayName() + "]";
             }
         }
 
