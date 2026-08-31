@@ -14,6 +14,8 @@ namespace GoingCooperative.Core
     {
         private readonly ConcurrentQueue<TransportEnvelope> inbox =
             new ConcurrentQueue<TransportEnvelope>();
+        private readonly ConcurrentQueue<TransportEnvelope> outbox =
+            new ConcurrentQueue<TransportEnvelope>();
         private readonly TransportChunkReassembler chunkReassembler =
             new TransportChunkReassembler();
         private readonly object latestStateLock = new object();
@@ -40,12 +42,16 @@ namespace GoingCooperative.Core
         private volatile bool authenticationEstablished;
         private int receiveGeneration;
         private int receivePending;
+        private int sendWorkerActive;
 
         // High-frequency state never belongs in the reliable FIFO backlog. Only the
         // newest value matters and replacing an older one reduces latency and GC.
         private TransportEnvelope? latestTransformSnapshot;
         private TransportEnvelope? latestPlayerPresence;
         private TransportEnvelope? latestPlayerSelection;
+        private TransportEnvelope? latestOutgoingTransformSnapshot;
+        private TransportEnvelope? latestOutgoingPlayerPresence;
+        private TransportEnvelope? latestOutgoingPlayerSelection;
 
         private long authenticationFailures;
         private long decodeFailures;
@@ -60,6 +66,8 @@ namespace GoingCooperative.Core
         private long secureBinaryPacketsSent;
         private long secureBinaryPacketsReceived;
         private long coalescedStateReplacements;
+        private long outgoingCoalescedStateReplacements;
+        private long sendFailures;
 
         private const int MaxUnchunkedDatagramBytes = 1100;
         private const int SecureDataV2HeaderBytes = 32;
@@ -144,6 +152,16 @@ namespace GoingCooperative.Core
         public long CoalescedStateReplacements
         {
             get { return Interlocked.Read(ref coalescedStateReplacements); }
+        }
+
+        public long OutgoingCoalescedStateReplacements
+        {
+            get { return Interlocked.Read(ref outgoingCoalescedStateReplacements); }
+        }
+
+        public long SendFailures
+        {
+            get { return Interlocked.Read(ref sendFailures); }
         }
 
         public int PendingMessages
@@ -254,8 +272,7 @@ namespace GoingCooperative.Core
                 throw new InvalidOperationException("Transport is not connected.");
             }
 
-            var target = remoteEndpoint;
-            if (target == null)
+            if (remoteEndpoint == null)
             {
                 throw new InvalidOperationException(
                     isHostEndpoint
@@ -264,22 +281,188 @@ namespace GoingCooperative.Core
             }
 
             envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
+            EnqueueOutgoingEnvelope(envelope);
+            ScheduleSendWorker();
+        }
+
+        private void EnqueueOutgoingEnvelope(TransportEnvelope envelope)
+        {
+            switch (envelope.Kind)
+            {
+                case TransportMessageKind.ReplicationTransformSnapshot:
+                    ReplaceLatestOutgoingState(
+                        ref latestOutgoingTransformSnapshot,
+                        envelope);
+                    return;
+                case TransportMessageKind.ReplicationPlayerPresence:
+                    ReplaceLatestOutgoingState(
+                        ref latestOutgoingPlayerPresence,
+                        envelope);
+                    return;
+                case TransportMessageKind.ReplicationPlayerSelection:
+                    ReplaceLatestOutgoingState(
+                        ref latestOutgoingPlayerSelection,
+                        envelope);
+                    return;
+                default:
+                    outbox.Enqueue(envelope);
+                    return;
+            }
+        }
+
+        private void ReplaceLatestOutgoingState(
+            ref TransportEnvelope? slot,
+            TransportEnvelope envelope)
+        {
+            lock (latestStateLock)
+            {
+                if (slot != null)
+                {
+                    Interlocked.Increment(
+                        ref outgoingCoalescedStateReplacements);
+                }
+
+                slot = envelope;
+            }
+        }
+
+        private void ScheduleSendWorker()
+        {
+            if (!isConnected)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(
+                    ref sendWorkerActive,
+                    1,
+                    0) != 0)
+            {
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(_ => DrainSendQueue());
+        }
+
+        private void DrainSendQueue()
+        {
+            try
+            {
+                var processed = 0;
+                while (isConnected && processed++ < 512)
+                {
+                    if (!TryDequeueOutgoingEnvelope(out var envelope))
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        SendEnvelopeImmediate(envelope);
+                    }
+                    catch
+                    {
+                        Interlocked.Increment(ref sendFailures);
+                    }
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref sendWorkerActive, 0);
+                if (isConnected && HasPendingOutgoingEnvelope())
+                {
+                    ScheduleSendWorker();
+                }
+            }
+        }
+
+        private bool TryDequeueOutgoingEnvelope(
+            out TransportEnvelope envelope)
+        {
+            if (outbox.TryDequeue(out var queued))
+            {
+                envelope = queued;
+                return true;
+            }
+
+            lock (latestStateLock)
+            {
+                if (latestOutgoingPlayerPresence != null)
+                {
+                    envelope = latestOutgoingPlayerPresence;
+                    latestOutgoingPlayerPresence = null;
+                    return true;
+                }
+
+                if (latestOutgoingPlayerSelection != null)
+                {
+                    envelope = latestOutgoingPlayerSelection;
+                    latestOutgoingPlayerSelection = null;
+                    return true;
+                }
+
+                if (latestOutgoingTransformSnapshot != null)
+                {
+                    envelope = latestOutgoingTransformSnapshot;
+                    latestOutgoingTransformSnapshot = null;
+                    return true;
+                }
+            }
+
+            envelope = new TransportEnvelope(
+                TransportMessageKind.ReplicationHello,
+                0L,
+                string.Empty,
+                string.Empty);
+            return false;
+        }
+
+        private bool HasPendingOutgoingEnvelope()
+        {
+            if (!outbox.IsEmpty)
+            {
+                return true;
+            }
+
+            lock (latestStateLock)
+            {
+                return latestOutgoingTransformSnapshot != null
+                    || latestOutgoingPlayerPresence != null
+                    || latestOutgoingPlayerSelection != null;
+            }
+        }
+
+        private void SendEnvelopeImmediate(
+            TransportEnvelope envelope)
+        {
+            var target = remoteEndpoint;
+            if (!isConnected || target == null)
+            {
+                return;
+            }
+
             var encoded = TransportEnvelopeCodec.Encode(envelope);
             var bytes = Encoding.UTF8.GetBytes(encoded);
-            var useLegacySecureDataFrame = securityEnabled && !binarySecurityDataEnabled;
+            var useLegacySecureDataFrame =
+                securityEnabled && !binarySecurityDataEnabled;
             var maxUnchunkedBytes =
-                useLegacySecureDataFrame ? 850 : MaxUnchunkedDatagramBytes;
+                useLegacySecureDataFrame
+                    ? 850
+                    : MaxUnchunkedDatagramBytes;
             if (envelope.Kind != TransportMessageKind.Chunk
                 && bytes.Length > maxUnchunkedBytes)
             {
                 var chunkId = envelope.SenderId
                     + "-"
                     + Interlocked.Increment(ref nextChunkId)
-                        .ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        .ToString(
+                            System.Globalization.CultureInfo.InvariantCulture);
                 var chunks = TransportChunkCodec.CreateChunks(
                     envelope,
                     chunkId,
-                    useLegacySecureDataFrame ? 450 : MaxChunkEnvelopeChars);
+                    useLegacySecureDataFrame
+                        ? 450
+                        : MaxChunkEnvelopeChars);
                 Interlocked.Add(ref chunkEnvelopesSent, chunks.Count);
                 for (var i = 0; i < chunks.Count; i++)
                 {
@@ -362,11 +545,18 @@ namespace GoingCooperative.Core
             {
             }
 
+            while (outbox.TryDequeue(out _))
+            {
+            }
+
             lock (latestStateLock)
             {
                 latestTransformSnapshot = null;
                 latestPlayerPresence = null;
                 latestPlayerSelection = null;
+                latestOutgoingTransformSnapshot = null;
+                latestOutgoingPlayerPresence = null;
+                latestOutgoingPlayerSelection = null;
             }
 
             remoteEndpoint = null;
@@ -378,6 +568,7 @@ namespace GoingCooperative.Core
             sendSecuritySequence = highestReceiveSecuritySequence = 0;
             receivedSecuritySequences.Clear();
             Interlocked.Exchange(ref receivePending, 0);
+            Interlocked.Exchange(ref sendWorkerActive, 0);
             Interlocked.Exchange(ref authenticationFailures, 0L);
             Interlocked.Exchange(ref decodeFailures, 0L);
             Interlocked.Exchange(ref chunkFailures, 0L);
@@ -391,6 +582,8 @@ namespace GoingCooperative.Core
             Interlocked.Exchange(ref secureBinaryPacketsSent, 0L);
             Interlocked.Exchange(ref secureBinaryPacketsReceived, 0L);
             Interlocked.Exchange(ref coalescedStateReplacements, 0L);
+            Interlocked.Exchange(ref outgoingCoalescedStateReplacements, 0L);
+            Interlocked.Exchange(ref sendFailures, 0L);
         }
 
         private void StartReceiveLoop()
