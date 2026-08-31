@@ -669,6 +669,31 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var localBuildHash = GetReplicationLocalBuildHash();
+            var localHasActionCapability = TryReadReplicationCapabilitySegment(
+                localBuildHash,
+                "actions",
+                out var localActionCapability);
+            var remoteHasActionCapability = TryReadReplicationCapabilitySegment(
+                hello.BuildHash,
+                "actions",
+                out var remoteActionCapability);
+            if (!localHasActionCapability
+                || !remoteHasActionCapability
+                || !string.Equals(
+                    localActionCapability,
+                    remoteActionCapability,
+                    StringComparison.Ordinal))
+            {
+                error = "client-action-capability-mismatch local="
+                    + (localHasActionCapability
+                        ? localActionCapability
+                        : "missing")
+                    + " remote="
+                    + (remoteHasActionCapability
+                        ? remoteActionCapability
+                        : "missing");
+                return false;
+            }
             var localHasAgentPresentationCapability = TryReadReplicationAgentPresentationCapability(
                 localBuildHash,
                 out var localAgentPresentationEnabled,
@@ -965,6 +990,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 + (replicationConfigStoragePolicyV4 ? "1:" : "0:")
                 + (replicationConfigShelfStorageManifestV1 ? "1:" : "0:")
                 + FormatReplicationStoragePolicyCapabilityFingerprint()
+                + "|actions="
+                + MultiplayerActionRegistry.ClientIntentFingerprint
                 + "|gameasm="
                 + GetReplicationGameAssemblyModuleVersionId();
         }
