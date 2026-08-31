@@ -100,6 +100,12 @@ internal static class CorePolicyTests
         Equal(true, roster.RemovePeer("client-2"), "peer roster removes client");
         Equal(false, roster.RemovePeer("host"), "peer roster never removes host");
         Equal(8, MultiplayerPeerLimits.ExperimentalMaximumPlayers, "experimental peer ceiling is eight players");
+        Equal("client-1", MultiplayerPeerIds.Client(1), "first client peer id");
+        Equal("client-7", MultiplayerPeerIds.Client(7), "last experimental client peer id");
+        Equal(true, MultiplayerPeerIds.TryParseClientSlot("client-3", out var peerSlot), "client peer id parses");
+        Equal(3, peerSlot, "client peer id slot roundtrip");
+        Equal(false, MultiplayerPeerIds.TryParseClientSlot("client-8", out _), "peer id rejects slot above eight-player ceiling");
+        Equal(true, MultiplayerPeerIds.IsValid(MultiplayerPeerIds.Host), "host peer id valid");
 
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
