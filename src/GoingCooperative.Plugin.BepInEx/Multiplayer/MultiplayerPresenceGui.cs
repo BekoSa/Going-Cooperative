@@ -1,0 +1,168 @@
+using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
+
+namespace GoingCooperative.Plugin.BepInEx
+{
+    public sealed partial class GoingCooperativePlugin
+    {
+        private GameObject? multiplayerPresenceCursorRoot;
+        private TextMeshProUGUI? multiplayerPresenceCursorText;
+        private readonly List<GameObject> multiplayerPresencePingRoots = new List<GameObject>();
+        private readonly List<TextMeshProUGUI> multiplayerPresencePingTexts = new List<TextMeshProUGUI>();
+
+        private void UpdateMultiplayerPresenceGui()
+        {
+            if (multiplayerCanvasRoot == null) return;
+
+            var gameplayVisible = replicationRuntimeStarted
+                && !multiplayerMainMenuActive
+                && (multiplayerCanvasPanel == null || !multiplayerCanvasPanel.activeSelf)
+                && (multiplayerResyncOverlay == null || !multiplayerResyncOverlay.activeSelf);
+            if (!gameplayVisible)
+            {
+                HideMultiplayerPresenceVisuals();
+                return;
+            }
+
+            EnsureMultiplayerPresenceCursorGui();
+            if (multiplayerPresenceCursorRoot != null)
+            {
+                if (TryGetReplicationRemotePresenceWorldPoint(out var cursorWorld)
+                    && TryProjectReplicationPresenceToCanvas(cursorWorld, out var cursorPosition))
+                {
+                    multiplayerPresenceCursorRoot.SetActive(true);
+                    multiplayerPresenceCursorRoot.GetComponent<RectTransform>().anchoredPosition =
+                        cursorPosition + new Vector2(0f, 18f);
+                    if (multiplayerPresenceCursorText != null)
+                    {
+                        multiplayerPresenceCursorText.text = (replicationConfigHostMode ? "CLIENT" : "HOST") + "\n+";
+                    }
+                }
+                else
+                {
+                    multiplayerPresenceCursorRoot.SetActive(false);
+                }
+            }
+
+            EnsureMultiplayerPresencePingVisualCount(ReplicationPresencePings.Count);
+            var now = Time.realtimeSinceStartup;
+            for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
+            {
+                var root = multiplayerPresencePingRoots[i];
+                if (i >= ReplicationPresencePings.Count)
+                {
+                    root.SetActive(false);
+                    continue;
+                }
+
+                var ping = ReplicationPresencePings[i];
+                if (!TryProjectReplicationPresenceToCanvas(ping.WorldPosition, out var position))
+                {
+                    root.SetActive(false);
+                    continue;
+                }
+
+                root.SetActive(true);
+                var rect = root.GetComponent<RectTransform>();
+                rect.anchoredPosition = position;
+                var age = Mathf.Max(0f, now - ping.CreatedRealtime);
+                var alpha = Mathf.Clamp01(ping.ExpiresRealtime - now);
+                var pulse = 1f + Mathf.Sin(age * 8f) * 0.12f;
+                rect.localScale = new Vector3(pulse, pulse, 1f);
+
+                var text = multiplayerPresencePingTexts[i];
+                var baseColor = ping.Remote
+                    ? new Color(0.28f, 0.82f, 1f, 1f)
+                    : MultiplayerCanvasAccent;
+                text.color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
+                text.text = ping.Remote ? "PING +" : "PING";
+            }
+        }
+
+        private void EnsureMultiplayerPresenceCursorGui()
+        {
+            if (multiplayerCanvasRoot == null || multiplayerPresenceCursorRoot != null) return;
+
+            multiplayerPresenceCursorRoot = new GameObject("Remote Player Cursor", typeof(RectTransform));
+            multiplayerPresenceCursorRoot.transform.SetParent(multiplayerCanvasRoot.transform, false);
+            var rect = multiplayerPresenceCursorRoot.GetComponent<RectTransform>();
+            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(120f, 48f);
+
+            multiplayerPresenceCursorText = CreateMultiplayerGameText(
+                multiplayerPresenceCursorRoot.transform,
+                "Label",
+                "PLAYER\n+",
+                15f,
+                TextAlignmentOptions.Center,
+                new Color(0.28f, 0.82f, 1f, 0.95f));
+            multiplayerPresenceCursorText.raycastTarget = false;
+            SetMultiplayerCanvasRect(multiplayerPresenceCursorText.rectTransform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+            multiplayerPresenceCursorRoot.SetActive(false);
+        }
+
+        private void EnsureMultiplayerPresencePingVisualCount(int count)
+        {
+            if (multiplayerCanvasRoot == null) return;
+            while (multiplayerPresencePingRoots.Count < count)
+            {
+                var root = new GameObject("Player Ping", typeof(RectTransform));
+                root.transform.SetParent(multiplayerCanvasRoot.transform, false);
+                var rect = root.GetComponent<RectTransform>();
+                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.sizeDelta = new Vector2(110f, 34f);
+
+                var text = CreateMultiplayerGameText(
+                    root.transform, "Label", "PING", 17f, TextAlignmentOptions.Center, MultiplayerCanvasAccent);
+                text.fontStyle = FontStyles.Bold;
+                text.raycastTarget = false;
+                SetMultiplayerCanvasRect(text.rectTransform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+                multiplayerPresencePingRoots.Add(root);
+                multiplayerPresencePingTexts.Add(text);
+            }
+        }
+
+        private bool TryProjectReplicationPresenceToCanvas(Vector3 world, out Vector2 canvasPosition)
+        {
+            canvasPosition = Vector2.zero;
+            if (multiplayerCanvasRoot == null) return false;
+            var camera = GetReplicationPresenceCamera();
+            if (camera == null) return false;
+            var screen = camera.WorldToScreenPoint(world);
+            if (screen.z <= 0f
+                || screen.x < -64f || screen.y < -64f
+                || screen.x > Screen.width + 64f || screen.y > Screen.height + 64f) return false;
+
+            return RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                multiplayerCanvasRoot.GetComponent<RectTransform>(),
+                new Vector2(screen.x, screen.y),
+                null,
+                out canvasPosition);
+        }
+
+        private void HideMultiplayerPresenceVisuals()
+        {
+            if (multiplayerPresenceCursorRoot != null) multiplayerPresenceCursorRoot.SetActive(false);
+            for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
+            {
+                multiplayerPresencePingRoots[i].SetActive(false);
+            }
+        }
+
+        private void DestroyMultiplayerPresenceGui()
+        {
+            if (multiplayerPresenceCursorRoot != null) Destroy(multiplayerPresenceCursorRoot);
+            for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
+            {
+                if (multiplayerPresencePingRoots[i] != null) Destroy(multiplayerPresencePingRoots[i]);
+            }
+            multiplayerPresenceCursorRoot = null;
+            multiplayerPresenceCursorText = null;
+            multiplayerPresencePingRoots.Clear();
+            multiplayerPresencePingTexts.Clear();
+        }
+    }
+}
