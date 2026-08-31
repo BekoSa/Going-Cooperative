@@ -14,13 +14,23 @@ namespace GoingCooperative.Core
     {
         private readonly ConcurrentQueue<TransportEnvelope> inbox =
             new ConcurrentQueue<TransportEnvelope>();
-        private readonly ConcurrentQueue<TransportEnvelope> outbox =
-            new ConcurrentQueue<TransportEnvelope>();
+        private readonly ConcurrentQueue<OutgoingTransportItem> outbox =
+            new ConcurrentQueue<OutgoingTransportItem>();
         private readonly TransportChunkReassembler chunkReassembler =
             new TransportChunkReassembler();
         private readonly object latestStateLock = new object();
         private readonly object receiveStateLock = new object();
         private readonly object sendLock = new object();
+        private readonly object hostPeerLock = new object();
+
+        private readonly Dictionary<string, TransportEnvelope> latestPlayerPresenceBySender =
+            new Dictionary<string, TransportEnvelope>(StringComparer.Ordinal);
+        private readonly Dictionary<string, TransportEnvelope> latestPlayerSelectionBySender =
+            new Dictionary<string, TransportEnvelope>(StringComparer.Ordinal);
+        private readonly Dictionary<string, HostUdpPeerSession> hostPeersByEndpoint =
+            new Dictionary<string, HostUdpPeerSession>(StringComparer.Ordinal);
+        private readonly Dictionary<string, HostUdpPeerSession> hostPeersById =
+            new Dictionary<string, HostUdpPeerSession>(StringComparer.Ordinal);
 
         private UdpClient? udpClient;
         private IPEndPoint? remoteEndpoint;
@@ -28,28 +38,29 @@ namespace GoingCooperative.Core
         private long nextChunkId;
         private readonly bool securityEnabled;
         private readonly byte[] securityKey;
+
+        // Client-side security state. Host security state is isolated per peer below.
         private byte[]? clientNonce;
         private byte[]? hostNonce;
         private byte[]? sessionId;
-        private IPEndPoint? pendingEndpoint;
         private long sendSecuritySequence;
         private long highestReceiveSecuritySequence;
-        private readonly HashSet<long> receivedSecuritySequences = new HashSet<long>();
+        private readonly HashSet<long> receivedSecuritySequences =
+            new HashSet<long>();
         private DateTime nextClientHelloUtc;
-        private int unauthenticatedDatagramsThisWindow;
-        private DateTime unauthenticatedWindowUtc;
         private volatile bool binarySecurityDataEnabled;
-        private volatile bool isConnected;
         private volatile bool authenticationEstablished;
+
+        private volatile bool isConnected;
         private int receiveGeneration;
         private int receivePending;
         private int sendWorkerActive;
+        private int unauthenticatedDatagramsThisWindow;
+        private DateTime unauthenticatedWindowUtc;
 
-        // High-frequency state never belongs in the reliable FIFO backlog. Only the
-        // newest value matters and replacing an older one reduces latency and GC.
+        // Transform is host-authored global state. Presence and selection are keyed by
+        // sender so one player's high-frequency state can never overwrite another's.
         private TransportEnvelope? latestTransformSnapshot;
-        private TransportEnvelope? latestPlayerPresence;
-        private TransportEnvelope? latestPlayerSelection;
         private TransportEnvelope? latestOutgoingTransformSnapshot;
         private TransportEnvelope? latestOutgoingPlayerPresence;
         private TransportEnvelope? latestOutgoingPlayerSelection;
@@ -69,14 +80,19 @@ namespace GoingCooperative.Core
         private long coalescedStateReplacements;
         private long outgoingCoalescedStateReplacements;
         private long sendFailures;
+        private long peerBindingFailures;
 
         private const int MaxUnchunkedDatagramBytes = 1100;
+        private const int LegacySecureUnchunkedBytes = 850;
+        private const int LegacySecureChunkChars = 450;
         private const int SecureDataV2HeaderBytes = 32;
         private const int SecureDataV2TagBytes = 32;
         private const int MaxSecureDataV2PayloadBytes = 60 * 1024;
+        private const int MaxChunkEnvelopeChars = 700;
+        private const int MaxHostPeerSessions =
+            MultiplayerPeerLimits.ExperimentalMaximumPlayers * 2;
         private static readonly byte[] SecureDataV2Magic =
             { (byte)'G', (byte)'C', (byte)'D', (byte)'2' };
-        private const int MaxChunkEnvelopeChars = 700;
 
         public bool IsConnected
         {
@@ -85,7 +101,57 @@ namespace GoingCooperative.Core
 
         public bool AuthenticationEstablished
         {
-            get { return authenticationEstablished; }
+            get
+            {
+                if (!securityEnabled)
+                {
+                    return isConnected;
+                }
+
+                if (!isHostEndpoint)
+                {
+                    return authenticationEstablished;
+                }
+
+                lock (hostPeerLock)
+                {
+                    foreach (var peer in hostPeersByEndpoint.Values)
+                    {
+                        if (peer.AuthenticationEstablished)
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+        }
+
+        public int BoundPeerCount
+        {
+            get
+            {
+                if (!isHostEndpoint)
+                {
+                    return authenticationEstablished ? 1 : 0;
+                }
+
+                lock (hostPeerLock)
+                {
+                    var count = 0;
+                    foreach (var peer in hostPeersById.Values)
+                    {
+                        if (peer.AuthenticationEstablished
+                            && peer.ApplicationCompatible)
+                        {
+                            count++;
+                        }
+                    }
+
+                    return count;
+                }
+            }
         }
 
         public long AuthenticationFailures
@@ -93,13 +159,11 @@ namespace GoingCooperative.Core
             get { return Interlocked.Read(ref authenticationFailures); }
         }
 
-        /// <summary>Datagrams that failed envelope decode and were silently dropped.</summary>
         public long DecodeFailures
         {
             get { return Interlocked.Read(ref decodeFailures); }
         }
 
-        /// <summary>Chunk datagrams that failed reassembly and were dropped.</summary>
         public long ChunkFailures
         {
             get { return Interlocked.Read(ref chunkFailures); }
@@ -165,6 +229,11 @@ namespace GoingCooperative.Core
             get { return Interlocked.Read(ref sendFailures); }
         }
 
+        public long PeerBindingFailures
+        {
+            get { return Interlocked.Read(ref peerBindingFailures); }
+        }
+
         public int PendingMessages
         {
             get
@@ -173,8 +242,8 @@ namespace GoingCooperative.Core
                 lock (latestStateLock)
                 {
                     if (latestTransformSnapshot != null) pending++;
-                    if (latestPlayerPresence != null) pending++;
-                    if (latestPlayerSelection != null) pending++;
+                    pending += latestPlayerPresenceBySender.Count;
+                    pending += latestPlayerSelectionBySender.Count;
                 }
 
                 return pending;
@@ -213,7 +282,18 @@ namespace GoingCooperative.Core
 
         public bool RemoteEndpointKnown
         {
-            get { return remoteEndpoint != null; }
+            get
+            {
+                if (!isHostEndpoint)
+                {
+                    return remoteEndpoint != null;
+                }
+
+                lock (hostPeerLock)
+                {
+                    return hostPeersByEndpoint.Count > 0;
+                }
+            }
         }
 
         public UdpNetworkTransport()
@@ -221,7 +301,9 @@ namespace GoingCooperative.Core
         {
         }
 
-        public UdpNetworkTransport(bool securityEnabled, string sessionCode)
+        public UdpNetworkTransport(
+            bool securityEnabled,
+            string sessionCode)
         {
             this.securityEnabled = securityEnabled;
             if (securityEnabled)
@@ -236,7 +318,7 @@ namespace GoingCooperative.Core
             }
             else
             {
-                securityKey = new byte[0];
+                securityKey = Array.Empty<byte>();
                 authenticationEstablished = true;
             }
         }
@@ -244,7 +326,8 @@ namespace GoingCooperative.Core
         public void StartHost(int port)
         {
             Stop();
-            udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+            udpClient = new UdpClient(
+                new IPEndPoint(IPAddress.Any, port));
             isHostEndpoint = true;
             isConnected = true;
             authenticationEstablished = !securityEnabled;
@@ -255,12 +338,17 @@ namespace GoingCooperative.Core
         {
             if (string.IsNullOrWhiteSpace(host))
             {
-                throw new ArgumentException("Host is required.", nameof(host));
+                throw new ArgumentException(
+                    "Host is required.",
+                    nameof(host));
             }
 
             Stop();
-            udpClient = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
-            remoteEndpoint = new IPEndPoint(ResolveHost(host), port);
+            udpClient = new UdpClient(
+                new IPEndPoint(IPAddress.Any, 0));
+            remoteEndpoint = new IPEndPoint(
+                ResolveHost(host),
+                port);
             isHostEndpoint = false;
             isConnected = true;
             authenticationEstablished = !securityEnabled;
@@ -276,55 +364,194 @@ namespace GoingCooperative.Core
 
         public void EnableBinarySecurityData()
         {
-            if (securityEnabled && authenticationEstablished)
+            if (!securityEnabled)
+            {
+                return;
+            }
+
+            if (!isHostEndpoint && authenticationEstablished)
             {
                 binarySecurityDataEnabled = true;
             }
         }
 
+        public void EnableBinarySecurityData(string peerId)
+        {
+            if (!securityEnabled)
+            {
+                return;
+            }
+
+            if (!isHostEndpoint)
+            {
+                EnableBinarySecurityData();
+                return;
+            }
+
+            lock (hostPeerLock)
+            {
+                if (hostPeersById.TryGetValue(peerId, out var peer)
+                    && peer.AuthenticationEstablished)
+                {
+                    peer.BinarySecurityDataEnabled = true;
+                    peer.ApplicationCompatible = true;
+                }
+            }
+        }
+
+        public string[] GetBoundPeerIds()
+        {
+            if (!isHostEndpoint)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (hostPeerLock)
+            {
+                var result = new List<string>();
+                foreach (var pair in hostPeersById)
+                {
+                    if (pair.Value.AuthenticationEstablished
+                        && pair.Value.ApplicationCompatible)
+                    {
+                        result.Add(pair.Key);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
+        public bool RemovePeer(string peerId)
+        {
+            if (!isHostEndpoint
+                || string.IsNullOrWhiteSpace(peerId))
+            {
+                return false;
+            }
+
+            lock (hostPeerLock)
+            {
+                if (!hostPeersById.TryGetValue(peerId, out var peer))
+                {
+                    return false;
+                }
+
+                hostPeersById.Remove(peerId);
+                hostPeersByEndpoint.Remove(
+                    FormatEndpointKey(peer.Endpoint));
+                peer.Closed = true;
+                return true;
+            }
+        }
+
         public void Send(TransportEnvelope envelope)
+        {
+            QueueOutgoing(
+                envelope,
+                targetPeerId: null,
+                excludedPeerId: null,
+                coalesceBroadcastState: true);
+        }
+
+        public void SendToPeer(
+            string peerId,
+            TransportEnvelope envelope)
+        {
+            if (!isHostEndpoint)
+            {
+                throw new InvalidOperationException(
+                    "Targeted sends are host-only.");
+            }
+
+            if (!MultiplayerPeerIds.TryParseClientSlot(peerId, out _))
+            {
+                throw new ArgumentException(
+                    "Invalid client peer id.",
+                    nameof(peerId));
+            }
+
+            QueueOutgoing(
+                envelope,
+                peerId,
+                excludedPeerId: null,
+                coalesceBroadcastState: false);
+        }
+
+        public void SendToAllExcept(
+            string excludedPeerId,
+            TransportEnvelope envelope)
+        {
+            if (!isHostEndpoint)
+            {
+                throw new InvalidOperationException(
+                    "Fan-out exclusion is host-only.");
+            }
+
+            QueueOutgoing(
+                envelope,
+                targetPeerId: null,
+                excludedPeerId,
+                coalesceBroadcastState: false);
+        }
+
+        private void QueueOutgoing(
+            TransportEnvelope envelope,
+            string? targetPeerId,
+            string? excludedPeerId,
+            bool coalesceBroadcastState)
         {
             if (!isConnected || udpClient == null)
             {
-                throw new InvalidOperationException("Transport is not connected.");
+                throw new InvalidOperationException(
+                    "Transport is not connected.");
             }
 
-            if (remoteEndpoint == null)
+            if (envelope == null)
+            {
+                throw new ArgumentNullException(nameof(envelope));
+            }
+
+            if (!isHostEndpoint && remoteEndpoint == null)
             {
                 throw new InvalidOperationException(
-                    isHostEndpoint
-                        ? "Host has no remote endpoint yet."
-                        : "Client has no host endpoint.");
+                    "Client has no host endpoint.");
             }
 
-            envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
-            EnqueueOutgoingEnvelope(envelope);
-            ScheduleSendWorker();
-        }
-
-        private void EnqueueOutgoingEnvelope(TransportEnvelope envelope)
-        {
-            switch (envelope.Kind)
+            if (coalesceBroadcastState
+                && targetPeerId == null
+                && excludedPeerId == null)
             {
-                case TransportMessageKind.ReplicationTransformSnapshot:
-                    ReplaceLatestOutgoingState(
-                        ref latestOutgoingTransformSnapshot,
-                        envelope);
-                    return;
-                case TransportMessageKind.ReplicationPlayerPresence:
-                    ReplaceLatestOutgoingState(
-                        ref latestOutgoingPlayerPresence,
-                        envelope);
-                    return;
-                case TransportMessageKind.ReplicationPlayerSelection:
-                    ReplaceLatestOutgoingState(
-                        ref latestOutgoingPlayerSelection,
-                        envelope);
-                    return;
-                default:
-                    outbox.Enqueue(envelope);
-                    return;
+                switch (envelope.Kind)
+                {
+                    case TransportMessageKind.ReplicationTransformSnapshot:
+                        ReplaceLatestOutgoingState(
+                            ref latestOutgoingTransformSnapshot,
+                            envelope);
+                        ScheduleSendWorker();
+                        return;
+                    case TransportMessageKind.ReplicationPlayerPresence:
+                        ReplaceLatestOutgoingState(
+                            ref latestOutgoingPlayerPresence,
+                            envelope);
+                        ScheduleSendWorker();
+                        return;
+                    case TransportMessageKind.ReplicationPlayerSelection:
+                        ReplaceLatestOutgoingState(
+                            ref latestOutgoingPlayerSelection,
+                            envelope);
+                        ScheduleSendWorker();
+                        return;
+                }
             }
+
+            outbox.Enqueue(
+                new OutgoingTransportItem(
+                    envelope,
+                    targetPeerId,
+                    excludedPeerId));
+            ScheduleSendWorker();
         }
 
         private void ReplaceLatestOutgoingState(
@@ -372,14 +599,14 @@ namespace GoingCooperative.Core
                     && generation == Volatile.Read(ref receiveGeneration)
                     && processed++ < 512)
                 {
-                    if (!TryDequeueOutgoingEnvelope(out var envelope))
+                    if (!TryDequeueOutgoingItem(out var item))
                     {
                         break;
                     }
 
                     try
                     {
-                        SendEnvelopeImmediate(envelope);
+                        SendEnvelopeImmediate(item);
                     }
                     catch
                     {
@@ -392,20 +619,17 @@ namespace GoingCooperative.Core
                 Interlocked.Exchange(ref sendWorkerActive, 0);
                 if (isConnected && HasPendingOutgoingEnvelope())
                 {
-                    // If this worker belongs to an old session generation, this
-                    // schedules a fresh worker for the current one without allowing
-                    // the old worker to send new-session envelopes.
                     ScheduleSendWorker();
                 }
             }
         }
 
-        private bool TryDequeueOutgoingEnvelope(
-            out TransportEnvelope envelope)
+        private bool TryDequeueOutgoingItem(
+            out OutgoingTransportItem item)
         {
             if (outbox.TryDequeue(out var queued))
             {
-                envelope = queued;
+                item = queued;
                 return true;
             }
 
@@ -413,31 +637,43 @@ namespace GoingCooperative.Core
             {
                 if (latestOutgoingPlayerPresence != null)
                 {
-                    envelope = latestOutgoingPlayerPresence;
+                    item = new OutgoingTransportItem(
+                        latestOutgoingPlayerPresence,
+                        null,
+                        null);
                     latestOutgoingPlayerPresence = null;
                     return true;
                 }
 
                 if (latestOutgoingPlayerSelection != null)
                 {
-                    envelope = latestOutgoingPlayerSelection;
+                    item = new OutgoingTransportItem(
+                        latestOutgoingPlayerSelection,
+                        null,
+                        null);
                     latestOutgoingPlayerSelection = null;
                     return true;
                 }
 
                 if (latestOutgoingTransformSnapshot != null)
                 {
-                    envelope = latestOutgoingTransformSnapshot;
+                    item = new OutgoingTransportItem(
+                        latestOutgoingTransformSnapshot,
+                        null,
+                        null);
                     latestOutgoingTransformSnapshot = null;
                     return true;
                 }
             }
 
-            envelope = new TransportEnvelope(
-                TransportMessageKind.ReplicationHello,
-                0L,
-                string.Empty,
-                string.Empty);
+            item = new OutgoingTransportItem(
+                new TransportEnvelope(
+                    TransportMessageKind.ReplicationHello,
+                    0L,
+                    string.Empty,
+                    string.Empty),
+                null,
+                null);
             return false;
         }
 
@@ -457,22 +693,112 @@ namespace GoingCooperative.Core
         }
 
         private void SendEnvelopeImmediate(
-            TransportEnvelope envelope)
+            OutgoingTransportItem item)
         {
-            var target = remoteEndpoint;
-            if (!isConnected || target == null)
+            if (!isConnected)
             {
                 return;
             }
 
+            if (!isHostEndpoint)
+            {
+                var target = remoteEndpoint;
+                if (target == null)
+                {
+                    return;
+                }
+
+                SendEnvelopeToClientTarget(
+                    item.Envelope,
+                    target);
+                return;
+            }
+
+            var peers = GetHostSendTargets(
+                item.Envelope.Kind,
+                item.TargetPeerId,
+                item.ExcludedPeerId);
+            if (peers.Length == 0)
+            {
+                return;
+            }
+
+            var encoded = TransportEnvelopeCodec.Encode(item.Envelope);
+            var encodedBytes = Encoding.UTF8.GetBytes(encoded);
+            List<TransportEnvelope>? legacyChunks = null;
+            List<TransportEnvelope>? binaryChunks = null;
+            for (var i = 0; i < peers.Length; i++)
+            {
+                var peer = peers[i];
+                var legacySecurity =
+                    securityEnabled
+                    && !peer.BinarySecurityDataEnabled;
+                var maxBytes = legacySecurity
+                    ? LegacySecureUnchunkedBytes
+                    : MaxUnchunkedDatagramBytes;
+                if (item.Envelope.Kind != TransportMessageKind.Chunk
+                    && encodedBytes.Length > maxBytes)
+                {
+                    var chunks = legacySecurity
+                        ? legacyChunks
+                        : binaryChunks;
+                    if (chunks == null)
+                    {
+                        chunks = TransportChunkCodec.CreateChunks(
+                            item.Envelope,
+                            item.Envelope.SenderId
+                                + "-"
+                                + Interlocked.Increment(ref nextChunkId)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture),
+                            legacySecurity
+                                ? LegacySecureChunkChars
+                                : MaxChunkEnvelopeChars);
+                        if (legacySecurity)
+                        {
+                            legacyChunks = chunks;
+                        }
+                        else
+                        {
+                            binaryChunks = chunks;
+                        }
+                    }
+
+                    Interlocked.Add(
+                        ref chunkEnvelopesSent,
+                        chunks.Count);
+                    for (var chunkIndex = 0;
+                        chunkIndex < chunks.Count;
+                        chunkIndex++)
+                    {
+                        var chunkBytes = Encoding.UTF8.GetBytes(
+                            TransportEnvelopeCodec.Encode(
+                                chunks[chunkIndex]));
+                        SendPayloadToHostPeer(
+                            chunkBytes,
+                            peer);
+                    }
+
+                    continue;
+                }
+
+                SendPayloadToHostPeer(
+                    encodedBytes,
+                    peer);
+            }
+        }
+
+        private void SendEnvelopeToClientTarget(
+            TransportEnvelope envelope,
+            IPEndPoint target)
+        {
             var encoded = TransportEnvelopeCodec.Encode(envelope);
             var bytes = Encoding.UTF8.GetBytes(encoded);
             var useLegacySecureDataFrame =
                 securityEnabled && !binarySecurityDataEnabled;
-            var maxUnchunkedBytes =
-                useLegacySecureDataFrame
-                    ? 850
-                    : MaxUnchunkedDatagramBytes;
+            var maxUnchunkedBytes = useLegacySecureDataFrame
+                ? LegacySecureUnchunkedBytes
+                : MaxUnchunkedDatagramBytes;
             if (envelope.Kind != TransportMessageKind.Chunk
                 && bytes.Length > maxUnchunkedBytes)
             {
@@ -485,18 +811,74 @@ namespace GoingCooperative.Core
                     envelope,
                     chunkId,
                     useLegacySecureDataFrame
-                        ? 450
+                        ? LegacySecureChunkChars
                         : MaxChunkEnvelopeChars);
-                Interlocked.Add(ref chunkEnvelopesSent, chunks.Count);
+                Interlocked.Add(
+                    ref chunkEnvelopesSent,
+                    chunks.Count);
                 for (var i = 0; i < chunks.Count; i++)
                 {
-                    SendEncodedEnvelope(chunks[i], target);
+                    var chunkBytes = Encoding.UTF8.GetBytes(
+                        TransportEnvelopeCodec.Encode(chunks[i]));
+                    SendPayloadToClient(
+                        chunkBytes,
+                        target);
                 }
 
                 return;
             }
 
-            SendPayload(bytes, target);
+            SendPayloadToClient(bytes, target);
+        }
+
+        private HostUdpPeerSession[] GetHostSendTargets(
+            TransportMessageKind kind,
+            string? targetPeerId,
+            string? excludedPeerId)
+        {
+            lock (hostPeerLock)
+            {
+                var result = new List<HostUdpPeerSession>();
+                if (!string.IsNullOrEmpty(targetPeerId))
+                {
+                    if (hostPeersById.TryGetValue(
+                            targetPeerId,
+                            out var target)
+                        && target.AuthenticationEstablished
+                        && !target.Closed
+                        && (kind == TransportMessageKind.ReplicationHello
+                            || target.ApplicationCompatible))
+                    {
+                        result.Add(target);
+                    }
+
+                    return result.ToArray();
+                }
+
+                foreach (var peer in hostPeersById.Values)
+                {
+                    if (peer.Closed
+                        || !peer.AuthenticationEstablished
+                        || (!string.IsNullOrEmpty(excludedPeerId)
+                            && string.Equals(
+                                peer.PeerId,
+                                excludedPeerId,
+                                StringComparison.Ordinal)))
+                    {
+                        continue;
+                    }
+
+                    if (kind != TransportMessageKind.ReplicationHello
+                        && !peer.ApplicationCompatible)
+                    {
+                        continue;
+                    }
+
+                    result.Add(peer);
+                }
+
+                return result.ToArray();
+            }
         }
 
         public bool TryReceive(out TransportEnvelope envelope)
@@ -516,19 +898,17 @@ namespace GoingCooperative.Core
 
             lock (latestStateLock)
             {
-                // Cursor/selection are tiny user-presence state. Prefer them ahead of
-                // transform presentation once the reliable FIFO has been drained.
-                if (latestPlayerPresence != null)
+                if (TryTakeLatestState(
+                    latestPlayerPresenceBySender,
+                    out envelope))
                 {
-                    envelope = latestPlayerPresence;
-                    latestPlayerPresence = null;
                     return true;
                 }
 
-                if (latestPlayerSelection != null)
+                if (TryTakeLatestState(
+                    latestPlayerSelectionBySender,
+                    out envelope))
                 {
-                    envelope = latestPlayerSelection;
-                    latestPlayerSelection = null;
                     return true;
                 }
 
@@ -542,9 +922,24 @@ namespace GoingCooperative.Core
 
             envelope = new TransportEnvelope(
                 TransportMessageKind.ReplicationHello,
-                0,
+                0L,
                 string.Empty,
                 string.Empty);
+            return false;
+        }
+
+        private static bool TryTakeLatestState(
+            Dictionary<string, TransportEnvelope> states,
+            out TransportEnvelope envelope)
+        {
+            foreach (var pair in states)
+            {
+                envelope = pair.Value;
+                states.Remove(pair.Key);
+                return true;
+            }
+
+            envelope = null!;
             return false;
         }
 
@@ -556,31 +951,26 @@ namespace GoingCooperative.Core
             udpClient = null;
             if (client != null)
             {
-                try
-                {
-                    client.Close();
-                }
-                catch
-                {
-                }
+                try { client.Close(); } catch { }
             }
 
-            while (inbox.TryDequeue(out _))
-            {
-            }
-
-            while (outbox.TryDequeue(out _))
-            {
-            }
+            while (inbox.TryDequeue(out _)) { }
+            while (outbox.TryDequeue(out _)) { }
 
             lock (latestStateLock)
             {
                 latestTransformSnapshot = null;
-                latestPlayerPresence = null;
-                latestPlayerSelection = null;
+                latestPlayerPresenceBySender.Clear();
+                latestPlayerSelectionBySender.Clear();
                 latestOutgoingTransformSnapshot = null;
                 latestOutgoingPlayerPresence = null;
                 latestOutgoingPlayerSelection = null;
+            }
+
+            lock (hostPeerLock)
+            {
+                hostPeersByEndpoint.Clear();
+                hostPeersById.Clear();
             }
 
             lock (receiveStateLock)
@@ -589,11 +979,12 @@ namespace GoingCooperative.Core
                 chunkReassembler.Clear();
                 authenticationEstablished = !securityEnabled;
                 clientNonce = hostNonce = sessionId = null;
-                pendingEndpoint = null;
                 binarySecurityDataEnabled = false;
-                sendSecuritySequence = highestReceiveSecuritySequence = 0;
+                sendSecuritySequence = 0L;
+                highestReceiveSecuritySequence = 0L;
                 receivedSecuritySequences.Clear();
             }
+
             Interlocked.Exchange(ref receivePending, 0);
             Interlocked.Exchange(ref authenticationFailures, 0L);
             Interlocked.Exchange(ref decodeFailures, 0L);
@@ -610,6 +1001,7 @@ namespace GoingCooperative.Core
             Interlocked.Exchange(ref coalescedStateReplacements, 0L);
             Interlocked.Exchange(ref outgoingCoalescedStateReplacements, 0L);
             Interlocked.Exchange(ref sendFailures, 0L);
+            Interlocked.Exchange(ref peerBindingFailures, 0L);
         }
 
         private void StartReceiveLoop()
@@ -620,7 +1012,10 @@ namespace GoingCooperative.Core
                 return;
             }
 
-            if (Interlocked.CompareExchange(ref receivePending, 1, 0) != 0)
+            if (Interlocked.CompareExchange(
+                    ref receivePending,
+                    1,
+                    0) != 0)
             {
                 return;
             }
@@ -630,7 +1025,9 @@ namespace GoingCooperative.Core
                 Volatile.Read(ref receiveGeneration));
             try
             {
-                client.BeginReceive(ReceiveCompleted, state);
+                client.BeginReceive(
+                    ReceiveCompleted,
+                    state);
             }
             catch (ObjectDisposedException)
             {
@@ -655,7 +1052,9 @@ namespace GoingCooperative.Core
             var sender = new IPEndPoint(IPAddress.Any, 0);
             try
             {
-                bytes = state.Client.EndReceive(asyncResult, ref sender);
+                bytes = state.Client.EndReceive(
+                    asyncResult,
+                    ref sender);
             }
             catch (ObjectDisposedException)
             {
@@ -673,7 +1072,8 @@ namespace GoingCooperative.Core
             }
 
             if (!isConnected
-                || state.Generation != Volatile.Read(ref receiveGeneration))
+                || state.Generation
+                    != Volatile.Read(ref receiveGeneration))
             {
                 return;
             }
@@ -688,12 +1088,12 @@ namespace GoingCooperative.Core
                     {
                         try
                         {
-                            ProcessReceivedDatagram(bytes, sender);
+                            ProcessReceivedDatagram(
+                                bytes,
+                                sender);
                         }
                         catch
                         {
-                            // The receive worker must survive malformed datagrams and
-                            // decoder bugs. Protocol paths maintain specific counters.
                             Interlocked.Increment(ref decodeFailures);
                         }
                     }
@@ -703,20 +1103,38 @@ namespace GoingCooperative.Core
             StartReceiveLoop();
         }
 
-        private void ProcessReceivedDatagram(byte[] bytes, IPEndPoint sender)
+        private void ProcessReceivedDatagram(
+            byte[] bytes,
+            IPEndPoint sender)
         {
             Interlocked.Increment(ref datagramsReceived);
             Interlocked.Add(ref bytesReceived, bytes.Length);
 
-            if (!securityEnabled && isHostEndpoint)
+            HostUdpPeerSession? hostPeer = null;
+            if (securityEnabled)
             {
-                remoteEndpoint = sender;
+                if (isHostEndpoint)
+                {
+                    if (!TryUnwrapHostSecureDatagram(
+                            bytes,
+                            sender,
+                            out bytes,
+                            out hostPeer))
+                    {
+                        return;
+                    }
+                }
+                else if (!TryUnwrapClientSecureDatagram(
+                    bytes,
+                    sender,
+                    out bytes))
+                {
+                    return;
+                }
             }
-
-            if (securityEnabled
-                && !TryUnwrapSecureDatagram(bytes, sender, out bytes))
+            else if (isHostEndpoint)
             {
-                return;
+                hostPeer = GetOrCreateInsecureHostPeer(sender);
             }
 
             var line = Encoding.UTF8.GetString(bytes);
@@ -730,6 +1148,18 @@ namespace GoingCooperative.Core
                 return;
             }
 
+            if (isHostEndpoint)
+            {
+                if (hostPeer == null
+                    || !ValidateAndBindHostEnvelope(
+                        hostPeer,
+                        decoded))
+                {
+                    Interlocked.Increment(ref peerBindingFailures);
+                    return;
+                }
+            }
+
             if (decoded.Kind == TransportMessageKind.Chunk)
             {
                 Interlocked.Increment(ref chunkEnvelopesReceived);
@@ -739,6 +1169,16 @@ namespace GoingCooperative.Core
                         out var chunkError)
                     && reassembled != null)
                 {
+                    if (isHostEndpoint
+                        && hostPeer != null
+                        && !ValidateAndBindHostEnvelope(
+                            hostPeer,
+                            reassembled))
+                    {
+                        Interlocked.Increment(ref peerBindingFailures);
+                        return;
+                    }
+
                     Interlocked.Increment(ref reassembledMessages);
                     EnqueueReceivedEnvelope(reassembled);
                 }
@@ -753,176 +1193,153 @@ namespace GoingCooperative.Core
             EnqueueReceivedEnvelope(decoded);
         }
 
-        private void EnqueueReceivedEnvelope(TransportEnvelope envelope)
+        private bool ValidateAndBindHostEnvelope(
+            HostUdpPeerSession peer,
+            TransportEnvelope envelope)
         {
-            switch (envelope.Kind)
+            peer.LastSeenUtc = DateTime.UtcNow;
+            lock (hostPeerLock)
             {
-                case TransportMessageKind.ReplicationTransformSnapshot:
-                    ReplaceLatestState(ref latestTransformSnapshot, envelope);
-                    return;
-                case TransportMessageKind.ReplicationPlayerPresence:
-                    ReplaceLatestState(ref latestPlayerPresence, envelope);
-                    return;
-                case TransportMessageKind.ReplicationPlayerSelection:
-                    ReplaceLatestState(ref latestPlayerSelection, envelope);
-                    return;
-                default:
-                    inbox.Enqueue(envelope);
-                    return;
+                if (string.IsNullOrEmpty(peer.PeerId))
+                {
+                    if (envelope.Kind
+                            != TransportMessageKind.ReplicationHello
+                        || !MultiplayerPeerIds.TryParseClientSlot(
+                            envelope.SenderId,
+                            out _))
+                    {
+                        return false;
+                    }
+
+                    if (hostPeersById.TryGetValue(
+                            envelope.SenderId,
+                            out var existing)
+                        && !ReferenceEquals(existing, peer)
+                        && !existing.Closed)
+                    {
+                        return false;
+                    }
+
+                    peer.PeerId = envelope.SenderId;
+                    hostPeersById[peer.PeerId] = peer;
+                    return true;
+                }
+
+                return string.Equals(
+                    peer.PeerId,
+                    envelope.SenderId,
+                    StringComparison.Ordinal);
             }
         }
 
-        private void ReplaceLatestState(
-            ref TransportEnvelope? slot,
+        private void EnqueueReceivedEnvelope(
             TransportEnvelope envelope)
         {
             lock (latestStateLock)
             {
-                if (slot != null)
+                switch (envelope.Kind)
                 {
-                    Interlocked.Increment(ref coalescedStateReplacements);
+                    case TransportMessageKind.ReplicationTransformSnapshot:
+                        if (latestTransformSnapshot != null)
+                        {
+                            Interlocked.Increment(
+                                ref coalescedStateReplacements);
+                        }
+
+                        latestTransformSnapshot = envelope;
+                        return;
+
+                    case TransportMessageKind.ReplicationPlayerPresence:
+                        ReplaceLatestStateBySender(
+                            latestPlayerPresenceBySender,
+                            envelope);
+                        return;
+
+                    case TransportMessageKind.ReplicationPlayerSelection:
+                        ReplaceLatestStateBySender(
+                            latestPlayerSelectionBySender,
+                            envelope);
+                        return;
+                }
+            }
+
+            inbox.Enqueue(envelope);
+        }
+
+        private void ReplaceLatestStateBySender(
+            Dictionary<string, TransportEnvelope> states,
+            TransportEnvelope envelope)
+        {
+            if (states.ContainsKey(envelope.SenderId))
+            {
+                Interlocked.Increment(
+                    ref coalescedStateReplacements);
+            }
+
+            states[envelope.SenderId] = envelope;
+        }
+
+        private HostUdpPeerSession GetOrCreateInsecureHostPeer(
+            IPEndPoint sender)
+        {
+            var key = FormatEndpointKey(sender);
+            lock (hostPeerLock)
+            {
+                if (hostPeersByEndpoint.TryGetValue(
+                        key,
+                        out var existing))
+                {
+                    return existing;
                 }
 
-                slot = envelope;
+                PruneHostPeerSessionsLocked();
+                if (hostPeersByEndpoint.Count >= MaxHostPeerSessions)
+                {
+                    throw new InvalidOperationException(
+                        "Too many UDP peer sessions.");
+                }
+
+                var peer = new HostUdpPeerSession(
+                    CloneEndpoint(sender))
+                {
+                    AuthenticationEstablished = true,
+                    BinarySecurityDataEnabled = false,
+                    LastSeenUtc = DateTime.UtcNow
+                };
+                hostPeersByEndpoint[key] = peer;
+                return peer;
             }
         }
 
-        private void SendEncodedEnvelope(
-            TransportEnvelope envelope,
-            IPEndPoint target)
-        {
-            var encoded = TransportEnvelopeCodec.Encode(envelope);
-            var bytes = Encoding.UTF8.GetBytes(encoded);
-            SendPayload(bytes, target);
-        }
-
-        private void SendPayload(byte[] payload, IPEndPoint target)
-        {
-            if (udpClient == null)
-            {
-                return;
-            }
-
-            if (!securityEnabled)
-            {
-                SendDatagram(payload, target);
-                return;
-            }
-
-            if (!authenticationEstablished || sessionId == null)
-            {
-                return;
-            }
-
-            var sequence = Interlocked.Increment(ref sendSecuritySequence);
-            var sequenceBytes = BitConverter.GetBytes(sequence);
-            if (binarySecurityDataEnabled)
-            {
-                var lengthBytes = BitConverter.GetBytes(payload.Length);
-                var tagV2 = DirectTransportSecurity.Mac(
-                    securityKey,
-                    "UDP-DATA2",
-                    sessionId,
-                    sequenceBytes,
-                    lengthBytes,
-                    payload);
-                var packetV2 = new byte[
-                    SecureDataV2HeaderBytes
-                    + payload.Length
-                    + SecureDataV2TagBytes];
-                Buffer.BlockCopy(
-                    SecureDataV2Magic,
-                    0,
-                    packetV2,
-                    0,
-                    SecureDataV2Magic.Length);
-                Buffer.BlockCopy(sessionId, 0, packetV2, 4, 16);
-                Buffer.BlockCopy(sequenceBytes, 0, packetV2, 20, 8);
-                Buffer.BlockCopy(lengthBytes, 0, packetV2, 28, 4);
-                Buffer.BlockCopy(
-                    payload,
-                    0,
-                    packetV2,
-                    SecureDataV2HeaderBytes,
-                    payload.Length);
-                Buffer.BlockCopy(
-                    tagV2,
-                    0,
-                    packetV2,
-                    SecureDataV2HeaderBytes + payload.Length,
-                    tagV2.Length);
-                Interlocked.Increment(ref secureBinaryPacketsSent);
-                SendDatagram(packetV2, target);
-                return;
-            }
-
-            var tag = DirectTransportSecurity.Mac(
-                securityKey,
-                "UDP-DATA",
-                sessionId,
-                sequenceBytes,
-                payload);
-            var packet = DirectTransportSecurity.UdpData
-                + "\t"
-                + Convert.ToBase64String(sessionId)
-                + "\t"
-                + sequence.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture)
-                + "\t"
-                + Convert.ToBase64String(payload)
-                + "\t"
-                + Convert.ToBase64String(tag);
-            SendDatagram(Encoding.UTF8.GetBytes(packet), target);
-        }
-
-        private void SendClientHelloIfDue()
-        {
-            if (!securityEnabled
-                || isHostEndpoint
-                || authenticationEstablished
-                || udpClient == null
-                || remoteEndpoint == null
-                || clientNonce == null)
-            {
-                return;
-            }
-
-            if (DateTime.UtcNow < nextClientHelloUtc)
-            {
-                return;
-            }
-
-            nextClientHelloUtc = DateTime.UtcNow.AddSeconds(1);
-            var tag = DirectTransportSecurity.Mac(
-                securityKey,
-                "UDP-C1",
-                clientNonce);
-            SendRawSecurityPacket(
-                DirectTransportSecurity.UdpClientHello
-                    + "\t"
-                    + Convert.ToBase64String(clientNonce)
-                    + "\t"
-                    + Convert.ToBase64String(tag),
-                remoteEndpoint);
-        }
-
-        private bool TryUnwrapSecureDatagram(
+        private bool TryUnwrapHostSecureDatagram(
             byte[] datagram,
             IPEndPoint sender,
-            out byte[] payload)
+            out byte[] payload,
+            out HostUdpPeerSession? peer)
         {
-            payload = new byte[0];
-            if (authenticationEstablished
-                && remoteEndpoint != null
-                && !EndpointEquals(sender, remoteEndpoint))
-            {
-                Interlocked.Increment(ref authenticationFailures);
-                return false;
-            }
+            payload = Array.Empty<byte>();
+            peer = null;
+            var key = FormatEndpointKey(sender);
 
             if (LooksLikeSecureDataV2(datagram))
             {
-                return TryUnwrapSecureDataV2(datagram, out payload);
+                lock (hostPeerLock)
+                {
+                    if (!hostPeersByEndpoint.TryGetValue(
+                            key,
+                            out peer)
+                        || !peer.AuthenticationEstablished)
+                    {
+                        Interlocked.Increment(
+                            ref authenticationFailures);
+                        return false;
+                    }
+                }
+
+                return TryUnwrapHostSecureDataV2(
+                    datagram,
+                    peer,
+                    out payload);
             }
 
             var line = Encoding.UTF8.GetString(datagram);
@@ -930,8 +1347,8 @@ namespace GoingCooperative.Core
             try
             {
                 if (fields.Length == 3
-                    && fields[0] == DirectTransportSecurity.UdpClientHello
-                    && isHostEndpoint
+                    && fields[0]
+                        == DirectTransportSecurity.UdpClientHello
                     && AllowUnauthenticatedDatagram())
                 {
                     var nonce = Convert.FromBase64String(fields[1]);
@@ -947,20 +1364,46 @@ namespace GoingCooperative.Core
                         throw new InvalidDataException();
                     }
 
-                    clientNonce = nonce;
-                    hostNonce = DirectTransportSecurity.RandomBytes(16);
-                    pendingEndpoint = sender;
+                    lock (hostPeerLock)
+                    {
+                        PruneHostPeerSessionsLocked();
+                        if (!hostPeersByEndpoint.TryGetValue(
+                                key,
+                                out peer))
+                        {
+                            if (hostPeersByEndpoint.Count
+                                >= MaxHostPeerSessions)
+                            {
+                                throw new InvalidDataException(
+                                    "too many peer sessions");
+                            }
+
+                            peer = new HostUdpPeerSession(
+                                CloneEndpoint(sender));
+                            hostPeersByEndpoint[key] = peer;
+                        }
+
+                        peer.ClientNonce = nonce;
+                        peer.HostNonce =
+                            DirectTransportSecurity.RandomBytes(16);
+                        peer.SessionId = null;
+                        peer.AuthenticationEstablished = false;
+                        peer.BinarySecurityDataEnabled = false;
+                        peer.ApplicationCompatible = false;
+                        peer.LastSeenUtc = DateTime.UtcNow;
+                    }
+
                     var responseTag = DirectTransportSecurity.Mac(
                         securityKey,
                         "UDP-S1",
-                        clientNonce,
-                        hostNonce);
+                        peer.ClientNonce!,
+                        peer.HostNonce!);
                     SendRawSecurityPacket(
                         DirectTransportSecurity.UdpServerHello
                             + "\t"
                             + fields[1]
                             + "\t"
-                            + Convert.ToBase64String(hostNonce)
+                            + Convert.ToBase64String(peer.HostNonce!)
                             + "\t"
                             + Convert.ToBase64String(responseTag),
                         sender);
@@ -968,14 +1411,154 @@ namespace GoingCooperative.Core
                 }
 
                 if (fields.Length == 4
-                    && fields[0] == DirectTransportSecurity.UdpServerHello
-                    && !isHostEndpoint
-                    && clientNonce != null
-                    && remoteEndpoint != null
-                    && EndpointEquals(sender, remoteEndpoint))
+                    && fields[0]
+                        == DirectTransportSecurity.UdpClientFinish)
                 {
-                    var echoedClient = Convert.FromBase64String(fields[1]);
-                    var receivedHost = Convert.FromBase64String(fields[2]);
+                    lock (hostPeerLock)
+                    {
+                        hostPeersByEndpoint.TryGetValue(
+                            key,
+                            out peer);
+                    }
+
+                    if (peer == null
+                        || peer.ClientNonce == null
+                        || peer.HostNonce == null)
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    var receivedClient =
+                        Convert.FromBase64String(fields[1]);
+                    var receivedHost =
+                        Convert.FromBase64String(fields[2]);
+                    var tag = Convert.FromBase64String(fields[3]);
+                    if (!DirectTransportSecurity.FixedTimeEquals(
+                            receivedClient,
+                            peer.ClientNonce)
+                        || !DirectTransportSecurity.FixedTimeEquals(
+                            receivedHost,
+                            peer.HostNonce)
+                        || !DirectTransportSecurity.FixedTimeEquals(
+                            tag,
+                            DirectTransportSecurity.Mac(
+                                securityKey,
+                                "UDP-C2",
+                                peer.ClientNonce,
+                                peer.HostNonce)))
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    peer.SessionId = SessionId(
+                        peer.ClientNonce,
+                        peer.HostNonce);
+                    peer.AuthenticationEstablished = true;
+                    peer.SendSequence = 0L;
+                    peer.HighestReceiveSequence = 0L;
+                    peer.ReceivedSequences.Clear();
+                    peer.LastSeenUtc = DateTime.UtcNow;
+                    return false;
+                }
+
+                if (fields.Length == 5
+                    && fields[0]
+                        == DirectTransportSecurity.UdpData)
+                {
+                    lock (hostPeerLock)
+                    {
+                        hostPeersByEndpoint.TryGetValue(
+                            key,
+                            out peer);
+                    }
+
+                    if (peer == null
+                        || !peer.AuthenticationEstablished
+                        || peer.SessionId == null)
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    var receivedSession =
+                        Convert.FromBase64String(fields[1]);
+                    if (!long.TryParse(
+                            fields[2],
+                            System.Globalization.NumberStyles.None,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            out var sequence))
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    var receivedPayload =
+                        Convert.FromBase64String(fields[3]);
+                    var tag = Convert.FromBase64String(fields[4]);
+                    if (!DirectTransportSecurity.FixedTimeEquals(
+                            receivedSession,
+                            peer.SessionId)
+                        || !DirectTransportSecurity.FixedTimeEquals(
+                            tag,
+                            DirectTransportSecurity.Mac(
+                                securityKey,
+                                "UDP-DATA",
+                                peer.SessionId,
+                                BitConverter.GetBytes(sequence),
+                                receivedPayload))
+                        || !AcceptHostReceiveSequence(
+                            peer,
+                            sequence))
+                    {
+                        throw new InvalidDataException();
+                    }
+
+                    peer.LastSeenUtc = DateTime.UtcNow;
+                    payload = receivedPayload;
+                    return true;
+                }
+            }
+            catch
+            {
+                Interlocked.Increment(ref authenticationFailures);
+                return false;
+            }
+
+            Interlocked.Increment(ref authenticationFailures);
+            return false;
+        }
+
+        private bool TryUnwrapClientSecureDatagram(
+            byte[] datagram,
+            IPEndPoint sender,
+            out byte[] payload)
+        {
+            payload = Array.Empty<byte>();
+            if (remoteEndpoint == null
+                || !EndpointEquals(sender, remoteEndpoint))
+            {
+                Interlocked.Increment(ref authenticationFailures);
+                return false;
+            }
+
+            if (LooksLikeSecureDataV2(datagram))
+            {
+                return TryUnwrapClientSecureDataV2(
+                    datagram,
+                    out payload);
+            }
+
+            var line = Encoding.UTF8.GetString(datagram);
+            var fields = line.Split('\t');
+            try
+            {
+                if (fields.Length == 4
+                    && fields[0]
+                        == DirectTransportSecurity.UdpServerHello
+                    && clientNonce != null)
+                {
+                    var echoedClient =
+                        Convert.FromBase64String(fields[1]);
+                    var receivedHost =
+                        Convert.FromBase64String(fields[2]);
                     var tag = Convert.FromBase64String(fields[3]);
                     if (!DirectTransportSecurity.FixedTimeEquals(
                             echoedClient,
@@ -993,7 +1576,9 @@ namespace GoingCooperative.Core
                     }
 
                     hostNonce = receivedHost;
-                    sessionId = SessionId(clientNonce, hostNonce);
+                    sessionId = SessionId(
+                        clientNonce,
+                        hostNonce);
                     var finish = DirectTransportSecurity.Mac(
                         securityKey,
                         "UDP-C2",
@@ -1012,43 +1597,9 @@ namespace GoingCooperative.Core
                     return false;
                 }
 
-                if (fields.Length == 4
-                    && fields[0] == DirectTransportSecurity.UdpClientFinish
-                    && isHostEndpoint
-                    && pendingEndpoint != null
-                    && EndpointEquals(sender, pendingEndpoint)
-                    && clientNonce != null
-                    && hostNonce != null)
-                {
-                    var receivedClient = Convert.FromBase64String(fields[1]);
-                    var receivedHost = Convert.FromBase64String(fields[2]);
-                    var tag = Convert.FromBase64String(fields[3]);
-                    if (!DirectTransportSecurity.FixedTimeEquals(
-                            receivedClient,
-                            clientNonce)
-                        || !DirectTransportSecurity.FixedTimeEquals(
-                            receivedHost,
-                            hostNonce)
-                        || !DirectTransportSecurity.FixedTimeEquals(
-                            tag,
-                            DirectTransportSecurity.Mac(
-                                securityKey,
-                                "UDP-C2",
-                                clientNonce,
-                                hostNonce)))
-                    {
-                        throw new InvalidDataException();
-                    }
-
-                    remoteEndpoint = sender;
-                    sessionId = SessionId(clientNonce, hostNonce);
-                    authenticationEstablished = true;
-                    pendingEndpoint = null;
-                    return false;
-                }
-
                 if (fields.Length == 5
-                    && fields[0] == DirectTransportSecurity.UdpData
+                    && fields[0]
+                        == DirectTransportSecurity.UdpData
                     && authenticationEstablished
                     && sessionId != null)
                 {
@@ -1077,7 +1628,7 @@ namespace GoingCooperative.Core
                                 sessionId,
                                 BitConverter.GetBytes(sequence),
                                 receivedPayload))
-                        || !AcceptReceiveSequence(sequence))
+                        || !AcceptClientReceiveSequence(sequence))
                     {
                         throw new InvalidDataException();
                     }
@@ -1096,16 +1647,20 @@ namespace GoingCooperative.Core
             return false;
         }
 
-        private static bool LooksLikeSecureDataV2(byte[] datagram)
+        private static bool LooksLikeSecureDataV2(
+            byte[] datagram)
         {
             if (datagram == null
                 || datagram.Length
-                    < SecureDataV2HeaderBytes + SecureDataV2TagBytes)
+                    < SecureDataV2HeaderBytes
+                        + SecureDataV2TagBytes)
             {
                 return false;
             }
 
-            for (var i = 0; i < SecureDataV2Magic.Length; i++)
+            for (var i = 0;
+                i < SecureDataV2Magic.Length;
+                i++)
             {
                 if (datagram[i] != SecureDataV2Magic[i])
                 {
@@ -1116,12 +1671,14 @@ namespace GoingCooperative.Core
             return true;
         }
 
-        private bool TryUnwrapSecureDataV2(
+        private bool TryUnwrapHostSecureDataV2(
             byte[] datagram,
+            HostUdpPeerSession peer,
             out byte[] payload)
         {
-            payload = new byte[0];
-            if (!authenticationEstablished || sessionId == null)
+            payload = Array.Empty<byte>();
+            if (peer.SessionId == null
+                || !peer.AuthenticationEstablished)
             {
                 Interlocked.Increment(ref authenticationFailures);
                 return false;
@@ -1129,79 +1686,38 @@ namespace GoingCooperative.Core
 
             try
             {
-                var receivedSession = new byte[16];
-                var sequenceBytes = new byte[8];
-                var lengthBytes = new byte[4];
-                Buffer.BlockCopy(
+                if (!TryReadSecureDataV2(
                     datagram,
-                    4,
-                    receivedSession,
-                    0,
-                    receivedSession.Length);
-                Buffer.BlockCopy(
-                    datagram,
-                    20,
-                    sequenceBytes,
-                    0,
-                    sequenceBytes.Length);
-                Buffer.BlockCopy(
-                    datagram,
-                    28,
-                    lengthBytes,
-                    0,
-                    lengthBytes.Length);
-
-                var sequence = BitConverter.ToInt64(sequenceBytes, 0);
-                var payloadLength = BitConverter.ToInt32(lengthBytes, 0);
-                if (payloadLength < 0
-                    || payloadLength > MaxSecureDataV2PayloadBytes)
+                    peer.SessionId,
+                    out var sequence,
+                    out var receivedPayload,
+                    out var sequenceBytes,
+                    out var lengthBytes,
+                    out var tag))
                 {
                     throw new InvalidDataException();
                 }
-
-                var expectedPacketLength =
-                    SecureDataV2HeaderBytes
-                    + payloadLength
-                    + SecureDataV2TagBytes;
-                if (datagram.Length != expectedPacketLength)
-                {
-                    throw new InvalidDataException();
-                }
-
-                var receivedPayload = new byte[payloadLength];
-                var tag = new byte[SecureDataV2TagBytes];
-                Buffer.BlockCopy(
-                    datagram,
-                    SecureDataV2HeaderBytes,
-                    receivedPayload,
-                    0,
-                    receivedPayload.Length);
-                Buffer.BlockCopy(
-                    datagram,
-                    SecureDataV2HeaderBytes + receivedPayload.Length,
-                    tag,
-                    0,
-                    tag.Length);
 
                 var expectedTag = DirectTransportSecurity.Mac(
                     securityKey,
                     "UDP-DATA2",
-                    sessionId,
+                    peer.SessionId,
                     sequenceBytes,
                     lengthBytes,
                     receivedPayload);
                 if (!DirectTransportSecurity.FixedTimeEquals(
-                        receivedSession,
-                        sessionId)
-                    || !DirectTransportSecurity.FixedTimeEquals(
                         tag,
                         expectedTag)
-                    || !AcceptReceiveSequence(sequence))
+                    || !AcceptHostReceiveSequence(
+                        peer,
+                        sequence))
                 {
                     throw new InvalidDataException();
                 }
 
-                Interlocked.Increment(ref secureBinaryPacketsReceived);
+                peer.LastSeenUtc = DateTime.UtcNow;
+                Interlocked.Increment(
+                    ref secureBinaryPacketsReceived);
                 payload = receivedPayload;
                 return true;
             }
@@ -1212,26 +1728,359 @@ namespace GoingCooperative.Core
             }
         }
 
-        private bool AcceptReceiveSequence(long sequence)
+        private bool TryUnwrapClientSecureDataV2(
+            byte[] datagram,
+            out byte[] payload)
         {
-            if (sequence <= 0
-                || sequence <= highestReceiveSecuritySequence - 2048
-                || receivedSecuritySequences.Contains(sequence))
+            payload = Array.Empty<byte>();
+            if (!authenticationEstablished
+                || sessionId == null)
+            {
+                Interlocked.Increment(ref authenticationFailures);
+                return false;
+            }
+
+            try
+            {
+                if (!TryReadSecureDataV2(
+                    datagram,
+                    sessionId,
+                    out var sequence,
+                    out var receivedPayload,
+                    out var sequenceBytes,
+                    out var lengthBytes,
+                    out var tag))
+                {
+                    throw new InvalidDataException();
+                }
+
+                var expectedTag = DirectTransportSecurity.Mac(
+                    securityKey,
+                    "UDP-DATA2",
+                    sessionId,
+                    sequenceBytes,
+                    lengthBytes,
+                    receivedPayload);
+                if (!DirectTransportSecurity.FixedTimeEquals(
+                        tag,
+                        expectedTag)
+                    || !AcceptClientReceiveSequence(sequence))
+                {
+                    throw new InvalidDataException();
+                }
+
+                Interlocked.Increment(
+                    ref secureBinaryPacketsReceived);
+                payload = receivedPayload;
+                return true;
+            }
+            catch
+            {
+                Interlocked.Increment(ref authenticationFailures);
+                return false;
+            }
+        }
+
+        private static bool TryReadSecureDataV2(
+            byte[] datagram,
+            byte[] expectedSessionId,
+            out long sequence,
+            out byte[] payload,
+            out byte[] sequenceBytes,
+            out byte[] lengthBytes,
+            out byte[] tag)
+        {
+            sequence = 0L;
+            payload = Array.Empty<byte>();
+            sequenceBytes = Array.Empty<byte>();
+            lengthBytes = Array.Empty<byte>();
+            tag = Array.Empty<byte>();
+            if (datagram.Length
+                < SecureDataV2HeaderBytes
+                    + SecureDataV2TagBytes)
             {
                 return false;
             }
 
-            receivedSecuritySequences.Add(sequence);
-            if (sequence > highestReceiveSecuritySequence)
+            var receivedSession = new byte[16];
+            sequenceBytes = new byte[8];
+            lengthBytes = new byte[4];
+            Buffer.BlockCopy(
+                datagram,
+                4,
+                receivedSession,
+                0,
+                receivedSession.Length);
+            Buffer.BlockCopy(
+                datagram,
+                20,
+                sequenceBytes,
+                0,
+                sequenceBytes.Length);
+            Buffer.BlockCopy(
+                datagram,
+                28,
+                lengthBytes,
+                0,
+                lengthBytes.Length);
+            if (!DirectTransportSecurity.FixedTimeEquals(
+                    receivedSession,
+                    expectedSessionId))
             {
-                highestReceiveSecuritySequence = sequence;
+                return false;
             }
 
-            if (receivedSecuritySequences.Count > 4096)
+            sequence = BitConverter.ToInt64(
+                sequenceBytes,
+                0);
+            var payloadLength = BitConverter.ToInt32(
+                lengthBytes,
+                0);
+            if (payloadLength < 0
+                || payloadLength > MaxSecureDataV2PayloadBytes
+                || datagram.Length
+                    != SecureDataV2HeaderBytes
+                        + payloadLength
+                        + SecureDataV2TagBytes)
             {
-                receivedSecuritySequences.RemoveWhere(
+                return false;
+            }
+
+            payload = new byte[payloadLength];
+            tag = new byte[SecureDataV2TagBytes];
+            Buffer.BlockCopy(
+                datagram,
+                SecureDataV2HeaderBytes,
+                payload,
+                0,
+                payloadLength);
+            Buffer.BlockCopy(
+                datagram,
+                SecureDataV2HeaderBytes + payloadLength,
+                tag,
+                0,
+                tag.Length);
+            return true;
+        }
+
+        private void SendPayloadToClient(
+            byte[] payload,
+            IPEndPoint target)
+        {
+            if (!securityEnabled)
+            {
+                SendDatagram(payload, target);
+                return;
+            }
+
+            if (!authenticationEstablished
+                || sessionId == null)
+            {
+                return;
+            }
+
+            var sequence =
+                Interlocked.Increment(ref sendSecuritySequence);
+            SendSecuredPayload(
+                payload,
+                target,
+                sessionId,
+                sequence,
+                binarySecurityDataEnabled);
+        }
+
+        private void SendPayloadToHostPeer(
+            byte[] payload,
+            HostUdpPeerSession peer)
+        {
+            if (!securityEnabled)
+            {
+                SendDatagram(payload, peer.Endpoint);
+                return;
+            }
+
+            if (!peer.AuthenticationEstablished
+                || peer.SessionId == null)
+            {
+                return;
+            }
+
+            long sequence;
+            lock (peer.SequenceLock)
+            {
+                sequence = ++peer.SendSequence;
+            }
+
+            SendSecuredPayload(
+                payload,
+                peer.Endpoint,
+                peer.SessionId,
+                sequence,
+                peer.BinarySecurityDataEnabled);
+        }
+
+        private void SendSecuredPayload(
+            byte[] payload,
+            IPEndPoint target,
+            byte[] activeSessionId,
+            long sequence,
+            bool binary)
+        {
+            var sequenceBytes = BitConverter.GetBytes(sequence);
+            if (binary)
+            {
+                var lengthBytes = BitConverter.GetBytes(payload.Length);
+                var tagV2 = DirectTransportSecurity.Mac(
+                    securityKey,
+                    "UDP-DATA2",
+                    activeSessionId,
+                    sequenceBytes,
+                    lengthBytes,
+                    payload);
+                var packetV2 = new byte[
+                    SecureDataV2HeaderBytes
+                    + payload.Length
+                    + SecureDataV2TagBytes];
+                Buffer.BlockCopy(
+                    SecureDataV2Magic,
+                    0,
+                    packetV2,
+                    0,
+                    SecureDataV2Magic.Length);
+                Buffer.BlockCopy(
+                    activeSessionId,
+                    0,
+                    packetV2,
+                    4,
+                    16);
+                Buffer.BlockCopy(
+                    sequenceBytes,
+                    0,
+                    packetV2,
+                    20,
+                    8);
+                Buffer.BlockCopy(
+                    lengthBytes,
+                    0,
+                    packetV2,
+                    28,
+                    4);
+                Buffer.BlockCopy(
+                    payload,
+                    0,
+                    packetV2,
+                    SecureDataV2HeaderBytes,
+                    payload.Length);
+                Buffer.BlockCopy(
+                    tagV2,
+                    0,
+                    packetV2,
+                    SecureDataV2HeaderBytes + payload.Length,
+                    tagV2.Length);
+                Interlocked.Increment(
+                    ref secureBinaryPacketsSent);
+                SendDatagram(packetV2, target);
+                return;
+            }
+
+            var tag = DirectTransportSecurity.Mac(
+                securityKey,
+                "UDP-DATA",
+                activeSessionId,
+                sequenceBytes,
+                payload);
+            var packet = DirectTransportSecurity.UdpData
+                + "\t"
+                + Convert.ToBase64String(activeSessionId)
+                + "\t"
+                + sequence.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + "\t"
+                + Convert.ToBase64String(payload)
+                + "\t"
+                + Convert.ToBase64String(tag);
+            SendDatagram(
+                Encoding.UTF8.GetBytes(packet),
+                target);
+        }
+
+        private void SendClientHelloIfDue()
+        {
+            if (!securityEnabled
+                || isHostEndpoint
+                || authenticationEstablished
+                || udpClient == null
+                || remoteEndpoint == null
+                || clientNonce == null)
+            {
+                return;
+            }
+
+            if (DateTime.UtcNow < nextClientHelloUtc)
+            {
+                return;
+            }
+
+            nextClientHelloUtc =
+                DateTime.UtcNow.AddSeconds(1);
+            var tag = DirectTransportSecurity.Mac(
+                securityKey,
+                "UDP-C1",
+                clientNonce);
+            SendRawSecurityPacket(
+                DirectTransportSecurity.UdpClientHello
+                    + "\t"
+                    + Convert.ToBase64String(clientNonce)
+                    + "\t"
+                    + Convert.ToBase64String(tag),
+                remoteEndpoint);
+        }
+
+        private bool AcceptClientReceiveSequence(
+            long sequence)
+        {
+            return AcceptReceiveSequence(
+                sequence,
+                ref highestReceiveSecuritySequence,
+                receivedSecuritySequences);
+        }
+
+        private static bool AcceptHostReceiveSequence(
+            HostUdpPeerSession peer,
+            long sequence)
+        {
+            lock (peer.SequenceLock)
+            {
+                return AcceptReceiveSequence(
+                    sequence,
+                    ref peer.HighestReceiveSequence,
+                    peer.ReceivedSequences);
+            }
+        }
+
+        private static bool AcceptReceiveSequence(
+            long sequence,
+            ref long highestSequence,
+            HashSet<long> receivedSequences)
+        {
+            if (sequence <= 0
+                || sequence <= highestSequence - 2048
+                || receivedSequences.Contains(sequence))
+            {
+                return false;
+            }
+
+            receivedSequences.Add(sequence);
+            if (sequence > highestSequence)
+            {
+                highestSequence = sequence;
+            }
+
+            if (receivedSequences.Count > 4096)
+            {
+                receivedSequences.RemoveWhere(
                     value =>
-                        value <= highestReceiveSecuritySequence - 2048);
+                        value <= highestSequence - 2048);
             }
 
             return true;
@@ -1249,14 +2098,59 @@ namespace GoingCooperative.Core
             return ++unauthenticatedDatagramsThisWindow <= 128;
         }
 
+        private void PruneHostPeerSessionsLocked()
+        {
+            var now = DateTime.UtcNow;
+            var remove = new List<string>();
+            foreach (var pair in hostPeersByEndpoint)
+            {
+                var peer = pair.Value;
+                if (peer.Closed
+                    || (string.IsNullOrEmpty(peer.PeerId)
+                        && now - peer.LastSeenUtc
+                            > TimeSpan.FromSeconds(15))
+                    || (now - peer.LastSeenUtc
+                        > TimeSpan.FromMinutes(2)))
+                {
+                    remove.Add(pair.Key);
+                }
+            }
+
+            for (var i = 0; i < remove.Count; i++)
+            {
+                if (!hostPeersByEndpoint.TryGetValue(
+                        remove[i],
+                        out var peer))
+                {
+                    continue;
+                }
+
+                hostPeersByEndpoint.Remove(remove[i]);
+                if (!string.IsNullOrEmpty(peer.PeerId)
+                    && hostPeersById.TryGetValue(
+                        peer.PeerId,
+                        out var indexed)
+                    && ReferenceEquals(indexed, peer))
+                {
+                    hostPeersById.Remove(peer.PeerId);
+                }
+
+                peer.Closed = true;
+            }
+        }
+
         private void SendRawSecurityPacket(
             string packet,
             IPEndPoint target)
         {
-            SendDatagram(Encoding.UTF8.GetBytes(packet), target);
+            SendDatagram(
+                Encoding.UTF8.GetBytes(packet),
+                target);
         }
 
-        private void SendDatagram(byte[] bytes, IPEndPoint target)
+        private void SendDatagram(
+            byte[] bytes,
+            IPEndPoint target)
         {
             var client = udpClient;
             if (client == null)
@@ -1273,19 +2167,30 @@ namespace GoingCooperative.Core
                     return;
                 }
 
-                sent = client.Send(bytes, bytes.Length, target);
+                sent = client.Send(
+                    bytes,
+                    bytes.Length,
+                    target);
             }
 
             Interlocked.Increment(ref datagramsSent);
             Interlocked.Add(ref bytesSent, sent);
         }
 
-        private static byte[] SessionId(byte[] client, byte[] host)
+        private static byte[] SessionId(
+            byte[] client,
+            byte[] host)
         {
             using (var sha = SHA256.Create())
             {
-                var combined = new byte[client.Length + host.Length];
-                Buffer.BlockCopy(client, 0, combined, 0, client.Length);
+                var combined =
+                    new byte[client.Length + host.Length];
+                Buffer.BlockCopy(
+                    client,
+                    0,
+                    combined,
+                    0,
+                    client.Length);
                 Buffer.BlockCopy(
                     host,
                     0,
@@ -1294,9 +2199,31 @@ namespace GoingCooperative.Core
                     host.Length);
                 var full = sha.ComputeHash(combined);
                 var result = new byte[16];
-                Buffer.BlockCopy(full, 0, result, 0, result.Length);
+                Buffer.BlockCopy(
+                    full,
+                    0,
+                    result,
+                    0,
+                    result.Length);
                 return result;
             }
+        }
+
+        private static string FormatEndpointKey(
+            IPEndPoint endpoint)
+        {
+            return endpoint.Address
+                + ":"
+                + endpoint.Port.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        private static IPEndPoint CloneEndpoint(
+            IPEndPoint endpoint)
+        {
+            return new IPEndPoint(
+                endpoint.Address,
+                endpoint.Port);
         }
 
         private static bool EndpointEquals(
@@ -1307,15 +2234,21 @@ namespace GoingCooperative.Core
                 && left.Address.Equals(right.Address);
         }
 
-        private static IPAddress ResolveHost(string host)
+        private static IPAddress ResolveHost(
+            string host)
         {
-            if (IPAddress.TryParse(host, out var address))
+            if (IPAddress.TryParse(
+                    host,
+                    out var address))
             {
                 return address;
             }
 
-            var addresses = Dns.GetHostAddresses(host);
-            for (var i = 0; i < addresses.Length; i++)
+            var addresses =
+                Dns.GetHostAddresses(host);
+            for (var i = 0;
+                i < addresses.Length;
+                i++)
             {
                 if (addresses[i].AddressFamily
                     == AddressFamily.InterNetwork)
@@ -1333,16 +2266,60 @@ namespace GoingCooperative.Core
                 "Could not resolve host: " + host);
         }
 
+        private sealed class OutgoingTransportItem
+        {
+            public OutgoingTransportItem(
+                TransportEnvelope envelope,
+                string? targetPeerId,
+                string? excludedPeerId)
+            {
+                Envelope = envelope;
+                TargetPeerId = targetPeerId;
+                ExcludedPeerId = excludedPeerId;
+            }
+
+            public TransportEnvelope Envelope { get; }
+            public string? TargetPeerId { get; }
+            public string? ExcludedPeerId { get; }
+        }
+
+        private sealed class HostUdpPeerSession
+        {
+            public HostUdpPeerSession(
+                IPEndPoint endpoint)
+            {
+                Endpoint = endpoint;
+                LastSeenUtc = DateTime.UtcNow;
+            }
+
+            public IPEndPoint Endpoint { get; }
+            public string PeerId { get; set; } = string.Empty;
+            public byte[]? ClientNonce { get; set; }
+            public byte[]? HostNonce { get; set; }
+            public byte[]? SessionId { get; set; }
+            public bool AuthenticationEstablished { get; set; }
+            public bool BinarySecurityDataEnabled { get; set; }
+            public bool ApplicationCompatible { get; set; }
+            public bool Closed { get; set; }
+            public long SendSequence;
+            public long HighestReceiveSequence;
+            public HashSet<long> ReceivedSequences { get; } =
+                new HashSet<long>();
+            public object SequenceLock { get; } = new object();
+            public DateTime LastSeenUtc { get; set; }
+        }
+
         private sealed class ReceiveState
         {
-            public ReceiveState(UdpClient client, int generation)
+            public ReceiveState(
+                UdpClient client,
+                int generation)
             {
                 Client = client;
                 Generation = generation;
             }
 
             public UdpClient Client { get; }
-
             public int Generation { get; }
         }
     }
