@@ -3231,7 +3231,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 var commandSequence = ++replicationIntentSequence;
                 var command = new LockstepCommand(
-                    ReplicationClientPeerId,
+                    GetReplicationLocalPeerId(),
                     commandSequence,
                     0L,
                     CommandKind.Custom,
