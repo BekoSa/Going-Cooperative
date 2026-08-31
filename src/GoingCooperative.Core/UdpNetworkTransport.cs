@@ -423,6 +423,23 @@ namespace GoingCooperative.Core
             }
         }
 
+        public bool IsPeerApplicationReady(string peerId)
+        {
+            if (!isHostEndpoint
+                || string.IsNullOrWhiteSpace(peerId))
+            {
+                return false;
+            }
+
+            lock (hostPeerLock)
+            {
+                return hostPeersById.TryGetValue(peerId, out var peer)
+                    && !peer.Closed
+                    && peer.AuthenticationEstablished
+                    && peer.ApplicationCompatible;
+            }
+        }
+
         public bool RemovePeer(string peerId)
         {
             if (!isHostEndpoint
