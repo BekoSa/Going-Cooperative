@@ -1739,7 +1739,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             replicationClientSelectedBuildingHostIdV2 = hostId;
             var command = new LockstepCommand(
-                ReplicationClientPeerId,
+                GetReplicationLocalPeerId(),
                 ++replicationIntentSequence,
                 0L,
                 CommandKind.Custom,
