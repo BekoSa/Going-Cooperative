@@ -15,6 +15,7 @@ namespace GoingCooperative.Core
         ReplicationResourceContainerBatch = 28,
         ReplicationPlayerPresence = 29,
         ReplicationPlayerPing = 30,
+        ReplicationPlayerSelection = 31,
         Chunk = 100
     }
 
