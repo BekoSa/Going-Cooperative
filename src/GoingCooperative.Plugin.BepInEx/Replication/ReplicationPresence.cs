@@ -350,8 +350,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            if (TryGetReplicationViewEntityId(selected, out entityId)
-                || TryGetReplicationStableEntityId(selected, out entityId))
+            if (TryGetReplicationViewEntityId(selected, out entityId))
             {
                 return true;
             }
@@ -383,7 +382,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            return false;
+            // Last-resort fallback for versions where SelectedObjects exposes
+            // an owner/data object rather than the actual AnimatedAgentView.
+            return TryGetReplicationStableEntityId(selected, out entityId);
         }
 
         private static bool TryGetReplicationAnimatedAgentViewFromComponent(
