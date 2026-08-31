@@ -105,7 +105,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 var message = new ReplicationPlayerPresence(
                     ++replicationPresenceSequence,
                     visible,
@@ -142,7 +142,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextSelectionHeartbeatRealtime = now + ReplicationSelectionHeartbeatSeconds;
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 replicationTransport.Send(ReplicationPresencePayloadCodec.ForSelection(
                     senderId,
                     new ReplicationPlayerSelection(++replicationSelectionSequence, entityIds)));
@@ -165,7 +165,7 @@ namespace GoingCooperative.Plugin.BepInEx
             AddReplicationPresencePing(sequence, false, world, Time.realtimeSinceStartup);
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 replicationTransport.Send(ReplicationPresencePayloadCodec.ForPing(
                     senderId,
                     new ReplicationPlayerPing(sequence, world.x, world.y, world.z)));
