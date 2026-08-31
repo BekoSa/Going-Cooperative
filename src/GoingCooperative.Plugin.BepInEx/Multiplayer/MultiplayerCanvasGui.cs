@@ -96,6 +96,7 @@ namespace GoingCooperative.Plugin.BepInEx
             MultiplayerTransferTest.Update(Time.realtimeSinceStartup);
             UpdateMultiplayerTransferTestUi();
             UpdateMultiplayerInGameHud();
+            UpdateMultiplayerPresenceGui();
             UpdateMultiplayerResyncOverlay();
             if (!multiplayerCanvasOpenedAtUsableResolution && Screen.width >= 640 && Screen.height >= 480)
             {
@@ -766,6 +767,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void DestroyMultiplayerCanvasGui()
         {
+            DestroyMultiplayerPresenceGui();
             if (multiplayerCanvasRoot != null) Destroy(multiplayerCanvasRoot);
             if (multiplayerCanvasEventSystem != null) Destroy(multiplayerCanvasEventSystem);
             multiplayerCanvasRoot = null;
