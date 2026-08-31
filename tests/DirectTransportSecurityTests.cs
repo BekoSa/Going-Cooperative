@@ -114,7 +114,7 @@ internal static class DirectTransportSecurityTests
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(1);
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        Exception hostFailure = null;
+        Exception? hostFailure = null;
         var host = new Thread(() =>
         {
             try
