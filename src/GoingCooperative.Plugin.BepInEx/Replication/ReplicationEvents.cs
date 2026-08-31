@@ -2413,7 +2413,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 state.DialogIndex,
                 optionIndex,
                 requestId);
-            var command = new LockstepCommand(ReplicationClientPeerId, ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
+            var command = new LockstepCommand(GetReplicationLocalPeerId(), ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
             replicationPendingEventChoice = new PendingReplicationEventChoice
             {
                 Command = command,
