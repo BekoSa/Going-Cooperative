@@ -34,6 +34,29 @@ internal static class CorePolicyTests
     public static int Main()
     {
         failures += DirectTransportSecurityTests.Run();
+
+        Equal(true,
+            MultiplayerActionRegistry.ClientIntentFingerprint.StartsWith(
+                MultiplayerActionRegistry.WireVersion + ":",
+                StringComparison.Ordinal),
+            "multiplayer action fingerprint carries schema version");
+        Equal(true,
+            MultiplayerActionRegistry.IsKnownCustomClientIntent(
+                LockstepCommandPayloads.CombatAttackAction),
+            "combat attack registered as client intent");
+        Equal(true,
+            MultiplayerActionRegistry.IsKnownCustomClientIntent(
+                LockstepCommandPayloads.ResearchActivateAction),
+            "research activate registered as client intent");
+        Equal(false,
+            MultiplayerActionRegistry.IsKnownCustomClientIntent(
+                LockstepCommandPayloads.CombatOutcomeAction),
+            "host combat outcome is not a client intent");
+        Equal(false,
+            MultiplayerActionRegistry.IsKnownCustomClientIntent(
+                "future-unknown-action"),
+            "unknown custom action rejected by registry");
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
