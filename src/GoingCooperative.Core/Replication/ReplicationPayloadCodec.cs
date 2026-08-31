@@ -7,9 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // REPL-4 adds remote player selection presentation on top of Direct presence.
-        // Peers still exchange the legacy-framed hello before enabling compact UDP data.
-        public const string ProtocolVersion = "GCOOP-REPL-4";
+        // REPL-5 moves Direct transport encode/auth/receive/send off the Unity main
+        // thread, adds coalesced presence state, and negotiates the client-action registry.
+        public const string ProtocolVersion = "GCOOP-REPL-5";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
