@@ -1336,6 +1336,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationPresentationAnimalV2StopsHeld = 0L;
             replicationPresentationAnimalV2IdleWritesAvoided = 0L;
             replicationPresentationAnimalV2LowSpeedTangentsBypassed = 0L;
+            replicationPresentationIdleTracksSkipped = 0L;
             ResetReplicationSemanticMotionState();
             ResetReplicationSemanticAgentMotionPresentation();
         }
@@ -1356,6 +1357,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " animalV2StopsHeld=" + replicationPresentationAnimalV2StopsHeld
                 + " animalV2IdleWritesAvoided=" + replicationPresentationAnimalV2IdleWritesAvoided
                 + " animalV2LowSpeedTangentsBypassed=" + replicationPresentationAnimalV2LowSpeedTangentsBypassed
+                + " idleTracksSkipped=" + replicationPresentationIdleTracksSkipped
                 + " " + FormatReplicationSemanticMotionStatus();
         }
     }
