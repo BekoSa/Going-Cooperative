@@ -4343,7 +4343,7 @@ namespace GoingCooperative.Plugin.BepInEx
             try
             {
                 replicationTransport.Send(ReplicationPayloadCodec.ForWorldObjectDeltaAck(
-                    ReplicationClientPeerId,
+                    GetReplicationLocalPeerId(),
                     new ReplicationWorldObjectDeltaAck(delta.Sequence, applied, duplicate, detail)));
                 replicationWorldObjectDeltaAcksSent++;
             }
@@ -5091,7 +5091,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool IsReplicationClientOriginBuildingDelta(ReplicationWorldObjectDelta delta)
         {
             return TryReadReplicationWorldObjectDetailToken(delta.Detail, "player", out var player)
-                && string.Equals(player, ReplicationClientPeerId, StringComparison.Ordinal);
+                && string.Equals(player, GetReplicationLocalPeerId(), StringComparison.Ordinal);
         }
 
         private static bool TryApplyReplicationBuildingStateSnapshotBegin(ReplicationWorldObjectDelta delta, out string detail)
