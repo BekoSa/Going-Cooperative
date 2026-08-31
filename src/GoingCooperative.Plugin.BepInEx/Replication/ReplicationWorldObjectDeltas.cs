@@ -4450,116 +4450,177 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
-        private void HandleReplicationWorldObjectDeltaAck(TransportEnvelope envelope)
+        private void HandleReplicationWorldObjectDeltaAck(
+            TransportEnvelope envelope)
         {
-            if (!ReplicationPayloadCodec.TryReadWorldObjectDeltaAck(envelope, out var ack, out var error) || ack == null)
+            if (!ReplicationPayloadCodec.TryReadWorldObjectDeltaAck(
+                    envelope,
+                    out var ack,
+                    out var error)
+                || ack == null)
             {
-                LogReplicationWarning("Going Cooperative replication world object delta ack decode failed error=" + error);
+                LogReplicationWarning(
+                    "Going Cooperative replication world object delta ack decode failed error="
+                    + error);
                 return;
             }
 
             replicationWorldObjectDeltaAcksReceived++;
             if (!replicationConfigHostMode)
             {
-                replicationLastWorldObjectDeltaSummary = "ack-ignored-nonhost sequence=" + ack.Sequence.ToString(CultureInfo.InvariantCulture);
+                replicationLastWorldObjectDeltaSummary =
+                    "ack-ignored-nonhost sequence="
+                    + ack.Sequence.ToString(CultureInfo.InvariantCulture);
                 return;
             }
 
-            HandleReplicationTraderPartyWorldDeltaAck(ack);
-            TryHandleReplicationBuildingLifecycleRepairAckV2(ack);
-
-            var removed = false;
-            ReplicationWorldObjectDelta? positivelyAcknowledgedBuildBatchResult = null;
-            ReplicationWorldObjectDelta? acknowledgedBuildingLifecycleV2Delta = null;
-            var positiveBuildBatchResultAck = IsPositiveReplicationBuildBatchResultAcknowledgement(ack);
-            if (ack.Applied || IsTerminalReplicationWorldObjectDeltaAck(ack.Detail))
+            var ackPeerId = envelope.SenderId;
+            if (!MultiplayerPeerIds.TryParseClientSlot(
+                    ackPeerId,
+                    out _)
+                || !ReplicationCompatiblePeerIds.Contains(ackPeerId))
             {
-                lock (ReplicationWorldObjectDeltaLock)
+                LogReplicationWarning(
+                    "[MP/REPL] world delta ack rejected sender="
+                    + ackPeerId
+                    + " sequence="
+                    + ack.Sequence.ToString(CultureInfo.InvariantCulture));
+                return;
+            }
+
+            var terminal = ack.Applied
+                || IsTerminalReplicationWorldObjectDeltaAck(ack.Detail);
+            var positiveBuildBatchResultAck =
+                IsPositiveReplicationBuildBatchResultAcknowledgement(ack);
+            var removed = false;
+            var acknowledged = false;
+            var requiredCount = 0;
+            var acknowledgedCount = 0;
+            ReplicationWorldObjectDelta? finalizedDelta = null;
+            ReplicationWorldObjectDelta? acknowledgedBuildingLifecycleV2Delta = null;
+            var positiveAckSeen = false;
+
+            lock (ReplicationWorldObjectDeltaLock)
+            {
+                if (replicationPendingWorldObjectDeltas.TryGetValue(
+                        ack.Sequence,
+                        out var pendingForAck))
                 {
-                    if (positiveBuildBatchResultAck
-                        && replicationPendingWorldObjectDeltas.TryGetValue(ack.Sequence, out var acknowledgedPending)
-                        && string.Equals(
-                            acknowledgedPending.Delta.DeltaKind,
-                            ReplicationBuildingBlueprintBatchResultDeltaKind,
-                            StringComparison.Ordinal))
+                    pendingForAck.PruneRequiredPeers(
+                        multiplayerSaveTransfer
+                            .GetReplicationRequiredClientPeerIds());
+
+                    if (terminal)
                     {
-                        // The ACK sequence identifies this exact reliable delta instance.
-                        // Retain it outside the pending map just long enough to verify and
-                        // release the matching heavy commit manifest.
-                        positivelyAcknowledgedBuildBatchResult = acknowledgedPending.Delta;
+                        acknowledged = pendingForAck.Acknowledge(
+                            ackPeerId,
+                            positiveBuildBatchResultAck || ack.Applied);
                     }
 
-                    if (replicationPendingWorldObjectDeltas.TryGetValue(ack.Sequence, out var pendingForAck))
+                    requiredCount = pendingForAck.RequiredPeerCount;
+                    acknowledgedCount = pendingForAck.AcknowledgedPeerCount;
+                    positiveAckSeen = pendingForAck.PositiveAckSeen;
+
+                    if (terminal && pendingForAck.IsComplete)
                     {
+                        finalizedDelta = pendingForAck.Delta;
                         if (string.Equals(
-                                pendingForAck.Delta.DeltaKind,
+                                finalizedDelta.DeltaKind,
                                 ReplicationBuildingLifecycleV2DeltaKind,
                                 StringComparison.Ordinal)
                             || string.Equals(
-                                pendingForAck.Delta.DeltaKind,
+                                finalizedDelta.DeltaKind,
                                 ReplicationBuildingRepairV2DeltaKind,
                                 StringComparison.Ordinal))
                         {
-                            acknowledgedBuildingLifecycleV2Delta = pendingForAck.Delta;
+                            acknowledgedBuildingLifecycleV2Delta =
+                                finalizedDelta;
                         }
 
-                        removed = replicationPendingWorldObjectDeltas.Remove(ack.Sequence);
+                        removed = replicationPendingWorldObjectDeltas.Remove(
+                            ack.Sequence);
                         if (removed)
                         {
-                            ClearReplicationPendingBuildingLifecycleSupersessionIndex(pendingForAck.Delta);
+                            ClearReplicationPendingBuildingLifecycleSupersessionIndex(
+                                pendingForAck.Delta);
                         }
                     }
                 }
             }
 
-            CompleteReplicationBuildingLifecycleAcknowledgementV2(
-                ack,
-                acknowledgedBuildingLifecycleV2Delta);
+            // No pending record means this was transient/expired state. Preserve the
+            // existing subsystem callbacks. For reliable state, run completion logic
+            // only after every peer that crossed the checkpoint boundary has ACKed.
+            if (finalizedDelta != null)
+            {
+                HandleReplicationTraderPartyWorldDeltaAck(ack);
+                TryHandleReplicationBuildingLifecycleRepairAckV2(ack);
+                CompleteReplicationBuildingLifecycleAcknowledgementV2(
+                    ack,
+                    acknowledgedBuildingLifecycleV2Delta);
+            }
+            else if (!replicationPendingWorldObjectDeltas.ContainsKey(
+                ack.Sequence))
+            {
+                HandleReplicationTraderPartyWorldDeltaAck(ack);
+                TryHandleReplicationBuildingLifecycleRepairAckV2(ack);
+            }
 
             var manifestReleaseDetail = string.Empty;
-            var manifestReleased = positivelyAcknowledgedBuildBatchResult != null
+            var manifestReleased = finalizedDelta != null
+                && positiveAckSeen
+                && string.Equals(
+                    finalizedDelta.DeltaKind,
+                    ReplicationBuildingBlueprintBatchResultDeltaKind,
+                    StringComparison.Ordinal)
                 && TryReleaseReplicationHostBuildBatchCommitManifest(
-                    positivelyAcknowledgedBuildBatchResult,
+                    finalizedDelta,
                     out manifestReleaseDetail);
-            if (positivelyAcknowledgedBuildBatchResult != null && !manifestReleased)
+            if (finalizedDelta != null
+                && string.Equals(
+                    finalizedDelta.DeltaKind,
+                    ReplicationBuildingBlueprintBatchResultDeltaKind,
+                    StringComparison.Ordinal)
+                && positiveAckSeen
+                && !manifestReleased)
             {
-                LogReplicationWarning("Going Cooperative replication build batch manifest release failed sequence="
+                LogReplicationWarning(
+                    "Going Cooperative replication build batch manifest release failed sequence="
                     + ack.Sequence.ToString(CultureInfo.InvariantCulture)
                     + " detail="
                     + manifestReleaseDetail);
             }
 
-            replicationLastWorldObjectDeltaSummary = "ack sequence="
+            replicationLastWorldObjectDeltaSummary =
+                "ack sequence="
                 + ack.Sequence.ToString(CultureInfo.InvariantCulture)
+                + " peer="
+                + ackPeerId
                 + " applied="
                 + (ack.Applied ? "yes" : "no")
                 + " duplicate="
                 + (ack.Duplicate ? "yes" : "no")
+                + " acknowledged="
+                + (acknowledged ? "yes" : "no")
+                + " peers="
+                + acknowledgedCount.ToString(CultureInfo.InvariantCulture)
+                + "/"
+                + requiredCount.ToString(CultureInfo.InvariantCulture)
                 + " removed="
                 + (removed ? "yes" : "no")
                 + " buildManifestReleased="
                 + (manifestReleased ? "yes" : "no")
                 + " detail="
                 + ack.Detail;
-            if (!IsReplicationResourcePileStateSnapshotAckDetail(ack.Detail))
+
+            if (!IsReplicationResourcePileStateSnapshotAckDetail(ack.Detail)
+                && replicationConfigVerboseReplicationLogging
+                && !ack.Duplicate
+                && !IsNoisyReplicationWorldObjectDeltaAckDetail(ack.Detail))
             {
-                if (replicationConfigVerboseReplicationLogging
-                    && !ack.Duplicate
-                    && !IsNoisyReplicationWorldObjectDeltaAckDetail(ack.Detail))
-                {
-                    LogReplicationInfo("Going Cooperative replication world object delta ack received sequence="
-                        + ack.Sequence.ToString(CultureInfo.InvariantCulture)
-                        + " applied="
-                        + (ack.Applied ? "yes" : "no")
-                        + " duplicate="
-                        + (ack.Duplicate ? "yes" : "no")
-                        + " removed="
-                        + (removed ? "yes" : "no")
-                        + " buildManifestReleased="
-                        + (manifestReleased ? "yes" : "no")
-                        + " detail="
-                        + ack.Detail);
-                }
+                LogReplicationInfo(
+                    "[MP/REPL] world object delta ack "
+                    + replicationLastWorldObjectDeltaSummary);
             }
         }
 
