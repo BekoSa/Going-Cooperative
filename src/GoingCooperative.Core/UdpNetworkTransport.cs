@@ -19,6 +19,7 @@ namespace GoingCooperative.Core
         private readonly TransportChunkReassembler chunkReassembler =
             new TransportChunkReassembler();
         private readonly object latestStateLock = new object();
+        private readonly object receiveStateLock = new object();
         private readonly object sendLock = new object();
 
         private UdpClient? udpClient;
@@ -341,15 +342,19 @@ namespace GoingCooperative.Core
                 return;
             }
 
-            ThreadPool.QueueUserWorkItem(_ => DrainSendQueue());
+            var generation = Volatile.Read(ref receiveGeneration);
+            ThreadPool.QueueUserWorkItem(
+                _ => DrainSendQueue(generation));
         }
 
-        private void DrainSendQueue()
+        private void DrainSendQueue(int generation)
         {
             try
             {
                 var processed = 0;
-                while (isConnected && processed++ < 512)
+                while (isConnected
+                    && generation == Volatile.Read(ref receiveGeneration)
+                    && processed++ < 512)
                 {
                     if (!TryDequeueOutgoingEnvelope(out var envelope))
                     {
@@ -371,6 +376,9 @@ namespace GoingCooperative.Core
                 Interlocked.Exchange(ref sendWorkerActive, 0);
                 if (isConnected && HasPendingOutgoingEnvelope())
                 {
+                    // If this worker belongs to an old session generation, this
+                    // schedules a fresh worker for the current one without allowing
+                    // the old worker to send new-session envelopes.
                     ScheduleSendWorker();
                 }
             }
@@ -559,16 +567,18 @@ namespace GoingCooperative.Core
                 latestOutgoingPlayerSelection = null;
             }
 
-            remoteEndpoint = null;
-            chunkReassembler.Clear();
-            authenticationEstablished = !securityEnabled;
-            clientNonce = hostNonce = sessionId = null;
-            pendingEndpoint = null;
-            binarySecurityDataEnabled = false;
-            sendSecuritySequence = highestReceiveSecuritySequence = 0;
-            receivedSecuritySequences.Clear();
+            lock (receiveStateLock)
+            {
+                remoteEndpoint = null;
+                chunkReassembler.Clear();
+                authenticationEstablished = !securityEnabled;
+                clientNonce = hostNonce = sessionId = null;
+                pendingEndpoint = null;
+                binarySecurityDataEnabled = false;
+                sendSecuritySequence = highestReceiveSecuritySequence = 0;
+                receivedSecuritySequences.Clear();
+            }
             Interlocked.Exchange(ref receivePending, 0);
-            Interlocked.Exchange(ref sendWorkerActive, 0);
             Interlocked.Exchange(ref authenticationFailures, 0L);
             Interlocked.Exchange(ref decodeFailures, 0L);
             Interlocked.Exchange(ref chunkFailures, 0L);
@@ -654,15 +664,23 @@ namespace GoingCooperative.Core
 
             if (bytes != null && bytes.Length > 0)
             {
-                try
+                lock (receiveStateLock)
                 {
-                    ProcessReceivedDatagram(bytes, sender);
-                }
-                catch
-                {
-                    // The receive worker must survive malformed datagrams and decoder
-                    // bugs. Individual protocol paths maintain more specific counters.
-                    Interlocked.Increment(ref decodeFailures);
+                    if (isConnected
+                        && state.Generation
+                            == Volatile.Read(ref receiveGeneration))
+                    {
+                        try
+                        {
+                            ProcessReceivedDatagram(bytes, sender);
+                        }
+                        catch
+                        {
+                            // The receive worker must survive malformed datagrams and
+                            // decoder bugs. Protocol paths maintain specific counters.
+                            Interlocked.Increment(ref decodeFailures);
+                        }
+                    }
                 }
             }
 
