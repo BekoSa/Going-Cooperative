@@ -28,7 +28,13 @@ namespace GoingCooperative.Core
         private DateTime nextClientHelloUtc;
         private int unauthenticatedDatagramsThisWindow;
         private DateTime unauthenticatedWindowUtc;
+        private bool binarySecurityDataEnabled;
         private const int MaxUnchunkedDatagramBytes = 1100;
+        private const int MaxDatagramsPerSocketPump = 48;
+        private const int SecureDataV2HeaderBytes = 32;
+        private const int SecureDataV2TagBytes = 32;
+        private const int MaxSecureDataV2PayloadBytes = 60 * 1024;
+        private static readonly byte[] SecureDataV2Magic = { (byte)'G', (byte)'C', (byte)'D', (byte)'2' };
         private const int MaxChunkEnvelopeChars = 700;
 
         public bool IsConnected { get; private set; }
@@ -42,6 +48,21 @@ namespace GoingCooperative.Core
 
         /// <summary>Chunk datagrams that failed reassembly (malformed or mismatched) and were dropped.</summary>
         public long ChunkFailures { get; private set; }
+
+        public long DatagramsSent { get; private set; }
+        public long DatagramsReceived { get; private set; }
+        public long BytesSent { get; private set; }
+        public long BytesReceived { get; private set; }
+        public long ChunkEnvelopesSent { get; private set; }
+        public long ChunkEnvelopesReceived { get; private set; }
+        public long ReassembledMessages { get; private set; }
+        public long SecureBinaryPacketsSent { get; private set; }
+        public long SecureBinaryPacketsReceived { get; private set; }
+
+        public int PendingMessages
+        {
+            get { return inbox.Count; }
+        }
 
         public int LocalPort
         {
@@ -113,6 +134,14 @@ namespace GoingCooperative.Core
             }
         }
 
+        public void EnableBinarySecurityData()
+        {
+            if (securityEnabled && AuthenticationEstablished)
+            {
+                binarySecurityDataEnabled = true;
+            }
+        }
+
         public void Send(TransportEnvelope envelope)
         {
             if (!IsConnected || udpClient == null)
@@ -129,11 +158,13 @@ namespace GoingCooperative.Core
             envelope = envelope ?? throw new ArgumentNullException(nameof(envelope));
             var encoded = TransportEnvelopeCodec.Encode(envelope);
             var bytes = Encoding.UTF8.GetBytes(encoded);
-            var maxUnchunkedBytes = securityEnabled ? 850 : MaxUnchunkedDatagramBytes;
+            var useLegacySecureDataFrame = securityEnabled && !binarySecurityDataEnabled;
+            var maxUnchunkedBytes = useLegacySecureDataFrame ? 850 : MaxUnchunkedDatagramBytes;
             if (envelope.Kind != TransportMessageKind.Chunk && bytes.Length > maxUnchunkedBytes)
             {
                 var chunkId = envelope.SenderId + "-" + (++nextChunkId).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                var chunks = TransportChunkCodec.CreateChunks(envelope, chunkId, securityEnabled ? 450 : MaxChunkEnvelopeChars);
+                var chunks = TransportChunkCodec.CreateChunks(envelope, chunkId, useLegacySecureDataFrame ? 450 : MaxChunkEnvelopeChars);
+                ChunkEnvelopesSent += chunks.Count;
                 for (var i = 0; i < chunks.Count; i++)
                 {
                     SendEncodedEnvelope(chunks[i], target);
@@ -147,7 +178,10 @@ namespace GoingCooperative.Core
 
         public bool TryReceive(out TransportEnvelope envelope)
         {
-            PumpSocket();
+            if (inbox.Count == 0)
+            {
+                PumpSocket();
+            }
             if (inbox.Count == 0)
             {
                 envelope = new TransportEnvelope(TransportMessageKind.ReplicationHello, 0, string.Empty, string.Empty);
@@ -167,7 +201,17 @@ namespace GoingCooperative.Core
             AuthenticationEstablished = !securityEnabled;
             clientNonce = hostNonce = sessionId = null;
             pendingEndpoint = null;
+            binarySecurityDataEnabled = false;
             sendSecuritySequence = highestReceiveSecuritySequence = 0;
+            DatagramsSent = 0L;
+            DatagramsReceived = 0L;
+            BytesSent = 0L;
+            BytesReceived = 0L;
+            ChunkEnvelopesSent = 0L;
+            ChunkEnvelopesReceived = 0L;
+            ReassembledMessages = 0L;
+            SecureBinaryPacketsSent = 0L;
+            SecureBinaryPacketsReceived = 0L;
             receivedSecuritySequences.Clear();
             if (udpClient != null)
             {
@@ -185,10 +229,12 @@ namespace GoingCooperative.Core
 
             SendClientHelloIfDue();
             var processed = 0;
-            while (udpClient.Available > 0 && processed++ < 2048)
+            while (udpClient.Available > 0 && processed++ < MaxDatagramsPerSocketPump)
             {
                 var sender = new IPEndPoint(IPAddress.Any, 0);
                 var bytes = udpClient.Receive(ref sender);
+                DatagramsReceived++;
+                BytesReceived += bytes.Length;
                 if (!securityEnabled && isHostEndpoint)
                 {
                     remoteEndpoint = sender;
@@ -204,8 +250,10 @@ namespace GoingCooperative.Core
                 {
                     if (decoded.Kind == TransportMessageKind.Chunk)
                     {
+                        ChunkEnvelopesReceived++;
                         if (chunkReassembler.TryAddChunk(decoded, out var reassembled, out var chunkError) && reassembled != null)
                         {
+                            ReassembledMessages++;
                             inbox.Enqueue(reassembled);
                         }
                         else if (!string.IsNullOrEmpty(chunkError))
@@ -237,12 +285,27 @@ namespace GoingCooperative.Core
             if (udpClient == null) return;
             if (!securityEnabled)
             {
-                udpClient.Send(payload, payload.Length, target);
+                SendDatagram(payload, target);
                 return;
             }
             if (!AuthenticationEstablished || sessionId == null) return;
             var sequence = ++sendSecuritySequence;
             var sequenceBytes = BitConverter.GetBytes(sequence);
+            if (binarySecurityDataEnabled)
+            {
+                var lengthBytes = BitConverter.GetBytes(payload.Length);
+                var tagV2 = DirectTransportSecurity.Mac(securityKey, "UDP-DATA2", sessionId, sequenceBytes, lengthBytes, payload);
+                var packetV2 = new byte[SecureDataV2HeaderBytes + payload.Length + SecureDataV2TagBytes];
+                Buffer.BlockCopy(SecureDataV2Magic, 0, packetV2, 0, SecureDataV2Magic.Length);
+                Buffer.BlockCopy(sessionId, 0, packetV2, 4, 16);
+                Buffer.BlockCopy(sequenceBytes, 0, packetV2, 20, 8);
+                Buffer.BlockCopy(lengthBytes, 0, packetV2, 28, 4);
+                Buffer.BlockCopy(payload, 0, packetV2, SecureDataV2HeaderBytes, payload.Length);
+                Buffer.BlockCopy(tagV2, 0, packetV2, SecureDataV2HeaderBytes + payload.Length, tagV2.Length);
+                SecureBinaryPacketsSent++;
+                SendDatagram(packetV2, target);
+                return;
+            }
             var tag = DirectTransportSecurity.Mac(securityKey, "UDP-DATA", sessionId, sequenceBytes, payload);
             var packet = DirectTransportSecurity.UdpData + "\t"
                 + Convert.ToBase64String(sessionId) + "\t"
@@ -250,7 +313,7 @@ namespace GoingCooperative.Core
                 + Convert.ToBase64String(payload) + "\t"
                 + Convert.ToBase64String(tag);
             var bytes = Encoding.UTF8.GetBytes(packet);
-            udpClient.Send(bytes, bytes.Length, target);
+            SendDatagram(bytes, target);
         }
 
         private void SendClientHelloIfDue()
@@ -269,6 +332,10 @@ namespace GoingCooperative.Core
             {
                 AuthenticationFailures++;
                 return false;
+            }
+            if (LooksLikeSecureDataV2(datagram))
+            {
+                return TryUnwrapSecureDataV2(datagram, out payload);
             }
             var line = Encoding.UTF8.GetString(datagram);
             var fields = line.Split('\t');
@@ -335,6 +402,48 @@ namespace GoingCooperative.Core
             return false;
         }
 
+        private static bool LooksLikeSecureDataV2(byte[] datagram)
+        {
+            if (datagram == null || datagram.Length < SecureDataV2HeaderBytes + SecureDataV2TagBytes) return false;
+            for (var i = 0; i < SecureDataV2Magic.Length; i++) if (datagram[i] != SecureDataV2Magic[i]) return false;
+            return true;
+        }
+
+        private bool TryUnwrapSecureDataV2(byte[] datagram, out byte[] payload)
+        {
+            payload = new byte[0];
+            if (!AuthenticationEstablished || sessionId == null) { AuthenticationFailures++; return false; }
+            try
+            {
+                var receivedSession = new byte[16];
+                var sequenceBytes = new byte[8];
+                var lengthBytes = new byte[4];
+                Buffer.BlockCopy(datagram, 4, receivedSession, 0, 16);
+                Buffer.BlockCopy(datagram, 20, sequenceBytes, 0, 8);
+                Buffer.BlockCopy(datagram, 28, lengthBytes, 0, 4);
+                var sequence = BitConverter.ToInt64(sequenceBytes, 0);
+                var payloadLength = BitConverter.ToInt32(lengthBytes, 0);
+                if (payloadLength < 0 || payloadLength > MaxSecureDataV2PayloadBytes) throw new InvalidDataException();
+                if (datagram.Length != SecureDataV2HeaderBytes + payloadLength + SecureDataV2TagBytes) throw new InvalidDataException();
+                var receivedPayload = new byte[payloadLength];
+                var tag = new byte[SecureDataV2TagBytes];
+                Buffer.BlockCopy(datagram, SecureDataV2HeaderBytes, receivedPayload, 0, payloadLength);
+                Buffer.BlockCopy(datagram, SecureDataV2HeaderBytes + payloadLength, tag, 0, tag.Length);
+                var expectedTag = DirectTransportSecurity.Mac(securityKey, "UDP-DATA2", sessionId, sequenceBytes, lengthBytes, receivedPayload);
+                if (!DirectTransportSecurity.FixedTimeEquals(receivedSession, sessionId)
+                    || !DirectTransportSecurity.FixedTimeEquals(tag, expectedTag)
+                    || !AcceptReceiveSequence(sequence)) throw new InvalidDataException();
+                SecureBinaryPacketsReceived++;
+                payload = receivedPayload;
+                return true;
+            }
+            catch
+            {
+                AuthenticationFailures++;
+                return false;
+            }
+        }
+
         private bool AcceptReceiveSequence(long sequence)
         {
             if (sequence <= 0 || sequence <= highestReceiveSecuritySequence - 2048 || receivedSecuritySequences.Contains(sequence)) return false;
@@ -360,8 +469,15 @@ namespace GoingCooperative.Core
 
         private void SendRawSecurityPacket(string packet, IPEndPoint target)
         {
-            var bytes = Encoding.UTF8.GetBytes(packet);
-            udpClient?.Send(bytes, bytes.Length, target);
+            SendDatagram(Encoding.UTF8.GetBytes(packet), target);
+        }
+
+        private void SendDatagram(byte[] bytes, IPEndPoint target)
+        {
+            if (udpClient == null) return;
+            var sent = udpClient.Send(bytes, bytes.Length, target);
+            DatagramsSent++;
+            BytesSent += sent;
         }
 
         private static byte[] SessionId(byte[] client, byte[] host)
