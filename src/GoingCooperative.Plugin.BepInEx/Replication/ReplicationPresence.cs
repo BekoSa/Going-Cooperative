@@ -36,6 +36,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static Vector3 replicationRemotePresenceDisplayWorld;
         private static float replicationRemotePresenceReceivedRealtime;
         private static float replicationRemoteSelectionReceivedRealtime;
+        private static string replicationRemoteDisplayName = MultiplayerNickname.DefaultNickname;
         private static Camera? replicationPresenceCamera;
         private static Type? replicationSelectableObjectManagerType;
         private static Type? replicationRaycastUtilsType;
@@ -676,6 +677,11 @@ namespace GoingCooperative.Plugin.BepInEx
             return true;
         }
 
+        private static string GetReplicationRemoteDisplayName()
+        {
+            return MultiplayerNickname.Normalize(replicationRemoteDisplayName);
+        }
+
         private static IReadOnlyList<string> GetReplicationRemoteSelectedEntityIds()
         {
             if (Time.realtimeSinceStartup - replicationRemoteSelectionReceivedRealtime
@@ -821,6 +827,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationRemotePresenceDisplayWorld = Vector3.zero;
             replicationRemotePresenceReceivedRealtime = 0f;
             replicationRemoteSelectionReceivedRealtime = 0f;
+            replicationRemoteDisplayName = MultiplayerNickname.DefaultNickname;
             replicationPresenceCamera = null;
             replicationSelectableObjectManagerType = null;
             replicationRaycastUtilsType = null;
