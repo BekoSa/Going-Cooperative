@@ -7,10 +7,10 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // Building snapshot scheduling changed in REPL-2. Keep this a hard wire
-        // compatibility boundary: an older peer can otherwise accept a session yet
-        // disagree about when authoritative building state is allowed to replay.
-        public const string ProtocolVersion = "GCOOP-REPL-2";
+        // REPL-3 keeps the existing replication contract and adds peer-presence messages.
+        // It also gates the compact authenticated Direct UDP data frame: peers first
+        // exchange the ordinary legacy-framed hello, then switch only after compatibility.
+        public const string ProtocolVersion = "GCOOP-REPL-3";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
