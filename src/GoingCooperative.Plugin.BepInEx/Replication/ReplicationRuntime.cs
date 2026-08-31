@@ -1774,9 +1774,16 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
-                replicationTransport.Send(ReplicationPayloadCodec.ForCommandAck(
-                    ReplicationHostPeerId,
-                    new ReplicationCommandAck(command.PlayerId, command.Sequence, accepted, duplicate, detail)));
+                replicationTransport.SendToPeer(
+                    command.PlayerId,
+                    ReplicationPayloadCodec.ForCommandAck(
+                        ReplicationHostPeerId,
+                        new ReplicationCommandAck(
+                            command.PlayerId,
+                            command.Sequence,
+                            accepted,
+                            duplicate,
+                            detail)));
                 replicationCommandAcksSent++;
             }
             catch (Exception ex)
