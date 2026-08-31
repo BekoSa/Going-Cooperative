@@ -1,0 +1,72 @@
+name: Build Going Cooperative
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - chatgpt/direct-presence-p0
+
+jobs:
+  build:
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+
+    timeout-minutes: 20
+
+    env:
+      GAME_ROOT: C:\\GOG Games\\Going Medieval
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify runner
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Write-Host "Runner: $env:COMPUTERNAME"
+          Write-Host "Game root: $env:GAME_ROOT"
+          dotnet --info
+          if (-not (Test-Path "$env:GAME_ROOT\\Going Medieval_Data\\Managed\\Assembly-CSharp.dll")) {
+            throw "Assembly-CSharp.dll not found under GAME_ROOT"
+          }
+          if (-not (Test-Path "$env:GAME_ROOT\\Going Medieval_Data\\Managed\\com.rlabrecque.steamworks.net.dll")) {
+            throw "Steamworks assembly not found under GAME_ROOT"
+          }
+
+      - name: Build plugin
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          powershell -ExecutionPolicy Bypass `
+            -File .\\scripts\\Build.ps1 `
+            -Configuration Release `
+            -GameRoot "$env:GAME_ROOT"
+
+      - name: Upload DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoingCooperative-dll-${{ github.sha }}
+          path: artifacts/bin/Release/GoingCooperative.dll
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Package player build
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          powershell -ExecutionPolicy Bypass `
+            -File .\\scripts\\Package-Release.ps1 `
+            -GameRoot "$env:GAME_ROOT"
+
+      - name: Upload player package
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoingCooperative-player-${{ github.sha }}
+          path: |
+            artifacts/Going-Cooperative-v*-win-x64.zip
+            artifacts/Going-Cooperative-v*-win-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
