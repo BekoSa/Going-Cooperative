@@ -516,6 +516,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         case TransportMessageKind.ReplicationPlayerPing:
                             HandleReplicationPlayerPing(envelope);
                             break;
+                        case TransportMessageKind.ReplicationPlayerSelection:
+                            HandleReplicationPlayerSelection(envelope);
+                            break;
                     }
                 }
                 catch (Exception ex)
