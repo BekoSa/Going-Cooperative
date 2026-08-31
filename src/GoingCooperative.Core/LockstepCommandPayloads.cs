@@ -1347,7 +1347,7 @@ namespace GoingCooperative.Core
                 return false;
             }
 
-            var normalizedJson = NormalizeJson(payloadJson);
+            var normalizedJson = Normalize(payloadJson);
             return TryReadStringProperty(normalizedJson, "action", out action)
                 && !string.IsNullOrWhiteSpace(action);
         }
