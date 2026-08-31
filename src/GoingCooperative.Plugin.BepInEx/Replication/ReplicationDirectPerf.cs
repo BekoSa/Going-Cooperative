@@ -39,6 +39,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " binaryTx=" + replicationTransport.SecureBinaryPacketsSent.ToString(CultureInfo.InvariantCulture)
                 + " binaryRx=" + replicationTransport.SecureBinaryPacketsReceived.ToString(CultureInfo.InvariantCulture)
                 + " pending=" + replicationTransport.PendingMessages.ToString(CultureInfo.InvariantCulture)
+                + " coalescedRx=" + replicationTransport.CoalescedStateReplacements.ToString(CultureInfo.InvariantCulture)
+                + " coalescedTx=" + replicationTransport.OutgoingCoalescedStateReplacements.ToString(CultureInfo.InvariantCulture)
+                + " sendFailures=" + replicationTransport.SendFailures.ToString(CultureInfo.InvariantCulture)
                 + " sparseSent=" + replicationSparseTransformRowsSent.ToString(CultureInfo.InvariantCulture)
                 + " sparseSuppressed=" + replicationSparseTransformRowsSuppressed.ToString(CultureInfo.InvariantCulture));
 
