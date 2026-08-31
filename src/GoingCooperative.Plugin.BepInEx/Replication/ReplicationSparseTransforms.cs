@@ -17,6 +17,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationNextSparseTransformPruneRealtime;
         private static long replicationSparseTransformRowsSent;
         private static long replicationSparseTransformRowsSuppressed;
+        private static long replicationSparseTransformRowsPrefiltered;
 
         private sealed class ReplicationSparseTransformState
         {
@@ -26,6 +27,31 @@ namespace GoingCooperative.Plugin.BepInEx
             public long LastPathRevision;
             public float LastSentRealtime;
             public float LastObservedRealtime;
+        }
+
+        private static bool ShouldPrefilterReplicationUnchangedTransform(
+            string entityId,
+            Vector3 position,
+            Quaternion rotation,
+            float now)
+        {
+            if (!ReplicationSparseTransformStates.TryGetValue(entityId, out var state))
+            {
+                return false;
+            }
+
+            state.LastObservedRealtime = now;
+            if (state.LastMoving
+                || now - state.LastSentRealtime >= ReplicationIdleTransformHeartbeatSeconds
+                || (position - state.LastSentPosition).sqrMagnitude >= ReplicationSparsePositionThresholdSqr
+                || Mathf.Abs(Quaternion.Dot(rotation, state.LastSentRotation))
+                    < ReplicationSparseRotationDotThreshold)
+            {
+                return false;
+            }
+
+            replicationSparseTransformRowsPrefiltered++;
+            return true;
         }
 
         private static ReplicationTransformSnapshot PrepareReplicationTransformSnapshotForWire(ReplicationTransformSnapshot snapshot)
@@ -126,6 +152,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextSparseTransformPruneRealtime = 0f;
             replicationSparseTransformRowsSent = 0L;
             replicationSparseTransformRowsSuppressed = 0L;
+            replicationSparseTransformRowsPrefiltered = 0L;
         }
     }
 }
