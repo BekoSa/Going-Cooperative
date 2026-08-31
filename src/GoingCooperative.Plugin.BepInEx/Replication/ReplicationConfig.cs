@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using BepInEx;
+using GoingCooperative.Core;
 
 namespace GoingCooperative.Plugin.BepInEx
 {
@@ -11,6 +12,29 @@ namespace GoingCooperative.Plugin.BepInEx
         private const string DiagnosticsConfigRelativePath = @"GoingCooperative\diagnostics.cfg";
         private const string ReplicationHostPeerId = "host";
         private const string ReplicationClientPeerId = "client";
+        private static string replicationAssignedClientPeerId = ReplicationClientPeerId;
+
+        private static string GetReplicationLocalPeerId()
+        {
+            if (replicationConfigHostMode)
+            {
+                return ReplicationHostPeerId;
+            }
+
+            return MultiplayerPeerIds.TryParseClientSlot(
+                    replicationAssignedClientPeerId,
+                    out _)
+                ? replicationAssignedClientPeerId
+                : ReplicationClientPeerId;
+        }
+
+        private static void SetReplicationLocalPeerId(string peerId)
+        {
+            replicationAssignedClientPeerId =
+                MultiplayerPeerIds.TryParseClientSlot(peerId, out _)
+                    ? peerId
+                    : ReplicationClientPeerId;
+        }
 
         private static bool replicationConfigLoadAttempted;
         private static bool replicationConfigEnabled;
