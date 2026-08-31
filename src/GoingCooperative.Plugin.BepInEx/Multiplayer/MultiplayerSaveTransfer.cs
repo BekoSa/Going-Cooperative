@@ -146,6 +146,66 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public string[] GetReplicationRequiredClientPeerIds()
+        {
+            if (!hostMode)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (stateLock)
+            {
+                var result = new List<string>();
+                foreach (var peer in hostPeers.Values)
+                {
+                    if (!peer.Closed && peer.RequiresCatchup)
+                    {
+                        result.Add(peer.PeerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
+        public string[] GetPlayingClientPeerIds()
+        {
+            if (!hostMode)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (stateLock)
+            {
+                var result = new List<string>();
+                foreach (var peer in hostPeers.Values)
+                {
+                    if (!peer.Closed && peer.ReadyForReplication)
+                    {
+                        result.Add(peer.PeerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
+        public bool IsClientPeerConnected(string peerId)
+        {
+            if (!hostMode)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                return hostPeers.TryGetValue(peerId, out var peer)
+                    && !peer.Closed;
+            }
+        }
+
         public void StartHost(
             int port,
             bool securityEnabled = false,
@@ -273,6 +333,13 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var peer = GetHostPeer(peerId);
+            lock (stateLock)
+            {
+                // The checkpoint has now captured all state before this boundary.
+                // Durable mutations after this point must be retained until this peer
+                // finishes loading and acknowledges them.
+                peer.RequiresCatchup = true;
+            }
             var sendThread = new Thread(() =>
             {
                 try
@@ -363,6 +430,10 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var peer = GetHostPeer(peerId);
+            lock (stateLock)
+            {
+                peer.RequiresCatchup = true;
+            }
             var sendThread = new Thread(() =>
             {
                 try
@@ -1523,6 +1594,7 @@ namespace GoingCooperative.Plugin.BepInEx
             public Thread? Worker { get; set; }
             public int Epoch { get; set; }
             public bool ReadyForReplication { get; set; }
+            public bool RequiresCatchup { get; set; }
             public bool Closed { get; set; }
             public float Progress { get; set; }
             public string Phase { get; set; } = "Connecting";
