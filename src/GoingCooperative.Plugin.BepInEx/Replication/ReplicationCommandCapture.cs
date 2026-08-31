@@ -224,7 +224,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var command = new LockstepCommand(
-                ReplicationClientPeerId,
+                GetReplicationLocalPeerId(),
                 ++replicationIntentSequence,
                 0L,
                 CommandKind.Speed,
@@ -336,7 +336,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     throw new InvalidOperationException("Replication transport is not connected.");
                 }
 
-                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(ReplicationClientPeerId, new ReplicationCommandIntent(command)));
+                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(GetReplicationLocalPeerId(), new ReplicationCommandIntent(command)));
                 if (pendingDurable != null)
                 {
                     pendingDurable.LastSentRealtime = Time.realtimeSinceStartup;
@@ -459,7 +459,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 try
                 {
                     replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(
-                        ReplicationClientPeerId,
+                        GetReplicationLocalPeerId(),
                         new ReplicationCommandIntent(pending.Command)));
                     pending.LastSentRealtime = now;
                     if (pending.HostResponded)
