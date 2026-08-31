@@ -31,29 +31,6 @@ namespace GoingCooperative.Plugin.BepInEx
                 var views = FindReplicationAnimatedAgentViews();
                 CollectReplicationViewTransforms(
                     views,
-                    "worker",
-                    maxEntities,
-                    seen,
-                    seenEntityIds,
-                    entities,
-                    ref stableCount,
-                    ref fallbackCount,
-                    fallbackSample,
-                    positionSample);
-                CollectReplicationViewTransforms(
-                    views,
-                    "npc",
-                    maxEntities,
-                    seen,
-                    seenEntityIds,
-                    entities,
-                    ref stableCount,
-                    ref fallbackCount,
-                    fallbackSample,
-                    positionSample);
-                CollectReplicationViewTransforms(
-                    views,
-                    "animal",
                     maxEntities,
                     seen,
                     seenEntityIds,
@@ -74,7 +51,6 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void CollectReplicationViewTransforms(
             UnityEngine.Object[] views,
-            string wantedKind,
             int maxEntities,
             HashSet<int> seen,
             HashSet<string> seenEntityIds,
@@ -88,7 +64,6 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 CollectReplicationViewTransform(
                     views[i],
-                    wantedKind,
                     maxEntities,
                     seen,
                     seenEntityIds,
@@ -102,7 +77,6 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void CollectReplicationViewTransform(
             UnityEngine.Object view,
-            string wantedKind,
             int maxEntities,
             HashSet<int> seen,
             HashSet<string> seenEntityIds,
@@ -122,8 +96,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var gameObject = behaviour.gameObject;
-            if (!TryClassifyReplicationView(view, out var kind)
-                || !string.Equals(kind, wantedKind, StringComparison.Ordinal))
+            if (!TryClassifyReplicationView(view, out var kind))
             {
                 return;
             }
