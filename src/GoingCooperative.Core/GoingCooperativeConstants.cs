@@ -4,7 +4,7 @@ namespace GoingCooperative.Core
     {
         public const string ModId = "goingcooperative.plugin";
         public const string ModName = "Going Cooperative";
-        public const string Version = "0.4.0";
+        public const string Version = "0.4.1";
         public const int DefaultCommandDelayTicks = 8;
         public const int DefaultHashIntervalTicks = 120;
     }
