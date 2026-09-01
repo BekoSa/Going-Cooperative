@@ -293,8 +293,6 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var disconnect = CreateV2Button(content, "Disconnect", "DISCONNECT", () => { StopMultiplayerSession(); ShowMultiplayerCanvasPageV2(MultiplayerMenuPage.Status); }, V2Card, 14f);
             SetMultiplayerCanvasRect(disconnect.GetComponent<RectTransform>(), new Vector2(0f, 0.13f), new Vector2(0.24f, 0.235f), Vector2.zero, Vector2.zero);
-            var play = CreateV2Button(content, "Play", "PLAY", MarkMultiplayerReadyToPlay, V2Accent, 14f);
-            SetMultiplayerCanvasRect(play.GetComponent<RectTransform>(), new Vector2(0.26f, 0.13f), new Vector2(0.5f, 0.235f), Vector2.zero, Vector2.zero);
             if (!replicationConfigHostMode)
             {
                 var resync = CreateV2Button(content, "Resync", "FULL RESYNC", RequestMultiplayerCanvasResync, V2AccentDark, 14f);
