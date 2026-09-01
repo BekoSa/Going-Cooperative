@@ -8,6 +8,15 @@ internal static class MultiPeerUdpTransportTests
     public static int Run()
     {
         var failures = 0;
+        if (!MultiplayerLifecyclePolicy.ShouldApplyDisconnectedPeerCleanup(false))
+        {
+            Fail("disconnect cleanup should run when no replacement peer is connected", ref failures);
+        }
+        if (MultiplayerLifecyclePolicy.ShouldApplyDisconnectedPeerCleanup(true))
+        {
+            Fail("disconnect cleanup must not remove a replacement peer using the same slot", ref failures);
+        }
+
         var sessionCode = DirectTransportSecurity.GenerateSessionCode();
         var host = new UdpNetworkTransport(true, sessionCode);
         var clients = new List<UdpNetworkTransport>();
