@@ -271,7 +271,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRuntimeStarted
                 && replicationRemoteHelloReceived
                 && replicationTransport != null
-                && replicationSnapshotsReceived > 0
+                && replicationLastAppliedSnapshotSequence >= 0
                 && replicationLastSnapshotEntities > 0
                 && IsReplicationLocalGameplayReady();
         }
