@@ -937,11 +937,12 @@ namespace GoingCooperative.Plugin.BepInEx
 
                         lock (stateLock)
                         {
-                            // State before the new checkpoint is superseded by that
-                            // checkpoint, so this peer temporarily leaves the reliable
-                            // recipient set until the new capture boundary is created.
+                            // Stop gameplay immediately, but keep this peer in the
+                            // durable recipient set until a new checkpoint is actually
+                            // captured. If capture fails, these retained mutations let the
+                            // peer resume the existing live world without a hidden gap.
                             peer.ReadyForReplication = false;
-                            peer.RequiresCatchup = false;
+                            peer.RequiresCatchup = true;
                             peer.CatchupPending = false;
                             peer.WorldLoaded = false;
                             peer.Phase = "Waiting for Resync";
