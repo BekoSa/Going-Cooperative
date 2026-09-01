@@ -152,6 +152,34 @@ internal static class CorePolicyTests
             disconnectedPeerStatus.Playing,
             "disconnected peer status cannot remain playing");
 
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                false,
+                7L,
+                7L),
+            "peer work accepts exact live connection generation");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                false,
+                8L,
+                7L),
+            "peer work rejects stale reconnect generation");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                true,
+                7L,
+                7L),
+            "peer work rejects closed connection");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(1, 0),
+            "host world remains loading before native resume");
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(1, 1),
+            "host world becomes ready after matching native resume");
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(0, 0),
+            "current-world hosting is ready without a native load");
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
