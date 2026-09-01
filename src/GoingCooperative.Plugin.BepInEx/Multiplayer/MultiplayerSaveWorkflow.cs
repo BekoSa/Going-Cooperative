@@ -193,6 +193,46 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
+            if (replicationConfigHostMode && replicationRuntimeStarted)
+            {
+                var catchupPeers =
+                    multiplayerSaveTransfer.GetCatchupPendingClientPeerIds();
+                for (var catchupIndex = 0;
+                    catchupIndex < catchupPeers.Length;
+                    catchupIndex++)
+                {
+                    var catchupPeerId = catchupPeers[catchupIndex];
+                    if (replicationTransport == null
+                        || !replicationTransport.IsPeerApplicationReady(
+                            catchupPeerId)
+                        || HasPendingReplicationWorldDeltasForPeer(
+                            catchupPeerId))
+                    {
+                        continue;
+                    }
+
+                    if (multiplayerSaveTransfer.CompletePeerCatchup(
+                            catchupPeerId,
+                            out var catchupError))
+                    {
+                        LogReplicationInfo(
+                            "[MP/SYNC] catch-up complete peer="
+                            + catchupPeerId);
+                    }
+                    else if (!string.Equals(
+                        catchupError,
+                        "peer-not-awaiting-catchup",
+                        StringComparison.Ordinal))
+                    {
+                        LogReplicationWarning(
+                            "[MP/SYNC] catch-up completion failed peer="
+                            + catchupPeerId
+                            + " error="
+                            + catchupError);
+                    }
+                }
+            }
+
             if (replicationConfigHostMode
                 && !multiplayerResyncCaptureInProgress
                 && !multiplayerLoadingInProgress
