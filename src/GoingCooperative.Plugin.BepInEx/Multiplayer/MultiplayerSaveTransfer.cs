@@ -19,8 +19,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private readonly object clientWriteLock = new object();
         private readonly Dictionary<string, HostPeerConnection> hostPeers =
             new Dictionary<string, HostPeerConnection>(StringComparer.Ordinal);
-        private readonly Queue<string> pendingJoinCaptures = new Queue<string>();
-        private readonly Queue<string> pendingResyncCaptures = new Queue<string>();
+        private readonly Queue<HostPeerWorkItem> pendingJoinCaptures =
+            new Queue<HostPeerWorkItem>();
+        private readonly Queue<HostPeerWorkItem> pendingResyncCaptures =
+            new Queue<HostPeerWorkItem>();
         private readonly Queue<string> disconnectedPeers = new Queue<string>();
         private readonly Queue<string> replicationResetPeers = new Queue<string>();
 
@@ -37,6 +39,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private volatile int resumeGeneration;
         private volatile int epoch;
         private long sessionId;
+        private long nextPeerConnectionGeneration;
         private int maxPlayers = MultiplayerPeerLimits.StableTargetPlayers;
         private string localNickname = MultiplayerNickname.DefaultNickname;
         private string hostNickname = MultiplayerNickname.DefaultNickname;
@@ -465,39 +468,48 @@ namespace GoingCooperative.Plugin.BepInEx
             return false;
         }
 
-        public bool TryDequeueJoinCapture(out string peerId)
+        public bool TryDequeueJoinCapture(
+            out string peerId,
+            out long connectionGeneration)
         {
             lock (stateLock)
             {
                 while (pendingJoinCaptures.Count > 0)
                 {
                     var candidate = pendingJoinCaptures.Dequeue();
-                    if (hostPeers.TryGetValue(candidate, out var peer)
+                    if (hostPeers.TryGetValue(candidate.PeerId, out var peer)
                         && !peer.Closed
+                        && peer.ConnectionGeneration == candidate.ConnectionGeneration
                         && !peer.ReadyForReplication)
                     {
-                        peerId = candidate;
+                        peerId = candidate.PeerId;
+                        connectionGeneration = candidate.ConnectionGeneration;
                         return true;
                     }
                 }
             }
 
             peerId = string.Empty;
+            connectionGeneration = 0L;
             return false;
         }
 
-        public bool TryDequeueResyncCapture(out string peerId)
+        public bool TryDequeueResyncCapture(
+            out string peerId,
+            out long connectionGeneration)
         {
             lock (stateLock)
             {
                 while (pendingResyncCaptures.Count > 0)
                 {
                     var candidate = pendingResyncCaptures.Dequeue();
-                    if (hostPeers.TryGetValue(candidate, out var peer)
-                        && !peer.Closed)
+                    if (hostPeers.TryGetValue(candidate.PeerId, out var peer)
+                        && !peer.Closed
+                        && peer.ConnectionGeneration == candidate.ConnectionGeneration)
                     {
                         resyncCaptureRequested = pendingResyncCaptures.Count > 0;
-                        peerId = candidate;
+                        peerId = candidate.PeerId;
+                        connectionGeneration = candidate.ConnectionGeneration;
                         return true;
                     }
                 }
@@ -506,10 +518,14 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             peerId = string.Empty;
+            connectionGeneration = 0L;
             return false;
         }
 
-        public void QueueJoinCheckpoint(string peerId, VillageSaveInfo save)
+        public void QueueJoinCheckpoint(
+            string peerId,
+            long connectionGeneration,
+            VillageSaveInfo save)
         {
             if (!hostMode || save == null)
             {
@@ -517,7 +533,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     "Only the host can send a join checkpoint.");
             }
 
-            var peer = GetHostPeer(peerId);
+            var peer = GetHostPeer(peerId, connectionGeneration);
             lock (stateLock)
             {
                 // The checkpoint has now captured all state before this boundary.
@@ -545,20 +561,20 @@ namespace GoingCooperative.Plugin.BepInEx
             sendThread.Start();
         }
 
-        public void RejectJoin(string peerId, string reason)
+        public void RejectJoin(
+            string peerId,
+            long connectionGeneration,
+            string reason)
         {
             if (!hostMode)
             {
                 return;
             }
 
-            HostPeerConnection? peer = null;
-            lock (stateLock)
-            {
-                hostPeers.TryGetValue(peerId, out peer);
-            }
-
-            if (peer == null)
+            if (!TryGetHostPeer(
+                    peerId,
+                    connectionGeneration,
+                    out var peer))
             {
                 return;
             }
@@ -608,6 +624,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         public void QueueResyncCheckpoint(
             string peerId,
+            long connectionGeneration,
             VillageSaveInfo save)
         {
             if (!hostMode || save == null)
@@ -616,7 +633,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     "Only the host can send a resync checkpoint.");
             }
 
-            var peer = GetHostPeer(peerId);
+            var peer = GetHostPeer(peerId, connectionGeneration);
             lock (stateLock)
             {
                 peer.RequiresCatchup = true;
@@ -641,14 +658,23 @@ namespace GoingCooperative.Plugin.BepInEx
             sendThread.Start();
         }
 
-        public void RejectResync(string peerId, string reason)
+        public void RejectResync(
+            string peerId,
+            long connectionGeneration,
+            string reason)
         {
             if (!hostMode)
             {
                 return;
             }
 
-            var peer = GetHostPeer(peerId);
+            if (!TryGetHostPeer(
+                    peerId,
+                    connectionGeneration,
+                    out var peer))
+            {
+                return;
+            }
             try
             {
                 SendHostCommand(peer, "RESYNC_FAILED", peer.Epoch, reason);
@@ -816,6 +842,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     {
                         var rejected = new HostPeerConnection(
                             string.Empty,
+                            0L,
                             nickname,
                             accepted,
                             stream);
@@ -830,6 +857,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
                     var peer = new HostPeerConnection(
                         peerId,
+                        Interlocked.Increment(
+                            ref nextPeerConnectionGeneration),
                         nickname,
                         accepted,
                         stream);
@@ -852,7 +881,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     peer.Detail = "Connected. Waiting for a current-world checkpoint.";
                     lock (stateLock)
                     {
-                        pendingJoinCaptures.Enqueue(peerId);
+                        pendingJoinCaptures.Enqueue(
+                            new HostPeerWorkItem(
+                                peer.PeerId,
+                                peer.ConnectionGeneration));
                     }
 
                     var peerThread = new Thread(
@@ -948,7 +980,10 @@ namespace GoingCooperative.Plugin.BepInEx
                             peer.Phase = "Waiting for Resync";
                             peer.Detail = "Requested a fresh host checkpoint.";
                             replicationResetPeers.Enqueue(peer.PeerId);
-                            pendingResyncCaptures.Enqueue(peer.PeerId);
+                            pendingResyncCaptures.Enqueue(
+                                new HostPeerWorkItem(
+                                    peer.PeerId,
+                                    peer.ConnectionGeneration));
                             resyncCaptureRequested = true;
                         }
                     }
@@ -1529,19 +1564,56 @@ namespace GoingCooperative.Plugin.BepInEx
             return string.Empty;
         }
 
-        private HostPeerConnection GetHostPeer(string peerId)
+        public bool IsCurrentHostPeerConnection(
+            string peerId,
+            long connectionGeneration)
         {
             lock (stateLock)
             {
-                if (!hostPeers.TryGetValue(peerId, out var peer)
-                    || peer.Closed)
-                {
-                    throw new InvalidOperationException(
-                        "Peer is not connected: " + peerId);
-                }
+                return hostPeers.TryGetValue(peerId, out var peer)
+                    && !peer.Closed
+                    && peer.ConnectionGeneration == connectionGeneration;
+            }
+        }
 
+        private bool TryGetHostPeer(
+            string peerId,
+            long connectionGeneration,
+            out HostPeerConnection peer)
+        {
+            lock (stateLock)
+            {
+                if (hostPeers.TryGetValue(peerId, out var current)
+                    && !current.Closed
+                    && current.ConnectionGeneration == connectionGeneration)
+                {
+                    peer = current;
+                    return true;
+                }
+            }
+
+            peer = null!;
+            return false;
+        }
+
+        private HostPeerConnection GetHostPeer(
+            string peerId,
+            long connectionGeneration)
+        {
+            if (TryGetHostPeer(
+                    peerId,
+                    connectionGeneration,
+                    out var peer))
+            {
                 return peer;
             }
+
+            throw new InvalidOperationException(
+                "Peer connection is no longer current: "
+                + peerId
+                + " generation="
+                + connectionGeneration.ToString(
+                    CultureInfo.InvariantCulture));
         }
 
         private void SetHostSummaryDetail()
@@ -1859,15 +1931,31 @@ namespace GoingCooperative.Plugin.BepInEx
             SetHostSummaryDetail();
         }
 
+        private sealed class HostPeerWorkItem
+        {
+            public HostPeerWorkItem(
+                string peerId,
+                long connectionGeneration)
+            {
+                PeerId = peerId;
+                ConnectionGeneration = connectionGeneration;
+            }
+
+            public string PeerId { get; }
+            public long ConnectionGeneration { get; }
+        }
+
         private sealed class HostPeerConnection
         {
             public HostPeerConnection(
                 string peerId,
+                long connectionGeneration,
                 string nickname,
                 TcpClient client,
                 Stream stream)
             {
                 PeerId = peerId;
+                ConnectionGeneration = connectionGeneration;
                 Nickname = MultiplayerNickname.Normalize(nickname);
                 ReplicationBindingToken = Convert.ToBase64String(
                     DirectTransportSecurity.RandomBytes(24));
@@ -1876,6 +1964,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             public string PeerId { get; }
+            public long ConnectionGeneration { get; }
             public string Nickname { get; }
             public string ReplicationBindingToken { get; }
             public TcpClient Client { get; }
