@@ -1144,7 +1144,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 + (replicationLastLocalSelectionSignature.Length == 0
                     ? "0"
                     : replicationLastLocalSelectionSignature
-                        .Split('\n').Length.ToString())
+                        .Split(
+                            new[] { '\n' },
+                            StringSplitOptions.None)
+                        .Length.ToString())
                 + " localSelectionUnresolved="
                 + replicationLastLocalSelectionUnresolved.ToString()
                 + " remoteSelected="
