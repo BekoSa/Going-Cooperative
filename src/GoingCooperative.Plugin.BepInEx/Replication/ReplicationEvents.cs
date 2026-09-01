@@ -2723,11 +2723,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 bool applied;
                 if (speedIndex <= 3)
                 {
-                    var methodName = speedIndex == 0 ? "SetSpeedPause"
-                        : speedIndex == 1 ? "SetSpeedNormal"
-                        : speedIndex == 2 ? "SetSpeedFast"
-                        : "SetSpeedFaster";
-                    applied = TryInvokeStoredGameSpeedManagerMethod(methodName, out detail);
+                    applied = TryApplyStoredGameSpeedIndexFromReplication(
+                        speedIndex,
+                        out detail);
                 }
                 else
                 {
