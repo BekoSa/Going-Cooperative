@@ -7,9 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // REPL-6 adds stable peer display names for multi-peer UI/presence while
-        // retaining technical peer IDs for authority, ACKs and resync addressing.
-        public const string ProtocolVersion = "GCOOP-REPL-6";
+        // REPL-7 introduces authenticated multi-peer Direct fan-out, per-peer
+        // reliable ACK obligations, live join-in-progress and peer replication epochs.
+        public const string ProtocolVersion = "GCOOP-REPL-7";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
