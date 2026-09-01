@@ -180,6 +180,12 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             if (replicationConfigHostMode && replicationRuntimeStarted)
             {
+                while (multiplayerSaveTransfer.TryDequeueReplicationResetPeer(
+                    out var resetPeerId))
+                {
+                    HandleReplicationPeerResyncStarted(resetPeerId);
+                }
+
                 while (multiplayerSaveTransfer.TryDequeueDisconnectedPeer(
                     out var disconnectedPeerId))
                 {
