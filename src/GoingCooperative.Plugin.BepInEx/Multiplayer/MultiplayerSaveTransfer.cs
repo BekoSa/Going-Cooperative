@@ -21,6 +21,7 @@ namespace GoingCooperative.Plugin.BepInEx
             new Dictionary<string, HostPeerConnection>(StringComparer.Ordinal);
         private readonly Queue<string> pendingJoinCaptures = new Queue<string>();
         private readonly Queue<string> pendingResyncCaptures = new Queue<string>();
+        private readonly Queue<string> disconnectedPeers = new Queue<string>();
 
         private TcpListener? listener;
         private Thread? acceptWorker;
@@ -280,6 +281,21 @@ namespace GoingCooperative.Plugin.BepInEx
             SetState("Loading Host World", "Loading the authoritative host world.", 1f);
         }
 
+        public bool TryDequeueDisconnectedPeer(out string peerId)
+        {
+            lock (stateLock)
+            {
+                if (disconnectedPeers.Count > 0)
+                {
+                    peerId = disconnectedPeers.Dequeue();
+                    return true;
+                }
+            }
+
+            peerId = string.Empty;
+            return false;
+        }
+
         public bool TryDequeueJoinCapture(out string peerId)
         {
             lock (stateLock)
@@ -527,6 +543,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 hostPeers.Clear();
                 pendingJoinCaptures.Clear();
                 pendingResyncCaptures.Clear();
+                disconnectedPeers.Clear();
                 assignedPeerId = MultiplayerPeerIds.Host;
                 hostNickname = MultiplayerNickname.DefaultNickname;
                 maxPlayers = MultiplayerPeerLimits.StableTargetPlayers;
@@ -742,8 +759,22 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             finally
             {
-                peer.Closed = true;
-                peer.ReadyForReplication = false;
+                var notifyDisconnect = false;
+                lock (stateLock)
+                {
+                    if (!peer.Closed)
+                    {
+                        notifyDisconnect = true;
+                    }
+                    peer.Closed = true;
+                    peer.ReadyForReplication = false;
+                    peer.RequiresCatchup = false;
+                    if (notifyDisconnect)
+                    {
+                        disconnectedPeers.Enqueue(peer.PeerId);
+                    }
+                }
+
                 try { peer.Client.Close(); } catch { }
                 SetHostSummaryDetail();
             }
@@ -1564,11 +1595,25 @@ namespace GoingCooperative.Plugin.BepInEx
             HostPeerConnection peer,
             Exception ex)
         {
-            peer.ReadyForReplication = false;
-            peer.Phase = "Failed";
-            peer.Detail = ex.GetType().Name + ": " + ex.Message;
+            var notifyDisconnect = false;
+            lock (stateLock)
+            {
+                if (!peer.Closed)
+                {
+                    notifyDisconnect = true;
+                }
+                peer.ReadyForReplication = false;
+                peer.RequiresCatchup = false;
+                peer.Phase = "Failed";
+                peer.Detail = ex.GetType().Name + ": " + ex.Message;
+                peer.Closed = true;
+                if (notifyDisconnect)
+                {
+                    disconnectedPeers.Enqueue(peer.PeerId);
+                }
+            }
+
             try { peer.Client.Close(); } catch { }
-            peer.Closed = true;
             SetHostSummaryDetail();
         }
 
