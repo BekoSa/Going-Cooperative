@@ -1174,22 +1174,25 @@ namespace GoingCooperative.Core
                 return;
             }
 
-            if (isHostEndpoint)
-            {
-                if (hostPeer == null
-                    || !ValidateAndBindHostEnvelope(
-                        hostPeer,
-                        decoded))
-                {
-                    Interlocked.Increment(ref peerBindingFailures);
-                    return;
-                }
-            }
-
             if (decoded.Kind == TransportMessageKind.Chunk)
             {
                 Interlocked.Increment(ref chunkEnvelopesReceived);
-                if (chunkReassembler.TryAddChunk(
+                var reassembler = chunkReassembler;
+                if (isHostEndpoint)
+                {
+                    if (hostPeer == null
+                        || !ValidateHostChunkEnvelope(
+                            hostPeer,
+                            decoded))
+                    {
+                        Interlocked.Increment(ref peerBindingFailures);
+                        return;
+                    }
+
+                    reassembler = hostPeer.ChunkReassembler;
+                }
+
+                if (reassembler.TryAddChunk(
                         decoded,
                         out var reassembled,
                         out var chunkError)
@@ -1216,7 +1219,54 @@ namespace GoingCooperative.Core
                 return;
             }
 
+            if (isHostEndpoint)
+            {
+                if (hostPeer == null
+                    || !ValidateAndBindHostEnvelope(
+                        hostPeer,
+                        decoded))
+                {
+                    Interlocked.Increment(ref peerBindingFailures);
+                    return;
+                }
+            }
+
             EnqueueReceivedEnvelope(decoded);
+        }
+
+        private bool ValidateHostChunkEnvelope(
+            HostUdpPeerSession peer,
+            TransportEnvelope envelope)
+        {
+            peer.LastSeenUtc = DateTime.UtcNow;
+            lock (hostPeerLock)
+            {
+                if (!MultiplayerPeerIds.TryParseClientSlot(
+                        envelope.SenderId,
+                        out _))
+                {
+                    return false;
+                }
+
+                if (!string.IsNullOrEmpty(peer.PeerId))
+                {
+                    return string.Equals(
+                        peer.PeerId,
+                        envelope.SenderId,
+                        StringComparison.Ordinal);
+                }
+
+                if (hostPeersById.TryGetValue(
+                        envelope.SenderId,
+                        out var existing)
+                    && !ReferenceEquals(existing, peer)
+                    && !existing.Closed)
+                {
+                    return false;
+                }
+
+                return true;
+            }
         }
 
         private bool ValidateAndBindHostEnvelope(
@@ -2335,6 +2385,8 @@ namespace GoingCooperative.Core
             public long HighestReceiveSequence;
             public HashSet<long> ReceivedSequences { get; } =
                 new HashSet<long>();
+            public TransportChunkReassembler ChunkReassembler { get; } =
+                new TransportChunkReassembler();
             public object SequenceLock { get; } = new object();
             public DateTime LastSeenUtc { get; set; }
         }
