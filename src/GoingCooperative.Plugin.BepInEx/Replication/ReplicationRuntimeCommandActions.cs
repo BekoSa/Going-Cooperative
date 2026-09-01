@@ -24,8 +24,8 @@ namespace GoingCooperative.Plugin.BepInEx
         bool IRuntimeCommandActions.ApplyPause(bool paused, out string detail)
         {
             var speedIndex = paused ? 0 : 1;
-            var applied = TryInvokeStoredGameSpeedManagerMethod(
-                paused ? "SetSpeedPause" : "SetSpeedNormal",
+            var applied = TryApplyStoredGameSpeedIndexFromReplication(
+                speedIndex,
                 out detail);
             if (applied && replicationConfigHostMode)
             {
@@ -42,7 +42,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     StringComparison.Ordinal)
                 ? 1
                 : speedIndex;
-            var applied = TryApplyStoredGameSpeedIndex(
+            var applied = TryApplyStoredGameSpeedIndexFromReplication(
                 requestedSpeedIndex,
                 out detail);
             if (applied && replicationConfigHostMode)
@@ -70,6 +70,68 @@ namespace GoingCooperative.Plugin.BepInEx
                     detail = "unsupported-speed-index="
                         + speedIndex.ToString(CultureInfo.InvariantCulture);
                     return false;
+            }
+        }
+
+        private static bool TryApplyStoredGameSpeedIndexFromReplication(
+            int speedIndex,
+            out string detail)
+        {
+            if (speedIndex < 0 || speedIndex > 3)
+            {
+                detail = "unsupported-speed-index="
+                    + speedIndex.ToString(CultureInfo.InvariantCulture);
+                return false;
+            }
+
+            // OnUIButtonClicked updates both native game speed and the selected
+            // speed-button presentation. Calling SetSpeed* alone changes simulation
+            // state but leaves a remote client's speed buttons visually stale.
+            replicationEventApplicationDepth++;
+            try
+            {
+                var target = gameSpeedManagerInstance;
+                if (target == null)
+                {
+                    TryCaptureGameSpeedManagerInstance(
+                        "replicated-speed-ui-apply");
+                    target = gameSpeedManagerInstance;
+                }
+
+                if (target != null)
+                {
+                    var buttonMethod = AccessTools.Method(
+                        target.GetType(),
+                        "OnUIButtonClicked",
+                        new[] { typeof(int) });
+                    if (buttonMethod != null)
+                    {
+                        try
+                        {
+                            buttonMethod.Invoke(
+                                target,
+                                new object[] { speedIndex });
+                            detail = "ok ui-button";
+                            return true;
+                        }
+                        catch
+                        {
+                            // Some game builds expose the button callback but reject
+                            // reflective invocation. Fall back to the proven SetSpeed*
+                            // surface while capture remains suppressed.
+                        }
+                    }
+                }
+
+                return TryApplyStoredGameSpeedIndex(
+                    speedIndex,
+                    out detail);
+            }
+            finally
+            {
+                replicationEventApplicationDepth = Math.Max(
+                    0,
+                    replicationEventApplicationDepth - 1);
             }
         }
 
