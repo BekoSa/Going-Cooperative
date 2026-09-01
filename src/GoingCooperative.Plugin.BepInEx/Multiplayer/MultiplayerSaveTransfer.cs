@@ -115,7 +115,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (hostMode)
                 {
                     var hostWorldReady =
-                        loadGeneration <= resumeGeneration;
+                        MultiplayerLifecyclePolicy.IsHostWorldReady(
+                            loadGeneration,
+                            resumeGeneration);
                     result.Add(new MultiplayerTransferPeerSnapshot(
                         MultiplayerPeerIds.Host,
                         localNickname,
@@ -480,8 +482,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     var candidate = pendingJoinCaptures.Dequeue();
                     if (hostPeers.TryGetValue(candidate.PeerId, out var peer)
-                        && !peer.Closed
-                        && peer.ConnectionGeneration == candidate.ConnectionGeneration
+                        && MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                            peer.Closed,
+                            peer.ConnectionGeneration,
+                            candidate.ConnectionGeneration)
                         && !peer.ReadyForReplication)
                     {
                         peerId = candidate.PeerId;
@@ -506,8 +510,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     var candidate = pendingResyncCaptures.Dequeue();
                     if (hostPeers.TryGetValue(candidate.PeerId, out var peer)
-                        && !peer.Closed
-                        && peer.ConnectionGeneration == candidate.ConnectionGeneration)
+                        && MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                            peer.Closed,
+                            peer.ConnectionGeneration,
+                            candidate.ConnectionGeneration))
                     {
                         resyncCaptureRequested = pendingResyncCaptures.Count > 0;
                         peerId = candidate.PeerId;
@@ -1572,8 +1578,10 @@ namespace GoingCooperative.Plugin.BepInEx
             lock (stateLock)
             {
                 return hostPeers.TryGetValue(peerId, out var peer)
-                    && !peer.Closed
-                    && peer.ConnectionGeneration == connectionGeneration;
+                    && MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                        peer.Closed,
+                        peer.ConnectionGeneration,
+                        connectionGeneration);
             }
         }
 
@@ -1585,8 +1593,10 @@ namespace GoingCooperative.Plugin.BepInEx
             lock (stateLock)
             {
                 if (hostPeers.TryGetValue(peerId, out var current)
-                    && !current.Closed
-                    && current.ConnectionGeneration == connectionGeneration)
+                    && MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                        current.Closed,
+                        current.ConnectionGeneration,
+                        connectionGeneration))
                 {
                     peer = current;
                     return true;
@@ -1643,7 +1653,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            if (loadGeneration > resumeGeneration)
+            if (!MultiplayerLifecyclePolicy.IsHostWorldReady(
+                    loadGeneration,
+                    resumeGeneration))
             {
                 SetState(
                     "Loading Host World",
