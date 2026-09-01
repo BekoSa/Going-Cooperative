@@ -31,6 +31,18 @@ namespace GoingCooperative.Core
                 && worldLoaded;
         }
 
+        public static bool ShouldFinalizeNativeLoad(
+            bool loadingInProgress,
+            bool completionObserved,
+            double elapsedSettleSeconds,
+            double requiredSettleSeconds)
+        {
+            return loadingInProgress
+                && completionObserved
+                && requiredSettleSeconds >= 0d
+                && elapsedSettleSeconds >= requiredSettleSeconds;
+        }
+
         public static bool ShouldApplyDisconnectedPeerCleanup(
             bool currentPeerConnected)
         {
