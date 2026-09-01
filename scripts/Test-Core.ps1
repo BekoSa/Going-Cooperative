@@ -38,6 +38,7 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportEnvelopeCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportChunkCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DirectTransportSecurity.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\UdpNetworkTransport.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DeterminismHash.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\LockstepCommandPayloads.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerActionRegistry.cs"),
@@ -46,6 +47,7 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerPeerRoster.cs"),
     (Join-Path $repositoryRoot "tests\BuildingReplicationV2PolicyTests.cs"),
     (Join-Path $repositoryRoot "tests\DirectTransportSecurityTests.cs"),
+    (Join-Path $repositoryRoot "tests\MultiPeerUdpTransportTests.cs"),
     (Join-Path $repositoryRoot "tests\CorePolicyTests.cs")
 )
 
