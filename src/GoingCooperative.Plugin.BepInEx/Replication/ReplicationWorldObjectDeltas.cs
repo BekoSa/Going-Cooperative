@@ -3462,6 +3462,7 @@ namespace GoingCooperative.Plugin.BepInEx
             if (string.Equals(delta.DeltaKind, CombatStateDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatHealthDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatDeathDeltaKind, StringComparison.Ordinal))
             {
@@ -4444,6 +4445,7 @@ namespace GoingCooperative.Plugin.BepInEx
             // lifecycle from waiting behind expensive world lookups while retaining
             // the same global queue bound and per-frame/time budgets.
             return string.Equals(delta.DeltaKind, CombatPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationPrioritisedObjectWorkResultV1DeltaKind, StringComparison.Ordinal)
@@ -4736,6 +4738,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool IsTransientReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
         {
             return string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentProgressUpdated", StringComparison.Ordinal)
@@ -4844,6 +4847,7 @@ namespace GoingCooperative.Plugin.BepInEx
             if (string.Equals(delta.DeltaKind, CombatStateDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatHealthDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatDeathDeltaKind, StringComparison.Ordinal))
             {
