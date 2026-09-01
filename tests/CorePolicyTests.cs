@@ -180,6 +180,50 @@ internal static class CorePolicyTests
             MultiplayerLifecyclePolicy.IsHostWorldReady(0, 0),
             "current-world hosting is ready without a native load");
 
+        var hostSyncBarrier = new MultiplayerHostSyncBarrier();
+        Equal(true,
+            hostSyncBarrier.Enter("client-1", 11L),
+            "first syncing peer requests host pause");
+        Equal(false,
+            hostSyncBarrier.Enter("client-2", 21L),
+            "additional syncing peer reuses host pause");
+        Equal(2,
+            hostSyncBarrier.Count,
+            "host sync barrier tracks multiple peers");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 10L),
+            "stale generation cannot release host pause");
+        Equal(2,
+            hostSyncBarrier.Count,
+            "stale generation preserves host sync barrier");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 11L),
+            "non-final peer release keeps host paused");
+        Equal(1,
+            hostSyncBarrier.Count,
+            "one syncing peer remains after first completion");
+        Equal(true,
+            hostSyncBarrier.ExitCurrent("client-2"),
+            "final syncing peer release requests host resume");
+        Equal(0,
+            hostSyncBarrier.Count,
+            "host sync barrier empties after all peers complete");
+        Equal(true,
+            hostSyncBarrier.Enter("client-1", 31L),
+            "reused peer slot can enter a new sync generation");
+        Equal(false,
+            hostSyncBarrier.Enter("client-1", 32L),
+            "replacement generation keeps existing host pause");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 31L),
+            "old generation cannot release replacement sync barrier");
+        Equal(1,
+            hostSyncBarrier.Count,
+            "replacement generation remains protected");
+        Equal(true,
+            hostSyncBarrier.Exit("client-1", 32L),
+            "current replacement generation may release host pause");
+
         var projectilePayload = CombatProjectilePresentationPayloads.Create(
             new CombatProjectilePresentationState(
                 17L,
