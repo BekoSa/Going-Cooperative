@@ -86,7 +86,9 @@ namespace GoingCooperative.Core
                 return false;
             }
 
-            var parts = envelope.Payload.Split('|');
+            var parts = envelope.Payload.Split(
+                new[] { '|' },
+                StringSplitOptions.None);
             if (parts.Length != 6
                 || !string.Equals(
                     parts[0],
