@@ -745,34 +745,6 @@ namespace GoingCooperative.Plugin.BepInEx
             return replicationPresenceCamera;
         }
 
-        private static bool TryGetReplicationRemotePresenceWorldPoint(out Vector3 world)
-        {
-            world = replicationRemotePresenceDisplayWorld;
-            if (!replicationRemotePresenceVisible
-                || Time.realtimeSinceStartup - replicationRemotePresenceReceivedRealtime
-                    > ReplicationPresenceTimeoutSeconds)
-            {
-                return false;
-            }
-
-            if (!replicationRemotePresenceDisplayInitialized)
-            {
-                replicationRemotePresenceDisplayWorld = replicationRemotePresenceWorld;
-                replicationRemotePresenceDisplayInitialized = true;
-            }
-            else
-            {
-                var blend = 1f - Mathf.Exp(-18f * Mathf.Max(0f, Time.unscaledDeltaTime));
-                replicationRemotePresenceDisplayWorld = Vector3.Lerp(
-                    replicationRemotePresenceDisplayWorld,
-                    replicationRemotePresenceWorld,
-                    blend);
-            }
-
-            world = replicationRemotePresenceDisplayWorld;
-            return true;
-        }
-
         private static void SetReplicationRemotePeerDisplayName(
             string peerId,
             string displayName)
