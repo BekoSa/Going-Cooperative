@@ -13,6 +13,7 @@ namespace GoingCooperative.Plugin.BepInEx
     {
         private static ulong replicationLastCapturedLocalCommandHash;
         private static float replicationLastCapturedLocalCommandRealtime;
+        private static int replicationAuthoritativeSpeedIndex = 1;
 
         private void TryInstallReplicationCommandCapture(Harmony harmonyInstance)
         {
@@ -142,6 +143,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationGameSpeedButtonPostfix(MethodBase __originalMethod, object __instance, int __0)
         {
             gameSpeedManagerInstance = __instance;
+            if (__0 >= 0 && __0 <= 3 && replicationConfigHostMode)
+            {
+                replicationAuthoritativeSpeedIndex = __0;
+            }
             SendReplicationLocalSpeedIntent(__0, "button:" + __0.ToString(CultureInfo.InvariantCulture));
         }
 
@@ -155,6 +160,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (replicationConfigHostMode)
             {
+                replicationAuthoritativeSpeedIndex = speedIndex;
                 return;
             }
             if (replicationEventApplicationDepth > 0)
@@ -170,8 +176,13 @@ namespace GoingCooperative.Plugin.BepInEx
             if (!replicationConfigHostMode || __0 == null) return;
             try
             {
+                var speedIndex = Convert.ToInt32(__0, CultureInfo.InvariantCulture);
+                if (speedIndex >= 0 && speedIndex <= 3)
+                {
+                    replicationAuthoritativeSpeedIndex = speedIndex;
+                }
                 SendHostReplicationEventSpeedStateIfEnabled(
-                    Convert.ToInt32(__0, CultureInfo.InvariantCulture),
+                    speedIndex,
                     "CurrentSpeedIndex");
             }
             catch (Exception ex)
