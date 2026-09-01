@@ -1015,7 +1015,11 @@ namespace GoingCooperative.Plugin.BepInEx
                             peer.WorldLoaded = false;
                             peer.Phase = "Waiting for Resync";
                             peer.Detail = "Requested a fresh host checkpoint.";
-                            replicationResetPeers.Enqueue(peer.PeerId);
+                            // Keep the existing UDP peer binding and durable backlog
+                            // intact until the replacement checkpoint has actually
+                            // been captured. Resetting here makes a failed/stale
+                            // capture impossible to recover from and causes all
+                            // in-flight packets to be refused while the host saves.
                             pendingResyncCaptures.Enqueue(
                                 new HostPeerWorkItem(
                                     peer.PeerId,
