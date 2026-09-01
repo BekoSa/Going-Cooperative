@@ -22,6 +22,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private readonly Queue<string> pendingJoinCaptures = new Queue<string>();
         private readonly Queue<string> pendingResyncCaptures = new Queue<string>();
         private readonly Queue<string> disconnectedPeers = new Queue<string>();
+        private readonly Queue<string> replicationResetPeers = new Queue<string>();
 
         private TcpListener? listener;
         private Thread? acceptWorker;
@@ -279,6 +280,21 @@ namespace GoingCooperative.Plugin.BepInEx
 
             loadGeneration++;
             SetState("Loading Host World", "Loading the authoritative host world.", 1f);
+        }
+
+        public bool TryDequeueReplicationResetPeer(out string peerId)
+        {
+            lock (stateLock)
+            {
+                if (replicationResetPeers.Count > 0)
+                {
+                    peerId = replicationResetPeers.Dequeue();
+                    return true;
+                }
+            }
+
+            peerId = string.Empty;
+            return false;
         }
 
         public bool TryDequeueDisconnectedPeer(out string peerId)
@@ -544,6 +560,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 pendingJoinCaptures.Clear();
                 pendingResyncCaptures.Clear();
                 disconnectedPeers.Clear();
+                replicationResetPeers.Clear();
                 assignedPeerId = MultiplayerPeerIds.Host;
                 hostNickname = MultiplayerNickname.DefaultNickname;
                 maxPlayers = MultiplayerPeerLimits.StableTargetPlayers;
@@ -727,11 +744,16 @@ namespace GoingCooperative.Plugin.BepInEx
                             continue;
                         }
 
-                        peer.ReadyForReplication = false;
-                        peer.Phase = "Waiting for Resync";
-                        peer.Detail = "Requested a fresh host checkpoint.";
                         lock (stateLock)
                         {
+                            // State before the new checkpoint is superseded by that
+                            // checkpoint, so this peer temporarily leaves the reliable
+                            // recipient set until the new capture boundary is created.
+                            peer.ReadyForReplication = false;
+                            peer.RequiresCatchup = false;
+                            peer.Phase = "Waiting for Resync";
+                            peer.Detail = "Requested a fresh host checkpoint.";
+                            replicationResetPeers.Enqueue(peer.PeerId);
                             pendingResyncCaptures.Enqueue(peer.PeerId);
                             resyncCaptureRequested = true;
                         }
