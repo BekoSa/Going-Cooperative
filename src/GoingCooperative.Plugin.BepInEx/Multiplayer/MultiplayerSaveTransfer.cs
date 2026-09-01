@@ -345,10 +345,11 @@ namespace GoingCooperative.Plugin.BepInEx
             lock (stateLock)
             {
                 return hostPeers.TryGetValue(peerId, out var peer)
-                    && !peer.Closed
-                    && peer.ReadyForReplication
-                    && !peer.CatchupPending
-                    && peer.WorldLoaded;
+                    && MultiplayerLifecyclePolicy.IsPeerGameplayReady(
+                        peer.Closed,
+                        peer.ReadyForReplication,
+                        peer.CatchupPending,
+                        peer.WorldLoaded);
             }
         }
 
