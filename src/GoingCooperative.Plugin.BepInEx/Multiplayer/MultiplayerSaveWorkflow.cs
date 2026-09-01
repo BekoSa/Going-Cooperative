@@ -24,6 +24,14 @@ namespace GoingCooperative.Plugin.BepInEx
         private bool multiplayerWaitingForHomeScene;
         private VillageSaveInfo? multiplayerPendingNativeLoad;
         private float multiplayerHomeReadyRealtime;
+        private const double MultiplayerNativeLoadSettleSeconds = 1d;
+        private readonly MultiplayerHostSyncBarrier multiplayerHostSyncBarrier =
+            new MultiplayerHostSyncBarrier();
+        private bool multiplayerHostSyncPauseApplied;
+        private int multiplayerHostSyncPauseRestoreSpeedIndex;
+        private bool multiplayerNativeLoadFinishedObserved;
+        private float multiplayerNativeLoadFinishedObservedRealtime;
+        private bool multiplayerNativeLoadFinishedAfterLoad;
 
         private List<VillageSaveInfo> GetMultiplayerSaves()
         {
@@ -73,6 +81,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             try
             {
+                ResetMultiplayerHostSyncPause("start-host");
                 multiplayerLoadInvoked = false;
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
@@ -131,6 +140,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             try
             {
+                ResetMultiplayerHostSyncPause("start-client");
                 multiplayerLoadInvoked = false;
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
@@ -150,6 +160,18 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void UpdateMultiplayerSaveWorkflow()
         {
+            if (MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                    multiplayerLoadingInProgress,
+                    multiplayerNativeLoadFinishedObserved,
+                    multiplayerNativeLoadFinishedObserved
+                        ? Time.realtimeSinceStartup
+                            - multiplayerNativeLoadFinishedObservedRealtime
+                        : 0d,
+                    MultiplayerNativeLoadSettleSeconds))
+            {
+                FinalizeMultiplayerNativeCheckpointLoad();
+            }
+
             if (multiplayerWaitingForHomeScene
                 && multiplayerMainMenuActive
                 && multiplayerPendingNativeLoad != null)
@@ -203,7 +225,21 @@ namespace GoingCooperative.Plugin.BepInEx
                         continue;
                     }
 
+                    ReleaseMultiplayerHostSyncPause(
+                        disconnectedPeerId,
+                        "peer-disconnected");
                     HandleReplicationPeerDisconnected(disconnectedPeerId);
+                }
+
+                var failedSyncPeers =
+                    multiplayerSaveTransfer.GetFailedClientPeerIds();
+                for (var failedIndex = 0;
+                    failedIndex < failedSyncPeers.Length;
+                    failedIndex++)
+                {
+                    ReleaseMultiplayerHostSyncPause(
+                        failedSyncPeers[failedIndex],
+                        "peer-failed");
                 }
             }
 
@@ -229,6 +265,9 @@ namespace GoingCooperative.Plugin.BepInEx
                             catchupPeerId,
                             out var catchupError))
                     {
+                        ReleaseMultiplayerHostSyncPause(
+                            catchupPeerId,
+                            "catch-up-complete");
                         LogReplicationInfo(
                             "[MP/SYNC] catch-up complete peer="
                             + catchupPeerId);
@@ -324,6 +363,9 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationClientWeatherAuthorityParked = !replicationConfigHostMode && WeatherScheduleLaneEnabled();
             multiplayerLoadingInProgress = true;
             multiplayerNativeLoadStartedRealtime = Time.realtimeSinceStartup;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             replicationConfigEnabled = false;
             LogReplicationInfo("Going Cooperative replication hooks gated off for native save loading.");
             SetMultiplayerCanvasOpen(false);
@@ -358,9 +400,39 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void OnMultiplayerGameLoadingFinished(bool afterLoad)
         {
-            if (!multiplayerLoadingInProgress) return;
+            if (!multiplayerLoadingInProgress
+                || multiplayerNativeLoadFinishedObserved)
+            {
+                return;
+            }
+
+            multiplayerNativeLoadFinishedObserved = true;
+            multiplayerNativeLoadFinishedObservedRealtime =
+                Time.realtimeSinceStartup;
+            multiplayerNativeLoadFinishedAfterLoad = afterLoad;
+            LogReplicationInfo(
+                "Going Cooperative native loading-finished callback observed afterLoad="
+                + afterLoad
+                + "; waiting "
+                + MultiplayerNativeLoadSettleSeconds.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + "s before multiplayer resume.");
+        }
+
+        private void FinalizeMultiplayerNativeCheckpointLoad()
+        {
+            if (!multiplayerLoadingInProgress
+                || !multiplayerNativeLoadFinishedObserved)
+            {
+                return;
+            }
+
+            var afterLoad = multiplayerNativeLoadFinishedAfterLoad;
             multiplayerLoadingInProgress = false;
             multiplayerNativeLoadStartedRealtime = 0f;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             multiplayerLoadInvoked = false;
             replicationConfigEnabled = false;
             multiplayerSaveTransfer.NotifyNativeLoadFinished();
@@ -369,7 +441,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextWeatherEnvironmentRealtime = 0f;
             replicationLastWeatherScheduleSignature = string.Empty;
             replicationLastWeatherEnvironmentSignature = string.Empty;
-            LogReplicationInfo("Going Cooperative synchronized loading finished afterLoad=" + afterLoad);
+            LogReplicationInfo(
+                "Going Cooperative synchronized loading settled afterLoad="
+                + afterLoad
+                + "; multiplayer resume released.");
         }
 
         private void OnMultiplayerNativeLoadFailed(string reason)
@@ -378,10 +453,125 @@ namespace GoingCooperative.Plugin.BepInEx
             multiplayerLoadingInProgress = false;
             multiplayerLoadInvoked = false;
             multiplayerNativeLoadStartedRealtime = 0f;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             replicationConfigEnabled = false;
             multiplayerSaveTransfer.ReportLoadFailure(reason);
             MultiplayerMenu.StatusMessage = "Native checkpoint load failed: " + reason;
             LogReplicationWarning(MultiplayerMenu.StatusMessage);
+        }
+
+        private bool HoldMultiplayerHostSyncPause(
+            string peerId,
+            long connectionGeneration,
+            out string detail)
+        {
+            var shouldPause =
+                multiplayerHostSyncBarrier.Enter(
+                    peerId,
+                    connectionGeneration);
+            if (!shouldPause)
+            {
+                detail = "shared-host-sync-pause";
+                return true;
+            }
+
+            multiplayerHostSyncPauseRestoreSpeedIndex =
+                replicationAuthoritativeSpeedIndex;
+            if (!TryInvokeStoredGameSpeedManagerMethod(
+                    "SetSpeedPause",
+                    out detail))
+            {
+                multiplayerHostSyncBarrier.Exit(
+                    peerId,
+                    connectionGeneration);
+                return false;
+            }
+
+            multiplayerHostSyncPauseApplied = true;
+            LogReplicationInfo(
+                "[MP/SYNC] host simulation paused peer="
+                + peerId
+                + " generation="
+                + connectionGeneration
+                + " restoreSpeed="
+                + multiplayerHostSyncPauseRestoreSpeedIndex);
+            return true;
+        }
+
+        private void ReleaseMultiplayerHostSyncPause(
+            string peerId,
+            string reason)
+        {
+            var shouldResume =
+                multiplayerHostSyncBarrier.ExitCurrent(peerId);
+            RestoreMultiplayerHostSyncPauseIfNeeded(
+                shouldResume,
+                reason);
+        }
+
+        private void ReleaseMultiplayerHostSyncPause(
+            string peerId,
+            long connectionGeneration,
+            string reason)
+        {
+            var shouldResume =
+                multiplayerHostSyncBarrier.Exit(
+                    peerId,
+                    connectionGeneration);
+            RestoreMultiplayerHostSyncPauseIfNeeded(
+                shouldResume,
+                reason);
+        }
+
+        private void RestoreMultiplayerHostSyncPauseIfNeeded(
+            bool shouldResume,
+            string reason)
+        {
+            if (!shouldResume || !multiplayerHostSyncPauseApplied)
+            {
+                return;
+            }
+
+            var restoreSpeed =
+                multiplayerHostSyncPauseRestoreSpeedIndex;
+            multiplayerHostSyncPauseApplied = false;
+            RestoreReplicationAuthoritativeSpeed(
+                restoreSpeed,
+                out var resumeDetail);
+            LogReplicationInfo(
+                "[MP/SYNC] host simulation resumed reason="
+                + reason
+                + " speed="
+                + restoreSpeed
+                + " detail="
+                + resumeDetail);
+        }
+
+        private void ResetMultiplayerHostSyncPause(string reason)
+        {
+            var hadBarrier = multiplayerHostSyncBarrier.Clear();
+            if (!multiplayerHostSyncPauseApplied)
+            {
+                return;
+            }
+
+            var restoreSpeed =
+                multiplayerHostSyncPauseRestoreSpeedIndex;
+            multiplayerHostSyncPauseApplied = false;
+            RestoreReplicationAuthoritativeSpeed(
+                restoreSpeed,
+                out var resumeDetail);
+            LogReplicationInfo(
+                "[MP/SYNC] host synchronization pause reset reason="
+                + reason
+                + " hadBarrier="
+                + (hadBarrier ? "true" : "false")
+                + " speed="
+                + restoreSpeed
+                + " detail="
+                + resumeDetail);
         }
 
         private void CaptureAndQueueMultiplayerJoin(
@@ -389,20 +579,29 @@ namespace GoingCooperative.Plugin.BepInEx
             long connectionGeneration)
         {
             multiplayerResyncCaptureInProgress = true;
-            var paused = false;
-            var previousSpeedIndex = replicationAuthoritativeSpeedIndex;
+            var syncPauseHeld = false;
+            var keepSyncPause = false;
             try
             {
-                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
+                if (!HoldMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        out var pauseDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Could not pause the authoritative host before join checkpoint: "
+                        + pauseDetail);
+                }
+
+                syncPauseHeld = true;
+                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(
+                        out var abortFlushDetail))
                 {
                     throw new InvalidOperationException(
                         "Trader abort cleanup is incomplete before join checkpoint: "
                         + abortFlushDetail);
                 }
 
-                paused = TryInvokeStoredGameSpeedManagerMethod(
-                    "SetSpeedPause",
-                    out var pauseDetail);
                 var filename = "GoingCooperative_Join_"
                     + peerId.Replace("-", "_")
                     + "_"
@@ -427,25 +626,32 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                LogReplicationInfo("[MP/SAVE] join checkpoint created peer="
+                LogReplicationInfo(
+                    "[MP/SAVE] join checkpoint created peer="
                     + peerId
                     + " generation="
                     + connectionGeneration
                     + " path="
                     + checkpoint.FilePath
                     + " pause="
-                    + pauseDetail);
+                    + pauseDetail
+                    + " hostPausedUntilCatchup=true");
                 multiplayerSaveTransfer.QueueJoinCheckpoint(
                     peerId,
                     connectionGeneration,
                     checkpoint);
+                keepSyncPause = true;
             }
             catch (Exception ex)
             {
                 var reason = "Join checkpoint capture failed: "
                     + FormatReflectionExceptionDetail(ex);
                 MultiplayerMenu.StatusMessage = reason;
-                LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
+                LogReplicationWarning(
+                    "[MP/SAVE] "
+                    + reason
+                    + " peer="
+                    + peerId);
                 multiplayerSaveTransfer.RejectJoin(
                     peerId,
                     connectionGeneration,
@@ -453,17 +659,12 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             finally
             {
-                if (paused)
+                if (syncPauseHeld && !keepSyncPause)
                 {
-                    RestoreReplicationAuthoritativeSpeed(
-                        previousSpeedIndex,
-                        out var resumeDetail);
-                    LogReplicationInfo("[MP/SAVE] host resumed after join checkpoint peer="
-                        + peerId
-                        + " generation="
-                        + connectionGeneration
-                        + " detail="
-                        + resumeDetail);
+                    ReleaseMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        "join-capture-aborted");
                 }
 
                 multiplayerResyncCaptureInProgress = false;
@@ -475,20 +676,29 @@ namespace GoingCooperative.Plugin.BepInEx
             long connectionGeneration)
         {
             multiplayerResyncCaptureInProgress = true;
-            var paused = false;
-            var previousSpeedIndex = replicationAuthoritativeSpeedIndex;
+            var syncPauseHeld = false;
+            var keepSyncPause = false;
             try
             {
-                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
+                if (!HoldMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        out var pauseDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Could not pause the authoritative host before resync checkpoint: "
+                        + pauseDetail);
+                }
+
+                syncPauseHeld = true;
+                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(
+                        out var abortFlushDetail))
                 {
                     throw new InvalidOperationException(
                         "Trader abort cleanup is incomplete before checkpoint: "
                         + abortFlushDetail);
                 }
 
-                paused = TryInvokeStoredGameSpeedManagerMethod(
-                    "SetSpeedPause",
-                    out var pauseDetail);
                 var filename = "GoingCooperative_Resync_"
                     + peerId.Replace("-", "_")
                     + "_"
@@ -513,50 +723,53 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                // Everything retained for this exact connection up to the completed
-                // native save is represented by the checkpoint. Drop only those old
-                // obligations; RequiresCatchup stays set for subsequent mutations.
                 ReleaseReplicationPeerWorldDeltaObligations(
                     peerId,
                     "resync-checkpoint-boundary");
 
-                LogReplicationInfo("[MP/SAVE] targeted resync checkpoint created peer="
+                LogReplicationInfo(
+                    "[MP/SAVE] targeted resync checkpoint created peer="
                     + peerId
                     + " generation="
                     + connectionGeneration
                     + " path="
                     + checkpoint.FilePath
                     + " pause="
-                    + pauseDetail);
+                    + pauseDetail
+                    + " hostPausedUntilCatchup=true");
                 multiplayerSaveTransfer.QueueResyncCheckpoint(
                     peerId,
                     connectionGeneration,
                     checkpoint);
+                keepSyncPause = true;
             }
             catch (Exception ex)
             {
                 var reason = "Full resync capture failed: "
                     + FormatReflectionExceptionDetail(ex);
                 MultiplayerMenu.StatusMessage = reason;
-                LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
+                LogReplicationWarning(
+                    "[MP/SAVE] "
+                    + reason
+                    + " peer="
+                    + peerId);
                 multiplayerSaveTransfer.RejectResync(
                     peerId,
                     connectionGeneration,
                     reason);
+                keepSyncPause =
+                    multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration);
             }
             finally
             {
-                if (paused)
+                if (syncPauseHeld && !keepSyncPause)
                 {
-                    RestoreReplicationAuthoritativeSpeed(
-                        previousSpeedIndex,
-                        out var resumeDetail);
-                    LogReplicationInfo("[MP/SAVE] host resumed after resync checkpoint peer="
-                        + peerId
-                        + " generation="
-                        + connectionGeneration
-                        + " detail="
-                        + resumeDetail);
+                    ReleaseMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        "resync-capture-aborted");
                 }
 
                 multiplayerResyncCaptureInProgress = false;
