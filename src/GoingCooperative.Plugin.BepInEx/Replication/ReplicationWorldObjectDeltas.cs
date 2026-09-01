@@ -20,6 +20,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static readonly HashSet<object> ReplicationClientGenericSpawnedResourcePiles =
             new HashSet<object>(ReferenceObjectComparer.Instance);
         private static readonly Dictionary<long, PendingReplicationWorldObjectDelta> replicationPendingWorldObjectDeltas = new Dictionary<long, PendingReplicationWorldObjectDelta>();
+        private static float replicationNextWorldObjectDeltaRetryScanRealtime;
         private static readonly Dictionary<string, long> ReplicationPendingSupersedableWorldDeltaSequenceByKey =
             new Dictionary<string, long>(StringComparer.Ordinal);
         private static readonly HashSet<long> replicationClientAppliedWorldObjectDeltaSequences = new HashSet<long>();
@@ -3559,6 +3560,15 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var now = Time.realtimeSinceStartup;
+            if (now < replicationNextWorldObjectDeltaRetryScanRealtime)
+            {
+                return;
+            }
+
+            // Reliable deltas retry no faster than 0.75s. Scanning the entire
+            // pending set every rendered frame only burns CPU during congestion
+            // and made building/recovery storms self-amplifying.
+            replicationNextWorldObjectDeltaRetryScanRealtime = now + 0.1f;
             var perfStarted = BeginReplicationPathingPerfSample();
             var inspected = 0;
             var pendingCount = 0;
@@ -4674,8 +4684,22 @@ namespace GoingCooperative.Plugin.BepInEx
                 TryHandleReplicationBuildingLifecycleRepairAckV2(ack);
             }
 
+            var hostLocalBuildResult = finalizedDelta != null
+                && string.Equals(
+                    finalizedDelta.DeltaKind,
+                    ReplicationBuildingBlueprintBatchResultDeltaKind,
+                    StringComparison.Ordinal)
+                && TryReadReplicationWorldObjectDetailToken(
+                    finalizedDelta.Detail,
+                    "player",
+                    out var finalizedBuildPlayer)
+                && string.Equals(
+                    finalizedBuildPlayer,
+                    ReplicationHostPeerId,
+                    StringComparison.Ordinal);
             var manifestReleaseDetail = string.Empty;
             var manifestReleased = finalizedDelta != null
+                && !hostLocalBuildResult
                 && positiveAckSeen
                 && string.Equals(
                     finalizedDelta.DeltaKind,
@@ -4685,6 +4709,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     finalizedDelta,
                     out manifestReleaseDetail);
             if (finalizedDelta != null
+                && !hostLocalBuildResult
                 && string.Equals(
                     finalizedDelta.DeltaKind,
                     ReplicationBuildingBlueprintBatchResultDeltaKind,
@@ -4763,6 +4788,8 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             return string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, WeatherEnvironmentStateDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "GameTimeSnapshot", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
                 || IsReplicationHighFrequencyPresentationUpdate(delta)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
@@ -10310,6 +10337,20 @@ namespace GoingCooperative.Plugin.BepInEx
                 + (receiptCleared ? "yes" : "already-clear")
                 + " parse="
                 + parseDetail.Replace(" ", "_");
+            if (string.Equals(playerId, ReplicationHostPeerId, StringComparison.Ordinal))
+            {
+                instance?.LogReplicationInfo(
+                    "[MP/BUILD] host-local result apply "
+                    + (reconciled ? "ok" : "incomplete")
+                    + " commandSequence="
+                    + commandSequence.ToString(CultureInfo.InvariantCulture)
+                    + " resolved="
+                    + resolved.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + records.Count.ToString(CultureInfo.InvariantCulture)
+                    + " detail="
+                    + detail);
+            }
             return reconciled;
         }
 

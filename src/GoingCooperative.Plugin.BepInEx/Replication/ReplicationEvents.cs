@@ -360,6 +360,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 && IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode);
         }
 
+        private static bool EventSpeedLaneEnabled()
+        {
+            // Game speed is global multiplayer state and must not depend on the
+            // still fail-closed full event-graph authority gate. Otherwise host
+            // pause/normal/fast changes never reach clients while
+            // eventSchedulerAuthority is intentionally disabled.
+            return replicationConfigEventReplication
+                && replicationConfigEventSpeedReplication
+                && replicationEventSpeedHookReady
+                && string.Equals(
+                    replicationConfigWorldObjectDeltaMode,
+                    "apply",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool ReplicationEventExternalAgentLifecycleImplemented()
         {
             return false;
@@ -2642,7 +2657,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var current = instance;
             if (current == null
                 || !replicationConfigHostMode
-                || !FullEventGraphAuthorityEnabled()
+                || !EventSpeedLaneEnabled()
                 || !replicationRuntimeStarted
                 || !replicationRemoteHelloReceived
                 || speedIndex < 0

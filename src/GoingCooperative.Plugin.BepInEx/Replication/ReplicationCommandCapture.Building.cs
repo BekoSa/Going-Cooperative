@@ -827,17 +827,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 // independently accepted host transactions and break drag atomicity.
                 if (replicationConfigHostMode)
                 {
-                    EmitHostLocalReplicationBuildPlacements(
-                        group,
-                        transaction.TransactionId,
-                        groupIndex);
+                    if (EmitHostLocalReplicationBuildPlacements(
+                            group,
+                            transaction.TransactionId,
+                            groupIndex))
+                    {
+                        emitted += group.Count;
+                    }
                 }
                 else
                 {
                     EmitClientReplicationBuildBatch(group, transaction.TransactionId);
+                    emitted += group.Count;
                 }
-
-                emitted += group.Count;
             }
 
             instance?.LogReplicationInfo("Going Cooperative replication build transaction committed id="
@@ -910,43 +912,94 @@ namespace GoingCooperative.Plugin.BepInEx
                     + placements.Count.ToString(CultureInfo.InvariantCulture));
         }
 
-        private static void EmitHostLocalReplicationBuildPlacements(
+        private static bool EmitHostLocalReplicationBuildPlacements(
             List<ReplicationCapturedBuildPlacement> placements,
             long transactionId,
             int groupIndex)
         {
-            if (instance == null || !replicationRemoteHelloReceived)
+            var current = instance;
+            if (current == null
+                || placements.Count == 0
+                || !replicationRemoteHelloReceived
+                || replicationTransport == null
+                || replicationTransport.BoundPeerCount <= 0)
             {
-                return;
+                current?.LogReplicationWarning(
+                    "[MP/BUILD] host-local batch not emitted transaction="
+                    + transactionId.ToString(CultureInfo.InvariantCulture)
+                    + " group="
+                    + groupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " remoteHello="
+                    + replicationRemoteHelloReceived
+                    + " boundPeers="
+                    + (replicationTransport == null
+                        ? "0"
+                        : replicationTransport.BoundPeerCount.ToString(CultureInfo.InvariantCulture)));
+                return false;
             }
 
             var first = placements[0];
             for (var i = 0; i < placements.Count; i++)
             {
-                TrackReplicationBuildingLifecycleV2(placements[i], "host-local-building-v2");
+                TrackReplicationBuildingLifecycleV2(
+                    placements[i],
+                    "host-local-building-v2");
             }
 
+            // Host-local placement used to have a separate
+            // BuildingBlueprintBatchPlaced replay implementation. Client-authored
+            // placement already uses BuildingBlueprintBatchResult, whose client path
+            // handles both provisional views and the no-provisional case by invoking
+            // the authoritative native placement surface. Reuse that mature path for
+            // host-local placement so both directions converge through one replay
+            // implementation.
             var payload = CreateReplicationBuildBatchWirePayload(
                 first.BlueprintId,
                 first.BuildingType,
                 first.Faction,
                 placements);
-            instance.SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
-                ++replicationWorldObjectDeltaSequence,
-                Time.realtimeSinceStartup,
-                ReplicationBuildingBlueprintBatchPlacedDeltaKind,
-                first.UniqueId,
+            var commandSequence =
+                4000000000000000000L
+                + transactionId * 1024L
+                + groupIndex;
+            var manifest = new ReplicationBuildBatchCommitManifest(
+                ReplicationHostPeerId,
+                commandSequence,
+                payload,
                 first.BlueprintId,
+                first.BuildingType,
+                first.Faction,
+                afterLoading: false,
                 first.Record.X,
                 first.Record.Y,
                 first.Record.Z,
-                "payloadB64=" + EncodeReplicationDetailBase64(payload)
-                    + " epoch=" + GetReplicationBuildBatchEpoch().ToString(CultureInfo.InvariantCulture)
-                    + " transactionId=" + transactionId.ToString(CultureInfo.InvariantCulture)
-                    + " group=" + groupIndex.ToString(CultureInfo.InvariantCulture)
-                    + " ids=" + FormatReplicationBuildBatchIds(placements)
-                    + " count=" + placements.Count.ToString(CultureInfo.InvariantCulture)
-                    + " source=host-local-batch"));
+                FormatReplicationBuildBatchIds(placements),
+                new string('1', placements.Count),
+                placements.Count,
+                "host-local-batch transaction="
+                    + transactionId.ToString(CultureInfo.InvariantCulture)
+                    + " group="
+                    + groupIndex.ToString(CultureInfo.InvariantCulture));
+
+            var deltaSequence = ++replicationWorldObjectDeltaSequence;
+            var sent = current.SendReplicationWorldObjectDelta(
+                manifest.CreateDelta(
+                    deltaSequence,
+                    Time.realtimeSinceStartup));
+            current.LogReplicationInfo(
+                "[MP/BUILD] host-local batch "
+                + (sent ? "sent" : "not-sent")
+                + " transaction="
+                + transactionId.ToString(CultureInfo.InvariantCulture)
+                + " group="
+                + groupIndex.ToString(CultureInfo.InvariantCulture)
+                + " count="
+                + placements.Count.ToString(CultureInfo.InvariantCulture)
+                + " deltaSequence="
+                + deltaSequence.ToString(CultureInfo.InvariantCulture)
+                + " commandSequence="
+                + commandSequence.ToString(CultureInfo.InvariantCulture));
+            return sent;
         }
 
         private static bool TryGetReplicationProvisionalBuildView(long commandSequence, int itemIndex, out object? view)
