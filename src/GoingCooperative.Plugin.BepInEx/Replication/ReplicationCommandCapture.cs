@@ -178,15 +178,33 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationGameSpeedIndexPostfix(object __instance, object __0)
         {
             gameSpeedManagerInstance = __instance;
-            if (!replicationConfigHostMode || __0 == null) return;
+            if (__0 == null || replicationEventApplicationDepth > 0)
+            {
+                return;
+            }
+
             try
             {
                 var speedIndex = Convert.ToInt32(__0, CultureInfo.InvariantCulture);
-                if (speedIndex >= 0 && speedIndex <= 3)
+                if (speedIndex < 0 || speedIndex > 3)
+                {
+                    return;
+                }
+
+                if (replicationConfigHostMode)
                 {
                     replicationAuthoritativeSpeedIndex = speedIndex;
+                    SendHostReplicationEventSpeedStateIfEnabled(
+                        speedIndex,
+                        "CurrentSpeedIndex");
+                    return;
                 }
-                SendHostReplicationEventSpeedStateIfEnabled(
+
+                // Keyboard shortcuts can assign CurrentSpeedIndex directly and never
+                // pass through OnUIButtonClicked/SetSpeed*. Treat the property setter
+                // as a first-class client intent source. The existing payload-hash
+                // duplicate window collapses the setter + button callback pair.
+                SendReplicationLocalSpeedIntent(
                     speedIndex,
                     "CurrentSpeedIndex");
             }

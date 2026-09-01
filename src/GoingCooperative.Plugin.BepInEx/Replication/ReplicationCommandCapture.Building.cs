@@ -921,20 +921,19 @@ namespace GoingCooperative.Plugin.BepInEx
             if (current == null
                 || placements.Count == 0
                 || !replicationRemoteHelloReceived
-                || replicationTransport == null
-                || replicationTransport.BoundPeerCount <= 0)
+                || replicationTransport == null)
             {
                 current?.LogReplicationWarning(
                     "[MP/BUILD] host-local batch not emitted transaction="
                     + transactionId.ToString(CultureInfo.InvariantCulture)
                     + " group="
                     + groupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " placements="
+                    + placements.Count.ToString(CultureInfo.InvariantCulture)
                     + " remoteHello="
                     + replicationRemoteHelloReceived
-                    + " boundPeers="
-                    + (replicationTransport == null
-                        ? "0"
-                        : replicationTransport.BoundPeerCount.ToString(CultureInfo.InvariantCulture)));
+                    + " transport="
+                    + (replicationTransport == null ? "missing" : "ready"));
                 return false;
             }
 

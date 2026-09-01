@@ -4790,6 +4790,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, WeatherEnvironmentStateDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "GameTimeSnapshot", StringComparison.Ordinal)
+                || (string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingLifecycleV2DeltaKind,
+                        StringComparison.Ordinal)
+                    && TryReadReplicationWorldObjectDetailToken(
+                        delta.Detail,
+                        "state",
+                        out var buildingLifecycleState)
+                    && string.Equals(
+                        buildingLifecycleState,
+                        "active",
+                        StringComparison.Ordinal))
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
                 || IsReplicationHighFrequencyPresentationUpdate(delta)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
@@ -16285,6 +16297,24 @@ namespace GoingCooperative.Plugin.BepInEx
             if (string.Equals(delta.DeltaKind, WeatherEnvironmentStateDeltaKind, StringComparison.Ordinal))
             {
                 return WeatherEnvironmentStateDeltaKind;
+            }
+
+            if (string.Equals(
+                    delta.DeltaKind,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    StringComparison.Ordinal)
+                && TryReadReplicationWorldObjectDetailToken(
+                    delta.Detail,
+                    "state",
+                    out var buildingLifecycleState)
+                && string.Equals(
+                    buildingLifecycleState,
+                    "active",
+                    StringComparison.Ordinal))
+            {
+                return ReplicationBuildingLifecycleV2DeltaKind
+                    + "|uid="
+                    + delta.UniqueId.ToString(CultureInfo.InvariantCulture);
             }
 
             if (string.Equals(delta.DeltaKind, GameEventSpeedStateDeltaKind, StringComparison.Ordinal))

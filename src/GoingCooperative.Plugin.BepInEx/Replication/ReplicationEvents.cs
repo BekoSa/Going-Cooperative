@@ -2726,15 +2726,11 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 replicationEventApplicationDepth++;
                 if (gameSpeedManagerInstance == null) TryCaptureGameSpeedManagerInstance("event-speed-apply");
-                if (gameSpeedManagerInstance != null
-                    && TryReadInstanceMemberValue(gameSpeedManagerInstance, "CurrentSpeedIndex", out var currentSpeedValue)
-                    && currentSpeedValue != null
-                    && Convert.ToInt32(currentSpeedValue, CultureInfo.InvariantCulture) == speedIndex)
-                {
-                    lock (ReplicationEventLock) replicationLastEventSpeedAppliedSequence = delta.Sequence;
-                    detail = "ok event-speed-already-current index=" + speedIndex.ToString(CultureInfo.InvariantCulture);
-                    return true;
-                }
+                // Do not short-circuit when CurrentSpeedIndex already matches.
+                // The numeric speed may have changed through a non-UI native path while
+                // the speed-button selection is still stale. Applying through
+                // TryApplyStoredGameSpeedIndexFromReplication refreshes both simulation
+                // state and the native button presentation under capture suppression.
                 bool applied;
                 if (speedIndex <= 3)
                 {
