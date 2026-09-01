@@ -1208,7 +1208,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            var parts = payload.Split('|');
+            var parts = payload.Split(
+                new[] { '|' },
+                StringSplitOptions.None);
             if (parts.Length != 6
                 || !string.Equals(parts[0], Magic, StringComparison.Ordinal)
                 || !long.TryParse(
