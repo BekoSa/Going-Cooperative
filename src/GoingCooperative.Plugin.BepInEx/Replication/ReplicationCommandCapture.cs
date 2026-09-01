@@ -143,6 +143,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationGameSpeedButtonPostfix(MethodBase __originalMethod, object __instance, int __0)
         {
             gameSpeedManagerInstance = __instance;
+            if (replicationEventApplicationDepth > 0)
+            {
+                return;
+            }
+
             if (__0 >= 0 && __0 <= 3 && replicationConfigHostMode)
             {
                 replicationAuthoritativeSpeedIndex = __0;
@@ -411,6 +416,7 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 var pending = pair.Value;
                 var storagePolicy = IsReplicationStoragePolicyUpdateCommand(pending.Command);
+                var buildBatch = IsReplicationBuildBatchCommand(pending.Command);
                 var resultRequestWindowExpired = pending.HostResponded
                     && !storagePolicy
                     && now - pending.AwaitingResultStartedRealtime >= ReplicationBuildBatchResultRequestWindowSeconds;
@@ -420,7 +426,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         : resultRequestWindowExpired
                         ? ReplicationBuildBatchResultDormantRetrySeconds
                         : ReplicationBuildBatchResultRequestRetrySeconds
-                    : ReplicationCommandIntentRetrySeconds;
+                    : buildBatch
+                        ? ReplicationBuildBatchIntentRetrySeconds
+                        : ReplicationCommandIntentRetrySeconds;
                 if (resultRequestWindowExpired)
                 {
                     if (!pending.ResultRequestWindowExpiredLogged)
@@ -446,9 +454,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
+                var maxIntentSends = buildBatch
+                    ? ReplicationBuildBatchIntentMaxSends
+                    : ReplicationCommandIntentMaxSends;
                 if (!storagePolicy
                     && !pending.HostResponded
-                    && pending.SendCount >= ReplicationCommandIntentMaxSends)
+                    && pending.SendCount >= maxIntentSends)
                 {
                     var rolledBack = RollbackReplicationProvisionalBuildViews(
                         pending.Command,
@@ -535,6 +546,11 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private const float ReplicationCommandIntentRetrySeconds = 0.5f;
         private const int ReplicationCommandIntentMaxSends = 12;
+        // Native building placement can stall the host for multiple frames while
+        // pathing/roof/support state is rebuilt. Retrying a whole batch every 500 ms
+        // multiplies that load precisely while the host is already saturated.
+        private const float ReplicationBuildBatchIntentRetrySeconds = 2.5f;
+        private const int ReplicationBuildBatchIntentMaxSends = 24;
         private const float ReplicationBuildBatchResultRequestRetrySeconds = 2f;
         private const float ReplicationBuildBatchResultRequestWindowSeconds = 120f;
         private const float ReplicationBuildBatchResultDormantRetrySeconds = 15f;
