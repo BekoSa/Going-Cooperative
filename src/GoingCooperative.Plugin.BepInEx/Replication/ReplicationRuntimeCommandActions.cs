@@ -204,7 +204,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var vec3IntType = position.GetType();
+                var vec3IntType = position!.GetType();
                 var forceOrder = AccessTools.Method(managerType, "OnForceOrderOnResource", new[] { vec3IntType });
                 if (forceOrder == null)
                 {
@@ -845,7 +845,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var shrinking = string.Equals(orderType, "ShrinkZone", StringComparison.Ordinal);
                 var validName = shrinking ? "GetShrinkValidPositions" : "GetExpandValidPositions";
                 var mutateName = shrinking ? "ShrinkStockpile" : "ExpandStockpile";
-                var getValid = AccessTools.Method(stockpileManagerType, validName, new[] { start.GetType(), end.GetType() });
+                var getValid = AccessTools.Method(stockpileManagerType, validName, new[] { start!.GetType(), end!.GetType() });
                 var validPositions = getValid?.Invoke(stockpileManager, new[] { start, end });
                 MethodInfo? mutate = null;
                 foreach (var candidate in stockpileManagerType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -1159,7 +1159,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var vec3IntType = min.GetType();
+                var vec3IntType = min!.GetType();
                 var forbiddenEdge = AccessTools.Method(gridDataIndexToolsType, "IsForbiddenEdge", new[] { vec3IntType });
                 if (forbiddenEdge == null)
                 {
@@ -1191,6 +1191,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 clamp.Invoke(null, clampMaxArgs);
                 min = clampMinArgs[0];
                 max = clampMaxArgs[0];
+                if (min == null || max == null)
+                {
+                    detail = "stockpile-rejected reason=clamped-position-null";
+                    return false;
+                }
+
                 if (!TryReadReplicationVec3Int(min, out var clampedMinX, out var clampedMinY, out var clampedMinZ)
                     || !TryReadReplicationVec3Int(max, out var clampedMaxX, out var clampedMaxY, out var clampedMaxZ))
                 {
@@ -1335,7 +1341,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var method = AccessTools.Method(managerType, "SpawnStockpile", new[] { stockpileType, start.GetType(), end.GetType() });
+                var method = AccessTools.Method(managerType, "SpawnStockpile", new[] { stockpileType, start!.GetType(), end!.GetType() });
                 if (method == null)
                 {
                     detail = "spawn-stockpile-method-missing";
