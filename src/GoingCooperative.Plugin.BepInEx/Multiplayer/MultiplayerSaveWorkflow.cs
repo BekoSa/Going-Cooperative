@@ -752,9 +752,11 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                ReleaseReplicationPeerWorldDeltaObligations(
-                    peerId,
-                    "resync-checkpoint-boundary");
+                // The checkpoint is now a valid replacement boundary. Only
+                // at this point tear down the old UDP peer/runtime state; doing it
+                // before SaveCurrentVillage() made a stale/failed capture strand the
+                // client in "Waiting for Host" with no usable replication lane.
+                HandleReplicationPeerResyncStarted(peerId);
 
                 LogReplicationInfo(
                     "[MP/SAVE] targeted resync checkpoint created peer="
