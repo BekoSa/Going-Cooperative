@@ -597,15 +597,23 @@ namespace GoingCooperative.Plugin.BepInEx
             try
             {
                 var mode = replicationConfigHostMode ? "host" : "client";
-                var peerId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
-                replicationTransport.Send(ReplicationPayloadCodec.ForHello(
-                    peerId,
-                    new ReplicationHello(
+                var peerId = replicationConfigHostMode
+                    ? ReplicationHostPeerId
+                    : GetReplicationLocalPeerId();
+                var peerBindingToken = replicationConfigHostMode
+                    ? string.Empty
+                    : multiplayerSaveTransfer.AssignedPeerBindingToken;
+                replicationTransport.Send(
+                    ReplicationPayloadCodec.ForHello(
                         peerId,
-                        mode,
-                        ReplicationPayloadCodec.ProtocolVersion,
-                        GetReplicationLocalBuildHash(),
-                        MultiplayerNickname.Normalize(MultiplayerMenu.Nickname))));
+                        new ReplicationHello(
+                            peerId,
+                            mode,
+                            ReplicationPayloadCodec.ProtocolVersion,
+                            GetReplicationLocalBuildHash(),
+                            MultiplayerNickname.Normalize(
+                                MultiplayerMenu.Nickname),
+                            peerBindingToken)));
             }
             catch (InvalidOperationException)
             {
@@ -679,6 +687,29 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (replicationConfigHostMode
+                && remoteIsClient
+                && !multiplayerSaveTransfer
+                    .TryValidateClientPeerReplicationToken(
+                        hello.PeerId,
+                        hello.PeerBindingToken))
+            {
+                LogReplicationWarning(
+                    "[MP/SESSION] peer binding proof refused peer="
+                    + hello.PeerId);
+                replicationTransport?.RemovePeer(hello.PeerId);
+                return;
+            }
+
+            if (!replicationConfigHostMode
+                && !string.IsNullOrEmpty(hello.PeerBindingToken))
+            {
+                LogReplicationWarning(
+                    "[MP/SESSION] public peer hello leaked a binding token peer="
+                    + hello.PeerId);
+                return;
+            }
+
             if (!IsReplicationHelloCompatible(
                     hello,
                     out var compatibilityError))
@@ -718,10 +749,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var publicHello = CreatePublicReplicationHello(hello);
             if (peerAnnouncement)
             {
                 ReplicationCompatiblePeerIds.Add(hello.PeerId);
-                ReplicationCompatiblePeerHellos[hello.PeerId] = hello;
+                ReplicationCompatiblePeerHellos[hello.PeerId] = publicHello;
                 SetReplicationRemotePeerDisplayName(
                     hello.PeerId,
                     hello.DisplayName);
@@ -735,7 +767,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var newlyCompatible =
                 ReplicationCompatiblePeerIds.Add(hello.PeerId);
-            ReplicationCompatiblePeerHellos[hello.PeerId] = hello;
+            ReplicationCompatiblePeerHellos[hello.PeerId] = publicHello;
             replicationRemoteCompatibilityRefused = false;
             replicationRemoteHelloReceived =
                 ReplicationCompatiblePeerIds.Contains(
@@ -775,7 +807,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     QueueReplicationResourceStateV2Baseline();
                     AnnounceReplicationPeersToNewClient(
                         hello.PeerId,
-                        envelope);
+                        publicHello);
                     SendReplicationPeerRosterToPeer(hello.PeerId);
                 }
             }
@@ -808,7 +840,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void AnnounceReplicationPeersToNewClient(
             string newPeerId,
-            TransportEnvelope newPeerHelloEnvelope)
+            ReplicationHello newPeerHello)
         {
             if (!replicationConfigHostMode
                 || replicationTransport == null)
@@ -821,7 +853,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 // Existing players learn about the newcomer.
                 replicationTransport.SendToAllExcept(
                     newPeerId,
-                    newPeerHelloEnvelope);
+                    ReplicationPayloadCodec.ForHello(
+                        newPeerId,
+                        newPeerHello));
 
                 // The newcomer learns display names/IDs of existing clients.
                 foreach (var pair in ReplicationCompatiblePeerHellos)
@@ -855,6 +889,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     + ":"
                     + ex.Message);
             }
+        }
+
+        private static ReplicationHello CreatePublicReplicationHello(
+            ReplicationHello hello)
+        {
+            return new ReplicationHello(
+                hello.PeerId,
+                hello.Mode,
+                hello.ProtocolVersion,
+                hello.BuildHash,
+                hello.DisplayName,
+                string.Empty);
         }
 
         private static bool IsReplicationHelloCompatible(ReplicationHello hello, out string error)
