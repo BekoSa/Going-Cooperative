@@ -2606,6 +2606,63 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReplicationWorldObjectDetailToken(result.Detail)));
         }
 
+        private void HandleReplicationPeerDisconnectedFromWorldDeltas(
+            string peerId)
+        {
+            if (string.IsNullOrWhiteSpace(peerId))
+            {
+                return;
+            }
+
+            var completed = new List<ReplicationWorldObjectDelta>();
+            lock (ReplicationWorldObjectDeltaLock)
+            {
+                var sequences = new List<long>();
+                foreach (var pair in replicationPendingWorldObjectDeltas)
+                {
+                    var pending = pair.Value;
+                    if (!pending.RemoveRequiredPeer(peerId)
+                        || !pending.IsComplete)
+                    {
+                        continue;
+                    }
+
+                    sequences.Add(pair.Key);
+                    completed.Add(pending.Delta);
+                    ClearReplicationPendingBuildingLifecycleSupersessionIndex(
+                        pending.Delta);
+                }
+
+                for (var i = 0; i < sequences.Count; i++)
+                {
+                    replicationPendingWorldObjectDeltas.Remove(sequences[i]);
+                }
+            }
+
+            for (var i = 0; i < completed.Count; i++)
+            {
+                var delta = completed[i];
+                if (string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingBlueprintBatchResultDeltaKind,
+                        StringComparison.Ordinal))
+                {
+                    TryReleaseReplicationHostBuildBatchCommitManifest(
+                        delta,
+                        out _);
+                }
+            }
+
+            if (completed.Count > 0)
+            {
+                LogReplicationInfo(
+                    "[MP/REPL] disconnected peer released pending deltas peer="
+                    + peerId
+                    + " count="
+                    + completed.Count.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
         private bool SendReplicationWorldObjectDelta(
             ReplicationWorldObjectDelta delta)
         {
@@ -16579,6 +16636,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     peerId => !active.Contains(peerId));
                 acknowledgedPeerIds.RemoveWhere(
                     peerId => !requiredPeerIds.Contains(peerId));
+            }
+
+            public bool RemoveRequiredPeer(string peerId)
+            {
+                acknowledgedPeerIds.Remove(peerId);
+                return requiredPeerIds.Remove(peerId);
             }
 
             public string[] GetUnacknowledgedPeerIds()
