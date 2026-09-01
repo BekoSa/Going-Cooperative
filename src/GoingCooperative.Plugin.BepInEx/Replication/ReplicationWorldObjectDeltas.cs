@@ -2628,8 +2628,9 @@ namespace GoingCooperative.Plugin.BepInEx
             return false;
         }
 
-        private void HandleReplicationPeerDisconnectedFromWorldDeltas(
-            string peerId)
+        private void ReleaseReplicationPeerWorldDeltaObligations(
+            string peerId,
+            string reason)
         {
             if (string.IsNullOrWhiteSpace(peerId))
             {
@@ -2678,8 +2679,10 @@ namespace GoingCooperative.Plugin.BepInEx
             if (completed.Count > 0)
             {
                 LogReplicationInfo(
-                    "[MP/REPL] disconnected peer released pending deltas peer="
+                    "[MP/REPL] peer released pending deltas peer="
                     + peerId
+                    + " reason="
+                    + reason
                     + " count="
                     + completed.Count.ToString(CultureInfo.InvariantCulture));
             }
