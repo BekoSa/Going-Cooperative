@@ -30,5 +30,15 @@ namespace GoingCooperative.Core
                 && !catchupPending
                 && worldLoaded;
         }
+
+        public static bool ShouldApplyDisconnectedPeerCleanup(
+            bool currentPeerConnected)
+        {
+            // Disconnect notifications are deferred from the control worker to the
+            // Unity thread. A reconnect may reuse the same peer slot before that
+            // notification is drained. In that case the peer-id keyed replication
+            // state already belongs to the replacement connection and must survive.
+            return !currentPeerConnected;
+        }
     }
 }
