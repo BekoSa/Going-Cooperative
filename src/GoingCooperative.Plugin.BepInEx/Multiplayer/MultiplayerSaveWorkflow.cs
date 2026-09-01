@@ -189,6 +189,20 @@ namespace GoingCooperative.Plugin.BepInEx
                 while (multiplayerSaveTransfer.TryDequeueDisconnectedPeer(
                     out var disconnectedPeerId))
                 {
+                    var replacementConnected =
+                        multiplayerSaveTransfer.IsClientPeerConnected(
+                            disconnectedPeerId);
+                    if (!MultiplayerLifecyclePolicy
+                        .ShouldApplyDisconnectedPeerCleanup(
+                            replacementConnected))
+                    {
+                        LogReplicationInfo(
+                            "[MP/SESSION] stale disconnect cleanup skipped peer="
+                            + disconnectedPeerId
+                            + " reason=reconnected-slot");
+                        continue;
+                    }
+
                     HandleReplicationPeerDisconnected(disconnectedPeerId);
                 }
             }
