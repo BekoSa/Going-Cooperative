@@ -178,6 +178,15 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 OnMultiplayerNativeLoadFailed("Timed out after 180 seconds.");
             }
+            if (replicationConfigHostMode && replicationRuntimeStarted)
+            {
+                while (multiplayerSaveTransfer.TryDequeueDisconnectedPeer(
+                    out var disconnectedPeerId))
+                {
+                    HandleReplicationPeerDisconnected(disconnectedPeerId);
+                }
+            }
+
             if (replicationConfigHostMode
                 && !multiplayerResyncCaptureInProgress
                 && !multiplayerLoadingInProgress
