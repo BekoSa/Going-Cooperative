@@ -356,6 +356,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 ReplicationPendingCommandIntents[pendingDurableKey] = pendingDurable;
             }
 
+            if (pendingDurable != null
+                && IsReplicationBuildBatchCommand(command)
+                && !IsOldestUnrespondedReplicationBuildBatch(
+                    command.Sequence))
+            {
+                instance?.LogReplicationInfo(
+                    "Going Cooperative replication build batch queued behind prior authoritative transaction key="
+                    + pendingDurableKey
+                    + " source="
+                    + source);
+                return;
+            }
+
             try
             {
                 if (replicationTransport == null)
@@ -417,6 +430,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 var pending = pair.Value;
                 var storagePolicy = IsReplicationStoragePolicyUpdateCommand(pending.Command);
                 var buildBatch = IsReplicationBuildBatchCommand(pending.Command);
+                if (buildBatch
+                    && !pending.HostResponded
+                    && !IsOldestUnrespondedReplicationBuildBatch(
+                        pending.Command.Sequence))
+                {
+                    continue;
+                }
+
                 var resultRequestWindowExpired = pending.HostResponded
                     && !storagePolicy
                     && now - pending.AwaitingResultStartedRealtime >= ReplicationBuildBatchResultRequestWindowSeconds;
@@ -555,6 +576,27 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildBatchResultRequestWindowSeconds = 120f;
         private const float ReplicationBuildBatchResultDormantRetrySeconds = 15f;
         private const float ReplicationStoragePolicyStateProofRetrySeconds = 2f;
+
+        private static bool IsOldestUnrespondedReplicationBuildBatch(
+            long commandSequence)
+        {
+            foreach (var pair in ReplicationPendingCommandIntents)
+            {
+                var candidate = pair.Value;
+                if (candidate.HostResponded
+                    || !IsReplicationBuildBatchCommand(candidate.Command))
+                {
+                    continue;
+                }
+
+                if (candidate.Command.Sequence < commandSequence)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         private static bool IsReplicationBuildBatchCommand(LockstepCommand command)
         {
