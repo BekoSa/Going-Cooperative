@@ -98,7 +98,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             SendReplicationLocalSelectionIfChangedOrDue(now);
 
-            if (Input.GetKeyDown(KeyCode.F9)
+            if (Input.GetKeyDown(replicationConfigPingKey)
                 && TryGetReplicationCursorWorldPoint(out var pingPosition))
             {
                 SendReplicationLocalPing(pingPosition);

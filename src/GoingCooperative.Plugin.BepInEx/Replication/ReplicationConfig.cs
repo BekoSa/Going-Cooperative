@@ -209,6 +209,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationConfigRegionCommandMode = "shadow";
         private static string replicationConfigGoapActionProbeEntityId = string.Empty;
         private static string replicationConfigWorldObjectDeltaMode = "shadow";
+        private static UnityEngine.KeyCode replicationConfigPingKey = UnityEngine.KeyCode.F9;
         private static int replicationConfigPort = 47692;
         private static int replicationConfigSnapshotHz = 12;
         private static int replicationConfigFullResyncSeconds = 45;
@@ -687,6 +688,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) && port > 0 && port <= 65535)
                     {
                         replicationConfigPort = port;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "pingkey":
+                case "playerpingkey":
+                    if (TryParseReplicationKeyCode(value, out var pingKey))
+                    {
+                        replicationConfigPingKey = pingKey;
                     }
                     else
                     {
@@ -1828,6 +1841,34 @@ namespace GoingCooperative.Plugin.BepInEx
                 + key
                 + " value="
                 + value);
+        }
+
+        private static bool TryParseReplicationKeyCode(string value, out UnityEngine.KeyCode keyCode)
+        {
+            keyCode = UnityEngine.KeyCode.None;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            try
+            {
+                var parsed = (UnityEngine.KeyCode)Enum.Parse(
+                    typeof(UnityEngine.KeyCode),
+                    value.Trim(),
+                    true);
+                if (!Enum.IsDefined(typeof(UnityEngine.KeyCode), parsed))
+                {
+                    return false;
+                }
+
+                keyCode = parsed;
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
         }
 
         private static bool TryParseReplicationCaptureMode(string value, out string mode)
