@@ -29,7 +29,8 @@ namespace GoingCooperative.Core.Replication
                     EncodeText(hello.Mode),
                     EncodeText(hello.ProtocolVersion),
                     EncodeText(hello.BuildHash),
-                    EncodeText(hello.DisplayName)
+                    EncodeText(hello.DisplayName),
+                    EncodeText(hello.PeerBindingToken)
                 }));
         }
 
@@ -45,9 +46,9 @@ namespace GoingCooperative.Core.Replication
             }
 
             var parts = envelope.Payload.Split(new[] { '|' }, StringSplitOptions.None);
-            if (parts.Length != 6)
+            if (parts.Length != 7)
             {
-                error = "expected hello payload with 6 fields";
+                error = "expected hello payload with 7 fields";
                 return false;
             }
 
@@ -56,7 +57,8 @@ namespace GoingCooperative.Core.Replication
                 || !TryDecodeText(parts[2], out var mode, out error)
                 || !TryDecodeText(parts[3], out var protocolVersion, out error)
                 || !TryDecodeText(parts[4], out var buildHash, out error)
-                || !TryDecodeText(parts[5], out var displayName, out error))
+                || !TryDecodeText(parts[5], out var displayName, out error)
+                || !TryDecodeText(parts[6], out var peerBindingToken, out error))
             {
                 return false;
             }
@@ -66,7 +68,8 @@ namespace GoingCooperative.Core.Replication
                 mode,
                 protocolVersion,
                 buildHash,
-                displayName);
+                displayName,
+                peerBindingToken);
             return true;
         }
 
