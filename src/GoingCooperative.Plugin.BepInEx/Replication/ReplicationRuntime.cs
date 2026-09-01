@@ -2014,7 +2014,9 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
-        private void HandleReplicationPeerDisconnected(string peerId)
+        private void ResetReplicationPeerRuntimeState(
+            string peerId,
+            string reason)
         {
             if (!replicationConfigHostMode
                 || string.IsNullOrWhiteSpace(peerId))
@@ -2034,11 +2036,23 @@ namespace GoingCooperative.Plugin.BepInEx
             RemoveReplicationRemotePeerPresence(peerId);
 
             LogReplicationInfo(
-                "[MP/SESSION] peer disconnected cleanup peer="
+                "[MP/SESSION] peer runtime reset peer="
                 + peerId
+                + " reason="
+                + reason
                 + " remainingCompatible="
                 + ReplicationCompatiblePeerIds.Count.ToString(
                     CultureInfo.InvariantCulture));
+        }
+
+        private void HandleReplicationPeerDisconnected(string peerId)
+        {
+            ResetReplicationPeerRuntimeState(peerId, "disconnect");
+        }
+
+        private void HandleReplicationPeerResyncStarted(string peerId)
+        {
+            ResetReplicationPeerRuntimeState(peerId, "resync");
         }
 
         private static void RememberReplicationHostCommandResult(
