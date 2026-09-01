@@ -208,6 +208,33 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public string[] GetFailedClientPeerIds()
+        {
+            if (!hostMode)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (stateLock)
+            {
+                var result = new List<string>();
+                foreach (var peer in hostPeers.Values)
+                {
+                    if (!peer.Closed
+                        && string.Equals(
+                            peer.Phase,
+                            "Failed",
+                            StringComparison.Ordinal))
+                    {
+                        result.Add(peer.PeerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
         public bool CompletePeerCatchup(
             string peerId,
             out string error)
