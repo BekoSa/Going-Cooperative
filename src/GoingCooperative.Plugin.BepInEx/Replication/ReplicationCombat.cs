@@ -18,9 +18,12 @@ namespace GoingCooperative.Plugin.BepInEx
         private const string CombatHealthDeltaKind = "CombatHealth";
         private const string CombatDeathDeltaKind = "CombatDeath";
         private const string CombatPresentationDeltaKind = "CombatPresentation";
+        private const string CombatProjectileDeltaKind = "CombatProjectile";
         private static long replicationCombatOutcomeSequence;
         private static long replicationCombatPresentationSequence;
         private static long replicationCombatChargeSequence;
+        private static long replicationCombatProjectileSequence;
+        private static ReplicationCombatPendingProjectileCapture? replicationCombatPendingProjectile;
         private static readonly Dictionary<string, object> ReplicationCombatStatTypeValueByName = new Dictionary<string, object>(StringComparer.Ordinal);
         private static readonly Dictionary<Type, MethodInfo> ReplicationCombatGetStatByStatsType = new Dictionary<Type, MethodInfo>();
         private static readonly Dictionary<Type, MethodInfo> ReplicationCombatForceStatByStatType = new Dictionary<Type, MethodInfo>();
@@ -63,6 +66,12 @@ namespace GoingCooperative.Plugin.BepInEx
             public bool HasAttackMotionTime;
         }
 
+        private sealed class ReplicationCombatPendingProjectileCapture
+        {
+            public string AttackerEntityId = string.Empty;
+            public int Frame;
+        }
+
         private void TryInstallReplicationCombatHooks(Harmony harmony)
         {
             if (!replicationConfigCombatReplication) return;
@@ -80,6 +89,8 @@ namespace GoingCooperative.Plugin.BepInEx
             var chargeStartPostfix = CombatHarmony(nameof(ReplicationCombatChargeStartPostfix));
             var chargeEndPrefix = CombatHarmony(nameof(ReplicationCombatChargeEndPrefix));
             var weaponReleasePrefix = CombatHarmony(nameof(ReplicationCombatWeaponReleasePrefix));
+            var weaponReleasePostfix = CombatHarmony(nameof(ReplicationCombatWeaponReleasePostfix));
+            var projectileSetupPostfix = CombatHarmony(nameof(ReplicationCombatProjectileSetupPostfix));
             var finalHealthPostfix = CombatHarmony(nameof(ReplicationCombatFinalHealthPostfix));
             var lifecycleHealthPostfix = CombatHarmony(nameof(ReplicationCombatLifecycleHealthPostfix));
             var woundTickPostfix = CombatHarmony(nameof(ReplicationCombatWoundTickPostfix));
@@ -117,8 +128,38 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 count += PatchCombat(harmony, "NSMedieval.Goap.Goals.AttackBaseGoal", "SpawnChargeProgressBar", Type.EmptyTypes, chargeStartPrefix, chargeStartPostfix);
                 count += PatchCombat(harmony, "NSMedieval.Goap.Goals.AttackBaseGoal", "DestroyChargeProgressBar", Type.EmptyTypes, chargeEndPrefix, null);
-                count += PatchCombat(harmony, "NSMedieval.Goap.Actions.CombatActions", "FireRangedWeapon", new[] { CombatType("NSMedieval.Goap.IDamageDealAgent") }, weaponReleasePrefix, null);
                 count += PatchCombat(harmony, "NSMedieval.Goap.Actions.CombatActions", "AttackMelee", new[] { CombatType("NSMedieval.Goap.IDamageDealAgent") }, weaponReleasePrefix, null);
+            }
+
+            if (replicationConfigCombatPresentationReplication
+                || replicationConfigCombatProjectileReplication)
+            {
+                count += PatchCombat(
+                    harmony,
+                    "NSMedieval.Goap.Actions.CombatActions",
+                    "FireRangedWeapon",
+                    new[] { CombatType("NSMedieval.Goap.IDamageDealAgent") },
+                    weaponReleasePrefix,
+                    weaponReleasePostfix);
+            }
+
+            if (replicationConfigCombatProjectileReplication)
+            {
+                count += PatchCombat(
+                    harmony,
+                    "NSMedieval.BasicPointToPointMove",
+                    "Setup",
+                    new[]
+                    {
+                        typeof(Vector3),
+                        typeof(float),
+                        typeof(bool),
+                        typeof(Vector3),
+                        typeof(float),
+                        typeof(float)
+                    },
+                    null,
+                    projectileSetupPostfix);
             }
 
             if (replicationConfigCombatHealthDetailReplication)
@@ -361,6 +402,28 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationCombatWeaponReleasePrefix(MethodBase __originalMethod, object __0)
         {
+            if (string.Equals(
+                    __originalMethod.Name,
+                    "FireRangedWeapon",
+                    StringComparison.Ordinal)
+                && replicationConfigHostMode
+                && replicationRuntimeStarted
+                && replicationRemoteHelloReceived
+                && CombatMutationEnabled(
+                    replicationConfigCombatProjectileReplication)
+                && TryGetReplicationAgentOwnerEntityId(
+                    __0,
+                    out var projectileAttackerId,
+                    out _))
+            {
+                replicationCombatPendingProjectile =
+                    new ReplicationCombatPendingProjectileCapture
+                    {
+                        AttackerEntityId = projectileAttackerId,
+                        Frame = Time.frameCount
+                    };
+            }
+
             if (!replicationConfigHostMode
                 || !replicationRuntimeStarted
                 || !replicationRemoteHelloReceived
@@ -377,6 +440,156 @@ namespace GoingCooperative.Plugin.BepInEx
                 ? LockstepCommandPayloads.CombatPresentationAttackKindRanged
                 : LockstepCommandPayloads.CombatPresentationAttackKindMelee;
             SendReplicationHostCombatPresentation(charge, LockstepCommandPayloads.CombatPresentationWeaponReleasePhase, LockstepCommandPayloads.CombatPresentationEndReasonNone);
+        }
+
+        private static void ReplicationCombatWeaponReleasePostfix(
+            MethodBase __originalMethod)
+        {
+            if (!string.Equals(
+                    __originalMethod.Name,
+                    "FireRangedWeapon",
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            var pending = replicationCombatPendingProjectile;
+            if (pending != null && pending.Frame == Time.frameCount)
+            {
+                replicationCombatPendingProjectile = null;
+            }
+        }
+
+        private static void ReplicationCombatProjectileSetupPostfix(
+            object __instance,
+            object[] __args)
+        {
+            var pending = replicationCombatPendingProjectile;
+            if (pending == null
+                || pending.Frame != Time.frameCount
+                || !replicationConfigHostMode
+                || !replicationRuntimeStarted
+                || !replicationRemoteHelloReceived
+                || !CombatMutationEnabled(
+                    replicationConfigCombatProjectileReplication)
+                || __args.Length != 6
+                || !(__instance is Component moverComponent)
+                || !(__args[0] is Vector3 destination)
+                || !(__args[3] is Vector3 destinationOffset)
+                || !TryConvertFiniteReplicationCombatFloat(
+                    __args[1],
+                    out var speed)
+                || speed <= 0f
+                || !TryConvertFiniteReplicationCombatFloat(
+                    __args[4],
+                    out var archHeight)
+                || !TryConvertFiniteReplicationCombatFloat(
+                    __args[5],
+                    out var destroyDelay)
+                || destroyDelay < 0f)
+            {
+                return;
+            }
+
+            var projectileType =
+                AccessTools.TypeByName("NSMedieval.CombatProjectile");
+            if (projectileType == null)
+            {
+                return;
+            }
+
+            var projectile =
+                moverComponent.GetComponent(projectileType);
+            if (projectile == null)
+            {
+                return;
+            }
+
+            var dontSpawnEffectOnTarget = false;
+            try
+            {
+                dontSpawnEffectOnTarget =
+                    Convert.ToBoolean(
+                        __args[2],
+                        CultureInfo.InvariantCulture);
+            }
+            catch
+            {
+                return;
+            }
+
+            var fireEffect = IsReplicationCombatProjectileEffectActive(
+                projectile,
+                "fireEffect");
+            var bonusTrail = IsReplicationCombatProjectileEffectActive(
+                projectile,
+                "bonusTrail");
+            var penaltyTrail = IsReplicationCombatProjectileEffectActive(
+                projectile,
+                "penaltyTrail");
+            var particlesOnHit = string.Empty;
+            if (TryReadInstanceMemberValue(
+                    __instance,
+                    "particlesOnHit",
+                    out var particles)
+                && particles != null)
+            {
+                particlesOnHit =
+                    Convert.ToString(
+                        particles,
+                        CultureInfo.InvariantCulture)
+                    ?? string.Empty;
+            }
+
+            replicationCombatPendingProjectile = null;
+            var sequence = ++replicationCombatProjectileSequence;
+            var start = moverComponent.transform.position;
+            var payload = CombatProjectilePresentationPayloads.Create(
+                new CombatProjectilePresentationState(
+                    sequence,
+                    pending.AttackerEntityId,
+                    start.x,
+                    start.y,
+                    start.z,
+                    destination.x,
+                    destination.y,
+                    destination.z,
+                    destinationOffset.x,
+                    destinationOffset.y,
+                    destinationOffset.z,
+                    speed,
+                    archHeight,
+                    destroyDelay,
+                    dontSpawnEffectOnTarget,
+                    fireEffect,
+                    bonusTrail,
+                    penaltyTrail,
+                    particlesOnHit));
+            instance?.SendCombatDelta(
+                CombatProjectileDeltaKind,
+                pending.AttackerEntityId,
+                payload);
+            instance?.LogReplicationInfo(
+                "Going Cooperative combat projectile host sequence="
+                    + sequence.ToString(CultureInfo.InvariantCulture)
+                    + " attacker="
+                    + pending.AttackerEntityId
+                    + " speed="
+                    + speed.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " arch="
+                    + archHeight.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+
+        private static bool IsReplicationCombatProjectileEffectActive(
+            object projectile,
+            string memberName)
+        {
+            return TryReadInstanceMemberValue(
+                    projectile,
+                    memberName,
+                    out var value)
+                && value is GameObject gameObject
+                && gameObject.activeSelf;
         }
 
         private static bool TryResolveReplicationCombatGoalOwner(object goal, out object? owner)
@@ -1292,6 +1505,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 return TryApplyReplicationCombatOutcomeDelta(delta, out detail);
             if (string.Equals(delta.DeltaKind, CombatPresentationDeltaKind, StringComparison.Ordinal))
                 return TryApplyReplicationCombatPresentationDelta(delta, out detail);
+            if (string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal))
+                return TryApplyReplicationCombatProjectileDelta(delta, out detail);
             if (string.Equals(delta.DeltaKind, CombatHealthDeltaKind, StringComparison.Ordinal))
                 return TryApplyReplicationCombatHealthDelta(delta, out detail);
             if (string.Equals(delta.DeltaKind, CombatDeathDeltaKind, StringComparison.Ordinal))
@@ -1382,6 +1597,302 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             return TryApplyReplicationCombatChargeEnd(attackerId, chargeId, eventTick, endReason, out detail);
+        }
+
+        private static bool TryApplyReplicationCombatProjectileDelta(
+            ReplicationWorldObjectDelta delta,
+            out string detail)
+        {
+            if (!CombatMutationEnabled(
+                    replicationConfigCombatProjectileReplication))
+            {
+                detail = "combat-projectile-disabled";
+                return true;
+            }
+
+            if (!CombatProjectilePresentationPayloads.TryRead(
+                    delta.Detail,
+                    out var state,
+                    out var parseError)
+                || state == null)
+            {
+                detail = "combat-projectile-payload-invalid "
+                    + parseError;
+                return false;
+            }
+
+            if (!TryResolveReplicationCombatProjectilePrefab(
+                    state.AttackerEntityId,
+                    out var prefab,
+                    out var prefabDetail)
+                || prefab == null)
+            {
+                detail = "combat-projectile-prefab-missing attacker="
+                    + state.AttackerEntityId
+                    + " "
+                    + prefabDetail;
+                return false;
+            }
+
+            UnityEngine.Object? spawned = null;
+            try
+            {
+                var start = new Vector3(
+                    (float)state.StartX,
+                    (float)state.StartY,
+                    (float)state.StartZ);
+                spawned = UnityEngine.Object.Instantiate(
+                    prefab,
+                    start,
+                    Quaternion.identity);
+                if (!(spawned is Component projectileComponent))
+                {
+                    detail = "combat-projectile-spawn-not-component";
+                    if (spawned != null)
+                    {
+                        UnityEngine.Object.Destroy(spawned);
+                    }
+                    return false;
+                }
+
+                TryInvokeReplicationCombatProjectileMethod(
+                    projectileComponent,
+                    "SetFireEffect",
+                    state.FireEffect);
+                if (state.BonusTrail)
+                {
+                    TryInvokeReplicationCombatProjectileMethod(
+                        projectileComponent,
+                        "ShowBonusTrail");
+                }
+                if (state.PenaltyTrail)
+                {
+                    TryInvokeReplicationCombatProjectileMethod(
+                        projectileComponent,
+                        "ShowPenaltyTrail");
+                }
+
+                var moverType =
+                    AccessTools.TypeByName(
+                        "NSMedieval.BasicPointToPointMove");
+                var mover = moverType == null
+                    ? null
+                    : projectileComponent.GetComponent(moverType);
+                if (moverType == null || mover == null)
+                {
+                    detail = "combat-projectile-mover-missing";
+                    UnityEngine.Object.Destroy(
+                        projectileComponent.gameObject);
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(state.ParticlesOnHit))
+                {
+                    AccessTools.Method(
+                            moverType,
+                            "SetParticlesOhHit",
+                            new[] { typeof(string) })
+                        ?.Invoke(
+                            mover,
+                            new object[] { state.ParticlesOnHit });
+                }
+
+                var setup = AccessTools.Method(
+                    moverType,
+                    "Setup",
+                    new[]
+                    {
+                        typeof(Vector3),
+                        typeof(float),
+                        typeof(bool),
+                        typeof(Vector3),
+                        typeof(float),
+                        typeof(float)
+                    });
+                if (setup == null)
+                {
+                    detail = "combat-projectile-setup-missing";
+                    UnityEngine.Object.Destroy(
+                        projectileComponent.gameObject);
+                    return false;
+                }
+
+                setup.Invoke(
+                    mover,
+                    new object[]
+                    {
+                        new Vector3(
+                            (float)state.DestinationX,
+                            (float)state.DestinationY,
+                            (float)state.DestinationZ),
+                        (float)state.Speed,
+                        state.DontSpawnEffectOnTarget,
+                        new Vector3(
+                            (float)state.DestinationOffsetX,
+                            (float)state.DestinationOffsetY,
+                            (float)state.DestinationOffsetZ),
+                        (float)state.ArchHeight,
+                        (float)state.DestroyDelay
+                    });
+
+                detail = "ok combat-projectile sequence="
+                    + state.Sequence.ToString(
+                        CultureInfo.InvariantCulture)
+                    + " attacker="
+                    + state.AttackerEntityId
+                    + " "
+                    + prefabDetail;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (spawned != null)
+                {
+                    try
+                    {
+                        UnityEngine.Object.Destroy(spawned);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                detail = "combat-projectile-error "
+                    + FormatReflectionExceptionDetail(ex);
+                return false;
+            }
+        }
+
+        private static bool TryResolveReplicationCombatProjectilePrefab(
+            string attackerEntityId,
+            out UnityEngine.Object? prefab,
+            out string detail)
+        {
+            prefab = null;
+            if (!TryFindReplicationAgentOwnerByEntityId(
+                    attackerEntityId,
+                    out var owner,
+                    out var lookupDetail)
+                || owner == null)
+            {
+                detail = "attacker-missing " + lookupDetail;
+                return false;
+            }
+
+            var combatUtilsType =
+                AccessTools.TypeByName("NSMedieval.Manager.CombatUtils");
+            if (combatUtilsType == null)
+            {
+                detail = "combat-utils-type-missing";
+                return false;
+            }
+
+            MethodInfo? getWeapon = null;
+            var methods = combatUtilsType.GetMethods(
+                BindingFlags.Public
+                    | BindingFlags.NonPublic
+                    | BindingFlags.Static);
+            for (var i = 0; i < methods.Length; i++)
+            {
+                var parameters = methods[i].GetParameters();
+                if (string.Equals(
+                        methods[i].Name,
+                        "GetWeapon",
+                        StringComparison.Ordinal)
+                    && parameters.Length == 2
+                    && parameters[0].ParameterType.IsInstanceOfType(owner)
+                    && parameters[1].ParameterType == typeof(bool))
+                {
+                    getWeapon = methods[i];
+                    break;
+                }
+            }
+
+            if (getWeapon == null)
+            {
+                detail = "combat-utils-get-weapon-missing";
+                return false;
+            }
+
+            var weapon = getWeapon.Invoke(
+                null,
+                new object[] { owner, false });
+            if (weapon == null)
+            {
+                detail = "attacker-weapon-missing " + lookupDetail;
+                return false;
+            }
+
+            var projectileValue =
+                AccessTools.Property(
+                        weapon.GetType(),
+                        "ProjectilePrefab")
+                    ?.GetValue(weapon, null);
+            if (!(projectileValue is UnityEngine.Object projectilePrefab))
+            {
+                detail = "weapon-projectile-prefab-missing type="
+                    + weapon.GetType().FullName;
+                return false;
+            }
+
+            prefab = projectilePrefab;
+            detail = "weapon="
+                + weapon.GetType().Name
+                + " "
+                + lookupDetail;
+            return true;
+        }
+
+        private static bool TryInvokeReplicationCombatProjectileMethod(
+            Component projectile,
+            string methodName,
+            params object[] args)
+        {
+            var methods = projectile.GetType().GetMethods(
+                BindingFlags.Instance
+                    | BindingFlags.Public
+                    | BindingFlags.NonPublic);
+            for (var i = 0; i < methods.Length; i++)
+            {
+                if (!string.Equals(
+                        methods[i].Name,
+                        methodName,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var parameters = methods[i].GetParameters();
+                if (parameters.Length != args.Length)
+                {
+                    continue;
+                }
+
+                var compatible = true;
+                for (var parameterIndex = 0;
+                    parameterIndex < parameters.Length;
+                    parameterIndex++)
+                {
+                    if (args[parameterIndex] != null
+                        && !parameters[parameterIndex]
+                            .ParameterType
+                            .IsInstanceOfType(args[parameterIndex]))
+                    {
+                        compatible = false;
+                        break;
+                    }
+                }
+
+                if (!compatible)
+                {
+                    continue;
+                }
+
+                methods[i].Invoke(projectile, args);
+                return true;
+            }
+
+            return false;
         }
 
         private static bool TryApplyReplicationCombatChargeStart(
@@ -1931,6 +2442,8 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationCombatOutcomeSequence = 0;
             replicationCombatPresentationSequence = 0;
             replicationCombatChargeSequence = 0;
+            replicationCombatProjectileSequence = 0;
+            replicationCombatPendingProjectile = null;
             ReplicationCombatClientTombstones.Clear();
             ReplicationCombatLastWoundTickSentAt.Clear();
             ReplicationCombatPresentationExpiryByEntityId.Clear();
