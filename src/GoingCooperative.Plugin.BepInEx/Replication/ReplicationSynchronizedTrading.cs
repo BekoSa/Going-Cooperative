@@ -648,7 +648,9 @@ namespace GoingCooperative.Plugin.BepInEx
             var unique = new HashSet<string>(StringComparer.Ordinal);
             for (var i = 0; i < rows.Length; i++)
             {
-                var columns = rows[i].Split(',');
+                var columns = rows[i].Split(
+                    new[] { ',' },
+                    StringSplitOptions.None);
                 if (columns.Length != 5
                     || !int.TryParse(columns[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var playerIndex)
                     || !int.TryParse(columns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var traderIndex)
@@ -892,7 +894,9 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static string FormatRelaxedReplicationTradingRowIdentity(string identity)
         {
-            var parts = identity.Split('|');
+            var parts = identity.Split(
+                new[] { '|' },
+                StringSplitOptions.None);
             var kept = new List<string>(parts.Length);
             for (var i = 0; i < parts.Length; i++)
             {
