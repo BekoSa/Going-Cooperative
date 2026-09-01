@@ -173,6 +173,83 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public string[] GetCatchupPendingClientPeerIds()
+        {
+            if (!hostMode)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (stateLock)
+            {
+                var result = new List<string>();
+                var now = DateTime.UtcNow;
+                foreach (var peer in hostPeers.Values)
+                {
+                    if (!peer.Closed
+                        && peer.CatchupPending
+                        && peer.WorldLoaded
+                        && now - peer.CatchupStartedUtc
+                            >= TimeSpan.FromSeconds(1))
+                    {
+                        result.Add(peer.PeerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
+        public bool CompletePeerCatchup(
+            string peerId,
+            out string error)
+        {
+            error = string.Empty;
+            if (!hostMode)
+            {
+                error = "host-only";
+                return false;
+            }
+
+            HostPeerConnection peer;
+            lock (stateLock)
+            {
+                if (!hostPeers.TryGetValue(peerId, out peer)
+                    || peer.Closed)
+                {
+                    error = "peer-not-connected";
+                    return false;
+                }
+
+                if (!peer.CatchupPending || !peer.WorldLoaded)
+                {
+                    error = "peer-not-awaiting-catchup";
+                    return false;
+                }
+
+                peer.CatchupPending = false;
+                peer.ReadyForReplication = true;
+                peer.Phase = "Playing";
+                peer.Detail = "Caught up with the live host world.";
+            }
+
+            try
+            {
+                SendHostCommand(
+                    peer,
+                    "CATCHUP_COMPLETE",
+                    peer.Epoch);
+                SetHostSummaryDetail();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+        }
+
         public string[] GetPlayingClientPeerIds()
         {
             if (!hostMode)
@@ -410,6 +487,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 // Durable mutations after this point must be retained until this peer
                 // finishes loading and acknowledges them.
                 peer.RequiresCatchup = true;
+                peer.CatchupPending = true;
+                peer.WorldLoaded = false;
             }
             var sendThread = new Thread(() =>
             {
@@ -504,6 +583,8 @@ namespace GoingCooperative.Plugin.BepInEx
             lock (stateLock)
             {
                 peer.RequiresCatchup = true;
+                peer.CatchupPending = true;
+                peer.WorldLoaded = false;
             }
             var sendThread = new Thread(() =>
             {
@@ -771,9 +852,19 @@ namespace GoingCooperative.Plugin.BepInEx
                             continue;
                         }
 
-                        peer.ReadyForReplication = true;
-                        peer.Phase = "Playing";
-                        peer.Detail = "Joined the live host world.";
+                        lock (stateLock)
+                        {
+                            peer.WorldLoaded = true;
+                            peer.CatchupPending = true;
+                            peer.CatchupStartedUtc = DateTime.UtcNow;
+                            peer.ReadyForReplication = false;
+                            peer.Phase = "Catching Up";
+                            peer.Detail =
+                                "World loaded. Applying changes since the checkpoint.";
+                        }
+
+                        // RESUME now means "start the replication transport", not
+                        // "allow gameplay immediately".
                         SendHostCommand(peer, "RESUME", peer.Epoch);
                         SetHostSummaryDetail();
                     }
@@ -792,6 +883,8 @@ namespace GoingCooperative.Plugin.BepInEx
                             // recipient set until the new capture boundary is created.
                             peer.ReadyForReplication = false;
                             peer.RequiresCatchup = false;
+                            peer.CatchupPending = false;
+                            peer.WorldLoaded = false;
                             peer.Phase = "Waiting for Resync";
                             peer.Detail = "Requested a fresh host checkpoint.";
                             replicationResetPeers.Enqueue(peer.PeerId);
@@ -832,6 +925,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     peer.Closed = true;
                     peer.ReadyForReplication = false;
                     peer.RequiresCatchup = false;
+                    peer.CatchupPending = false;
+                    peer.WorldLoaded = false;
                     if (notifyDisconnect)
                     {
                         disconnectedPeers.Enqueue(peer.PeerId);
@@ -1046,6 +1141,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     && commandEpoch == epoch)
                 {
                     resumeGeneration++;
+                    SetState(
+                        "Catching Up",
+                        "World loaded. Synchronizing changes made after the checkpoint.",
+                        1f);
+                }
+                else if (command == "CATCHUP_COMPLETE"
+                    && commandEpoch == epoch)
+                {
                     SetState(
                         "Playing",
                         "Joined "
@@ -1681,6 +1784,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
                 peer.ReadyForReplication = false;
                 peer.RequiresCatchup = false;
+                peer.CatchupPending = false;
+                peer.WorldLoaded = false;
                 peer.Phase = "Failed";
                 peer.Detail = ex.GetType().Name + ": " + ex.Message;
                 peer.Closed = true;
@@ -1720,6 +1825,9 @@ namespace GoingCooperative.Plugin.BepInEx
             public int Epoch { get; set; }
             public bool ReadyForReplication { get; set; }
             public bool RequiresCatchup { get; set; }
+            public bool CatchupPending { get; set; }
+            public bool WorldLoaded { get; set; }
+            public DateTime CatchupStartedUtc { get; set; }
             public bool Closed { get; set; }
             public float Progress { get; set; }
             public string Phase { get; set; } = "Connecting";
