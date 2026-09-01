@@ -742,8 +742,8 @@ namespace GoingCooperative.Core
 
             var encoded = TransportEnvelopeCodec.Encode(item.Envelope);
             var encodedBytes = Encoding.UTF8.GetBytes(encoded);
-            List<TransportEnvelope>? legacyChunks = null;
-            List<TransportEnvelope>? binaryChunks = null;
+            IReadOnlyList<TransportEnvelope>? legacyChunks = null;
+            IReadOnlyList<TransportEnvelope>? binaryChunks = null;
             for (var i = 0; i < peers.Length; i++)
             {
                 var peer = peers[i];
@@ -859,7 +859,7 @@ namespace GoingCooperative.Core
                 if (!string.IsNullOrEmpty(targetPeerId))
                 {
                     if (hostPeersById.TryGetValue(
-                            targetPeerId,
+                            targetPeerId!,
                             out var target)
                         && target.AuthenticationEstablished
                         && !target.Closed
@@ -2104,9 +2104,9 @@ namespace GoingCooperative.Core
 
             if (receivedSequences.Count > 4096)
             {
+                var cutoff = highestSequence - 2048;
                 receivedSequences.RemoveWhere(
-                    value =>
-                        value <= highestSequence - 2048);
+                    value => value <= cutoff);
             }
 
             return true;
