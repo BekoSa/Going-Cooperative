@@ -225,7 +225,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var method = type == null ? null : AccessTools.Method(type, methodName, parameterTypes);
                 if (method == null || method.ContainsGenericParameters) return 0;
                 harmonyInstance.Patch(method, prefix: prefix);
-                AppendPluginLog("Replication world object delta patched prefix: " + type.FullName + "." + method.Name);
+                AppendPluginLog("Replication world object delta patched prefix: " + type!.FullName + "." + method.Name);
                 return 1;
             }
             catch (Exception ex)
@@ -6813,7 +6813,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (TryCreateVec3Int(delta.GridX, delta.GridY, delta.GridZ, out var gridPosition, out _))
             {
-                return GetReplicationBuildWorldPosition(gridPosition, delta.GridX, delta.GridY, delta.GridZ, out detail);
+                return GetReplicationBuildWorldPosition(gridPosition!, delta.GridX, delta.GridY, delta.GridZ, out detail);
             }
 
             var fallback = new Vector3(delta.GridX, delta.GridY, delta.GridZ);
@@ -9511,7 +9511,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var completionMethod = AccessTools.Method(groundManagerType, "OnDigActionCompleted", new[] { position.GetType() });
+                var completionMethod = AccessTools.Method(groundManagerType, "OnDigActionCompleted", new[] { position!.GetType() });
                 if (completionMethod == null)
                 {
                     detail = "on-dig-action-completed-method-missing";
@@ -14053,7 +14053,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (pendingTokenCount == 1 && !string.IsNullOrWhiteSpace(pendingTokenEntityId))
             {
-                entityId = pendingTokenEntityId;
+                entityId = pendingTokenEntityId!;
                 detail = "active-action-fallback=pending-token hint="
                     + FormatReplicationWorldObjectDetailToken(actionHint)
                     + " active="
@@ -14063,7 +14063,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (activeCount == 1 && !string.IsNullOrWhiteSpace(onlyActiveEntityId))
             {
-                entityId = onlyActiveEntityId;
+                entityId = onlyActiveEntityId!;
                 detail = "active-action-fallback=single-active hint="
                     + FormatReplicationWorldObjectDetailToken(actionHint);
                 return true;
@@ -14479,7 +14479,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var gridUtilsType = AccessTools.TypeByName("NSMedieval.GridUtils");
                 if (gridUtilsType != null)
                 {
-                    var vecMethod = AccessTools.Method(gridUtilsType, "GetWorldPosition", new[] { gridPosition.GetType() });
+                    var vecMethod = AccessTools.Method(gridUtilsType, "GetWorldPosition", new[] { gridPosition!.GetType() });
                     if (vecMethod != null && vecMethod.Invoke(null, new[] { gridPosition }) is Vector3 worldFromVec)
                     {
                         detail = "position=GridUtils.GetWorldPosition(Vec3Int) world=" + FormatUnityVector(worldFromVec);
