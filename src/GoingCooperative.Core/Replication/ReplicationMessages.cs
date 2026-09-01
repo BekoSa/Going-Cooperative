@@ -10,7 +10,13 @@ namespace GoingCooperative.Core.Replication
             string mode,
             string protocolVersion,
             string buildHash)
-            : this(peerId, mode, protocolVersion, buildHash, peerId)
+            : this(
+                peerId,
+                mode,
+                protocolVersion,
+                buildHash,
+                peerId,
+                string.Empty)
         {
         }
 
@@ -20,12 +26,30 @@ namespace GoingCooperative.Core.Replication
             string protocolVersion,
             string buildHash,
             string displayName)
+            : this(
+                peerId,
+                mode,
+                protocolVersion,
+                buildHash,
+                displayName,
+                string.Empty)
+        {
+        }
+
+        public ReplicationHello(
+            string peerId,
+            string mode,
+            string protocolVersion,
+            string buildHash,
+            string displayName,
+            string peerBindingToken)
         {
             PeerId = peerId ?? throw new ArgumentNullException(nameof(peerId));
             Mode = mode ?? throw new ArgumentNullException(nameof(mode));
             ProtocolVersion = protocolVersion ?? throw new ArgumentNullException(nameof(protocolVersion));
             BuildHash = buildHash ?? throw new ArgumentNullException(nameof(buildHash));
             DisplayName = MultiplayerNickname.Normalize(displayName);
+            PeerBindingToken = peerBindingToken ?? string.Empty;
         }
 
         public string PeerId { get; }
@@ -33,6 +57,7 @@ namespace GoingCooperative.Core.Replication
         public string ProtocolVersion { get; }
         public string BuildHash { get; }
         public string DisplayName { get; }
+        public string PeerBindingToken { get; }
     }
 
     public sealed class ReplicationCommandIntent
