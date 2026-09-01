@@ -23,15 +23,39 @@ namespace GoingCooperative.Plugin.BepInEx
     {
         bool IRuntimeCommandActions.ApplyPause(bool paused, out string detail)
         {
-            return TryInvokeStoredGameSpeedManagerMethod(paused ? "SetSpeedPause" : "SetSpeedNormal", out detail);
+            var speedIndex = paused ? 0 : 1;
+            var applied = TryInvokeStoredGameSpeedManagerMethod(
+                paused ? "SetSpeedPause" : "SetSpeedNormal",
+                out detail);
+            if (applied && replicationConfigHostMode)
+            {
+                replicationAuthoritativeSpeedIndex = speedIndex;
+            }
+            return applied;
         }
+
         bool IRuntimeCommandActions.ApplySpeedIndex(int speedIndex, string action, out string detail)
         {
-            if (string.Equals(action, LockstepCommandPayloads.SetSpeedNormalAction, StringComparison.Ordinal))
+            var requestedSpeedIndex = string.Equals(
+                    action,
+                    LockstepCommandPayloads.SetSpeedNormalAction,
+                    StringComparison.Ordinal)
+                ? 1
+                : speedIndex;
+            var applied = TryApplyStoredGameSpeedIndex(
+                requestedSpeedIndex,
+                out detail);
+            if (applied && replicationConfigHostMode)
             {
-                return TryInvokeStoredGameSpeedManagerMethod("SetSpeedNormal", out detail);
+                replicationAuthoritativeSpeedIndex = requestedSpeedIndex;
             }
+            return applied;
+        }
 
+        private static bool TryApplyStoredGameSpeedIndex(
+            int speedIndex,
+            out string detail)
+        {
             switch (speedIndex)
             {
                 case 0:
@@ -43,9 +67,22 @@ namespace GoingCooperative.Plugin.BepInEx
                 case 3:
                     return TryInvokeStoredGameSpeedManagerMethod("SetSpeedFaster", out detail);
                 default:
-                    detail = "unsupported-speed-index=" + speedIndex.ToString(CultureInfo.InvariantCulture);
+                    detail = "unsupported-speed-index="
+                        + speedIndex.ToString(CultureInfo.InvariantCulture);
                     return false;
             }
+        }
+
+        private static bool RestoreReplicationAuthoritativeSpeed(
+            int speedIndex,
+            out string detail)
+        {
+            var applied = TryApplyStoredGameSpeedIndex(speedIndex, out detail);
+            if (applied)
+            {
+                replicationAuthoritativeSpeedIndex = speedIndex;
+            }
+            return applied;
         }
         bool IRuntimeCommandActions.ApplyDig(int startX, int startY, int startZ, int endX, int endY, int endZ, out string detail)
         {
