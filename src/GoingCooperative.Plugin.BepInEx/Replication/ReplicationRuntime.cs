@@ -1960,6 +1960,87 @@ namespace GoingCooperative.Plugin.BepInEx
             return command.PlayerId + ":" + command.Sequence.ToString(CultureInfo.InvariantCulture);
         }
 
+        private static void ForgetReplicationHostCommandResultsForPeer(
+            string peerId)
+        {
+            if (string.IsNullOrWhiteSpace(peerId))
+            {
+                return;
+            }
+
+            var prefix = peerId + ":";
+            var remove = new List<string>();
+            foreach (var pair in replicationHostCommandIntentResults)
+            {
+                if (pair.Key.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    remove.Add(pair.Key);
+                }
+            }
+
+            for (var i = 0; i < remove.Count; i++)
+            {
+                if (!replicationHostCommandIntentResults.TryGetValue(
+                        remove[i],
+                        out var record))
+                {
+                    continue;
+                }
+
+                if (record.IsEvictionProtected)
+                {
+                    replicationHostProtectedBuildBatchManifestCount = Math.Max(
+                        0,
+                        replicationHostProtectedBuildBatchManifestCount - 1);
+                }
+
+                replicationHostCommandIntentResults.Remove(remove[i]);
+            }
+
+            var retainedOrder = new Queue<string>();
+            while (replicationHostCommandIntentResultOrder.Count > 0)
+            {
+                var key = replicationHostCommandIntentResultOrder.Dequeue();
+                if (!key.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    retainedOrder.Enqueue(key);
+                }
+            }
+
+            while (retainedOrder.Count > 0)
+            {
+                replicationHostCommandIntentResultOrder.Enqueue(
+                    retainedOrder.Dequeue());
+            }
+        }
+
+        private void HandleReplicationPeerDisconnected(string peerId)
+        {
+            if (!replicationConfigHostMode
+                || string.IsNullOrWhiteSpace(peerId))
+            {
+                return;
+            }
+
+            replicationTransport?.RemovePeer(peerId);
+            ReplicationCompatiblePeerIds.Remove(peerId);
+            ReplicationCompatiblePeerHellos.Remove(peerId);
+            replicationRemoteHelloReceived =
+                ReplicationCompatiblePeerIds.Count > 0;
+            replicationRemoteCompatibilityRefused = false;
+
+            HandleReplicationPeerDisconnectedFromWorldDeltas(peerId);
+            ForgetReplicationHostCommandResultsForPeer(peerId);
+            RemoveReplicationRemotePeerPresence(peerId);
+
+            LogReplicationInfo(
+                "[MP/SESSION] peer disconnected cleanup peer="
+                + peerId
+                + " remainingCompatible="
+                + ReplicationCompatiblePeerIds.Count.ToString(
+                    CultureInfo.InvariantCulture));
+        }
+
         private static void RememberReplicationHostCommandResult(
             string commandKey,
             RuntimeCommandResult result,
