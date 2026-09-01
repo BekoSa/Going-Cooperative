@@ -41,6 +41,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private string localNickname = MultiplayerNickname.DefaultNickname;
         private string hostNickname = MultiplayerNickname.DefaultNickname;
         private string assignedPeerId = MultiplayerPeerIds.Host;
+        private string assignedPeerBindingToken = string.Empty;
         private string phase = "Idle";
         private string detail = "Start or join a multiplayer session.";
         private float progress;
@@ -74,6 +75,7 @@ namespace GoingCooperative.Plugin.BepInEx
         public string ReceivedVillageName { get { lock (stateLock) return receivedVillageName; } }
         public Exception? Failure { get { return failure; } }
         public string AssignedPeerId { get { lock (stateLock) return assignedPeerId; } }
+        public string AssignedPeerBindingToken { get { lock (stateLock) return assignedPeerBindingToken; } }
         public string HostNickname { get { lock (stateLock) return hostNickname; } }
         public int MaxPlayers { get { lock (stateLock) return maxPlayers; } }
 
@@ -194,6 +196,41 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public bool TryValidateClientPeerReplicationToken(
+            string peerId,
+            string token)
+        {
+            if (!hostMode
+                || string.IsNullOrWhiteSpace(peerId)
+                || string.IsNullOrWhiteSpace(token))
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                if (!hostPeers.TryGetValue(peerId, out var peer)
+                    || peer.Closed)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var expected = Convert.FromBase64String(
+                        peer.ReplicationBindingToken);
+                    var received = Convert.FromBase64String(token);
+                    return DirectTransportSecurity.FixedTimeEquals(
+                        expected,
+                        received);
+                }
+                catch (FormatException)
+                {
+                    return false;
+                }
+            }
+        }
+
         public bool IsClientPeerConnected(string peerId)
         {
             if (!hostMode)
@@ -228,6 +265,7 @@ namespace GoingCooperative.Plugin.BepInEx
             localNickname = MultiplayerNickname.Normalize(nickname);
             hostNickname = localNickname;
             assignedPeerId = MultiplayerPeerIds.Host;
+            assignedPeerBindingToken = string.Empty;
             maxPlayers = requestedMaxPlayers;
             ConfigureSecurity(securityEnabled, sessionCode);
             SetState(
@@ -258,6 +296,7 @@ namespace GoingCooperative.Plugin.BepInEx
             stopping = false;
             localNickname = MultiplayerNickname.Normalize(nickname);
             assignedPeerId = string.Empty;
+            assignedPeerBindingToken = string.Empty;
             ConfigureSecurity(securityEnabled, sessionCode);
             SetState(
                 "Connecting",
@@ -562,6 +601,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 disconnectedPeers.Clear();
                 replicationResetPeers.Clear();
                 assignedPeerId = MultiplayerPeerIds.Host;
+                assignedPeerBindingToken = string.Empty;
                 hostNickname = MultiplayerNickname.DefaultNickname;
                 maxPlayers = MultiplayerPeerLimits.StableTargetPlayers;
             }
@@ -666,7 +706,8 @@ namespace GoingCooperative.Plugin.BepInEx
                             SessionId,
                             peerId,
                             maxPlayers,
-                            localNickname));
+                            localNickname,
+                            peer.ReplicationBindingToken));
                     peer.Phase = "Waiting for Checkpoint";
                     peer.Detail = "Connected. Waiting for a current-world checkpoint.";
                     lock (stateLock)
@@ -859,7 +900,8 @@ namespace GoingCooperative.Plugin.BepInEx
                         out var remoteSessionId,
                         out var peerId,
                         out var remoteMaxPlayers,
-                        out var remoteHostNickname))
+                        out var remoteHostNickname,
+                        out var remotePeerBindingToken))
                 {
                     throw new InvalidDataException(
                         "The host control protocol is incompatible.");
@@ -869,6 +911,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 lock (stateLock)
                 {
                     assignedPeerId = peerId;
+                    assignedPeerBindingToken = remotePeerBindingToken;
                     maxPlayers = remoteMaxPlayers;
                     hostNickname = remoteHostNickname;
                 }
@@ -903,7 +946,8 @@ namespace GoingCooperative.Plugin.BepInEx
             long value,
             string peerId,
             int maxPlayers,
-            string hostDisplayName)
+            string hostDisplayName,
+            string peerBindingToken)
         {
             return Magic
                 + "|"
@@ -915,7 +959,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 + "|"
                 + Convert.ToBase64String(
                     Encoding.UTF8.GetBytes(
-                        MultiplayerNickname.Normalize(hostDisplayName)));
+                        MultiplayerNickname.Normalize(hostDisplayName)))
+                + "|"
+                + peerBindingToken;
         }
 
         private static bool TryReadHelloPayload(
@@ -923,19 +969,21 @@ namespace GoingCooperative.Plugin.BepInEx
             out long value,
             out string peerId,
             out int remoteMaxPlayers,
-            out string remoteHostNickname)
+            out string remoteHostNickname,
+            out string peerBindingToken)
         {
             value = 0L;
             peerId = string.Empty;
             remoteMaxPlayers = 0;
             remoteHostNickname = MultiplayerNickname.DefaultNickname;
+            peerBindingToken = string.Empty;
             if (string.IsNullOrEmpty(payload))
             {
                 return false;
             }
 
             var parts = payload.Split('|');
-            if (parts.Length != 5
+            if (parts.Length != 6
                 || !string.Equals(parts[0], Magic, StringComparison.Ordinal)
                 || !long.TryParse(
                     parts[1],
@@ -962,6 +1010,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 remoteHostNickname = MultiplayerNickname.Normalize(
                     Encoding.UTF8.GetString(
                         Convert.FromBase64String(parts[4])));
+                var tokenBytes = Convert.FromBase64String(parts[5]);
+                if (tokenBytes.Length != 24)
+                {
+                    return false;
+                }
+
+                peerBindingToken = parts[5];
             }
             catch (FormatException)
             {
@@ -1649,12 +1704,15 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 PeerId = peerId;
                 Nickname = MultiplayerNickname.Normalize(nickname);
+                ReplicationBindingToken = Convert.ToBase64String(
+                    DirectTransportSecurity.RandomBytes(24));
                 Client = client;
                 Stream = stream;
             }
 
             public string PeerId { get; }
             public string Nickname { get; }
+            public string ReplicationBindingToken { get; }
             public TcpClient Client { get; }
             public Stream Stream { get; }
             public object WriteLock { get; } = new object();
