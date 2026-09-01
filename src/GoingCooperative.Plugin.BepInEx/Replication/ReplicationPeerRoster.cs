@@ -214,13 +214,11 @@ namespace GoingCooperative.Plugin.BepInEx
             return builder.ToString();
         }
 
-        private static int GetReplicationVisibleConnectedPeerCount()
+        private int GetReplicationVisibleConnectedPeerCount()
         {
             if (replicationConfigHostMode)
             {
-                return instance == null
-                    ? 1
-                    : instance.multiplayerSaveTransfer.ConnectedPeerCount;
+                return multiplayerSaveTransfer.ConnectedPeerCount;
             }
 
             var count = 0;
