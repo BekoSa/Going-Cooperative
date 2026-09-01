@@ -39,6 +39,7 @@ namespace GoingCooperative.Plugin.BepInEx
             public int SpeedBucket;
             public ReplicationAgentLocomotionGait Gait;
             public bool CaptureKeyInitialized;
+            public bool PathUpdatePending;
             public float LastSeenRealtime;
             public float LastPathSentRealtime;
             public Vector3 LastPosition;
@@ -178,6 +179,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     driver);
                 var speedBucket = Mathf.RoundToInt(desiredSpeed * 2f);
                 if (state.CaptureKeyInitialized
+                    && !state.PathUpdatePending
                     && ReferenceEquals(state.PathIdentity, pathIdentity)
                     && state.CurrentNodeIndex == currentNodeIndex
                     && state.FinalDestinationHash == finalDestinationHash
@@ -232,6 +234,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     state.ActivityId = ++replicationSemanticMotionActivitySequence;
                     state.Revision = 1L;
                     state.CornerSignature = cornerSignature;
+                    state.PathUpdatePending = false;
                     state.LastPathSentRealtime = now;
                     SendReplicationSemanticAgentMotionPath(
                         entityId,
@@ -253,13 +256,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (now - state.LastPathSentRealtime
                     < ReplicationSemanticMotionMinimumPathSendSeconds)
                 {
-                    // Do not advance CornerSignature/Revision until the newest path
-                    // is actually emitted. The next capture pass will retry with the
-                    // latest native path after the presentation rate window.
+                    // Capture-key fields above already describe the newest native
+                    // path. Keep a pending marker so the normal unchanged-key fast
+                    // path cannot swallow this unsent revision on the next frame.
+                    state.PathUpdatePending = true;
                     return;
                 }
 
                 state.CornerSignature = cornerSignature;
+                state.PathUpdatePending = false;
                 state.Revision++;
                 state.LastPathSentRealtime = now;
                 SendReplicationSemanticAgentMotionPath(
