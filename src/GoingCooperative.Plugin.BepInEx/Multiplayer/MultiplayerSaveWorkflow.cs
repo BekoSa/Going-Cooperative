@@ -238,13 +238,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 && !multiplayerLoadingInProgress
                 && replicationRuntimeStarted)
             {
-                if (multiplayerSaveTransfer.TryDequeueJoinCapture(out var joinPeerId))
+                if (multiplayerSaveTransfer.TryDequeueJoinCapture(
+                        out var joinPeerId,
+                        out var joinConnectionGeneration))
                 {
-                    CaptureAndQueueMultiplayerJoin(joinPeerId);
+                    CaptureAndQueueMultiplayerJoin(
+                        joinPeerId,
+                        joinConnectionGeneration);
                 }
-                else if (multiplayerSaveTransfer.TryDequeueResyncCapture(out var resyncPeerId))
+                else if (multiplayerSaveTransfer.TryDequeueResyncCapture(
+                    out var resyncPeerId,
+                    out var resyncConnectionGeneration))
                 {
-                    CaptureAndQueueMultiplayerResync(resyncPeerId);
+                    CaptureAndQueueMultiplayerResync(
+                        resyncPeerId,
+                        resyncConnectionGeneration);
                 }
             }
 
@@ -362,7 +370,9 @@ namespace GoingCooperative.Plugin.BepInEx
             LogReplicationWarning(MultiplayerMenu.StatusMessage);
         }
 
-        private void CaptureAndQueueMultiplayerJoin(string peerId)
+        private void CaptureAndQueueMultiplayerJoin(
+            string peerId,
+            long connectionGeneration)
         {
             multiplayerResyncCaptureInProgress = true;
             var paused = false;
@@ -391,13 +401,30 @@ namespace GoingCooperative.Plugin.BepInEx
                         "Going Medieval did not create the join checkpoint.");
                 }
 
+                if (!multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration))
+                {
+                    LogReplicationInfo(
+                        "[MP/SAVE] discarded stale join checkpoint peer="
+                        + peerId
+                        + " generation="
+                        + connectionGeneration);
+                    return;
+                }
+
                 LogReplicationInfo("[MP/SAVE] join checkpoint created peer="
                     + peerId
+                    + " generation="
+                    + connectionGeneration
                     + " path="
                     + checkpoint.FilePath
                     + " pause="
                     + pauseDetail);
-                multiplayerSaveTransfer.QueueJoinCheckpoint(peerId, checkpoint);
+                multiplayerSaveTransfer.QueueJoinCheckpoint(
+                    peerId,
+                    connectionGeneration,
+                    checkpoint);
             }
             catch (Exception ex)
             {
@@ -405,7 +432,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReflectionExceptionDetail(ex);
                 MultiplayerMenu.StatusMessage = reason;
                 LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
-                multiplayerSaveTransfer.RejectJoin(peerId, reason);
+                multiplayerSaveTransfer.RejectJoin(
+                    peerId,
+                    connectionGeneration,
+                    reason);
             }
             finally
             {
@@ -416,6 +446,8 @@ namespace GoingCooperative.Plugin.BepInEx
                         out var resumeDetail);
                     LogReplicationInfo("[MP/SAVE] host resumed after join checkpoint peer="
                         + peerId
+                        + " generation="
+                        + connectionGeneration
                         + " detail="
                         + resumeDetail);
                 }
@@ -424,7 +456,9 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
-        private void CaptureAndQueueMultiplayerResync(string peerId)
+        private void CaptureAndQueueMultiplayerResync(
+            string peerId,
+            long connectionGeneration)
         {
             multiplayerResyncCaptureInProgress = true;
             var paused = false;
@@ -453,22 +487,36 @@ namespace GoingCooperative.Plugin.BepInEx
                         "Going Medieval did not create the resync checkpoint.");
                 }
 
-                // Everything retained for this peer up to the completed native
-                // save is now represented by the checkpoint. Drop only those old
-                // obligations; RequiresCatchup remains set so mutations from the next
-                // frame onward are retained until the reloaded peer ACKs them.
+                if (!multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration))
+                {
+                    LogReplicationInfo(
+                        "[MP/SAVE] discarded stale resync checkpoint peer="
+                        + peerId
+                        + " generation="
+                        + connectionGeneration);
+                    return;
+                }
+
+                // Everything retained for this exact connection up to the completed
+                // native save is represented by the checkpoint. Drop only those old
+                // obligations; RequiresCatchup stays set for subsequent mutations.
                 ReleaseReplicationPeerWorldDeltaObligations(
                     peerId,
                     "resync-checkpoint-boundary");
 
                 LogReplicationInfo("[MP/SAVE] targeted resync checkpoint created peer="
                     + peerId
+                    + " generation="
+                    + connectionGeneration
                     + " path="
                     + checkpoint.FilePath
                     + " pause="
                     + pauseDetail);
                 multiplayerSaveTransfer.QueueResyncCheckpoint(
                     peerId,
+                    connectionGeneration,
                     checkpoint);
             }
             catch (Exception ex)
@@ -477,7 +525,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReflectionExceptionDetail(ex);
                 MultiplayerMenu.StatusMessage = reason;
                 LogReplicationWarning("[MP/SAVE] " + reason + " peer=" + peerId);
-                multiplayerSaveTransfer.RejectResync(peerId, reason);
+                multiplayerSaveTransfer.RejectResync(
+                    peerId,
+                    connectionGeneration,
+                    reason);
             }
             finally
             {
@@ -488,6 +539,8 @@ namespace GoingCooperative.Plugin.BepInEx
                         out var resumeDetail);
                     LogReplicationInfo("[MP/SAVE] host resumed after resync checkpoint peer="
                         + peerId
+                        + " generation="
+                        + connectionGeneration
                         + " detail="
                         + resumeDetail);
                 }
