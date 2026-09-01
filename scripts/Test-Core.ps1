@@ -40,6 +40,7 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\BuildingReplicationV2Policy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\CoordinateResolverPolicy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\CombatPresentationOrderingPolicy.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\CombatProjectilePresentationPayloads.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\ReplicationOrderingPolicy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportContracts.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportEnvelopeCodec.cs"),
