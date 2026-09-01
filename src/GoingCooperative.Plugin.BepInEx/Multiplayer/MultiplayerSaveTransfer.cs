@@ -180,6 +180,33 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public string[] GetReplicationReliableClientPeerIds()
+        {
+            if (!hostMode)
+            {
+                return Array.Empty<string>();
+            }
+
+            lock (stateLock)
+            {
+                var result = new List<string>();
+                foreach (var peer in hostPeers.Values)
+                {
+                    // Keep reliable live state addressed after checkpoint catch-up.
+                    // RequiresCatchup covers the barrier; ReadyForReplication covers
+                    // the normal Playing phase.
+                    if (!peer.Closed
+                        && (peer.RequiresCatchup || peer.ReadyForReplication))
+                    {
+                        result.Add(peer.PeerId);
+                    }
+                }
+
+                result.Sort(StringComparer.Ordinal);
+                return result.ToArray();
+            }
+        }
+
         public string[] GetCatchupPendingClientPeerIds()
         {
             if (!hostMode)

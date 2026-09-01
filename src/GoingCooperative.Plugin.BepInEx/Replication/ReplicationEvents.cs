@@ -2655,7 +2655,9 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             replicationHostEventSpeedIndex = speedIndex;
             var current = instance;
-            if (current == null
+            // The retained static multiplayer runtime can outlive Unity's plugin object.
+            // Use CLR null semantics; Unity fake-null must not suppress host speed state.
+            if (ReferenceEquals(current, null)
                 || !replicationConfigHostMode
                 || !EventSpeedLaneEnabled()
                 || !replicationRuntimeStarted

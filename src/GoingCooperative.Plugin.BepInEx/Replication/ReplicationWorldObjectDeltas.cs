@@ -2706,7 +2706,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var requiredPeers = transient
                 ? Array.Empty<string>()
                 : multiplayerSaveTransfer
-                    .GetReplicationRequiredClientPeerIds();
+                    .GetReplicationReliableClientPeerIds();
             if (!replicationRemoteHelloReceived
                 && requiredPeers.Length == 0)
             {
@@ -3815,7 +3815,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     pending.PruneRequiredPeers(
                         multiplayerSaveTransfer
-                            .GetReplicationRequiredClientPeerIds());
+                            .GetReplicationReliableClientPeerIds());
                     targets = pending.GetUnacknowledgedPeerIds();
                 }
             }
@@ -4626,7 +4626,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     pendingForAck.PruneRequiredPeers(
                         multiplayerSaveTransfer
-                            .GetReplicationRequiredClientPeerIds());
+                            .GetReplicationReliableClientPeerIds());
 
                     if (terminal)
                     {

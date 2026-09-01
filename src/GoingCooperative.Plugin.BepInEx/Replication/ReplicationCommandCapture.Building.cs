@@ -918,7 +918,9 @@ namespace GoingCooperative.Plugin.BepInEx
             int groupIndex)
         {
             var current = instance;
-            if (current == null
+            // The retained static multiplayer runtime can outlive Unity's plugin object.
+            // Use CLR null semantics; Unity fake-null must not suppress host builds.
+            if (ReferenceEquals(current, null)
                 || placements.Count == 0
                 || !replicationRemoteHelloReceived
                 || replicationTransport == null)
