@@ -2740,6 +2740,11 @@ namespace GoingCooperative.Plugin.BepInEx
                             delta);
                     }
 
+                    if (IsReplicationSupersedableAbsoluteStateDelta(delta))
+                    {
+                        SupersedePendingReplicationAbsoluteStateDelta(delta);
+                    }
+
                     replicationPendingWorldObjectDeltas[delta.Sequence] =
                         new PendingReplicationWorldObjectDelta(
                             delta,
@@ -3685,6 +3690,46 @@ namespace GoingCooperative.Plugin.BepInEx
                     + "|epoch=" + epoch.ToString(CultureInfo.InvariantCulture)
                     + "|uid=" + delta.UniqueId.ToString(CultureInfo.InvariantCulture)
                 : string.Empty;
+        }
+
+        private static bool IsReplicationSupersedableAbsoluteStateDelta(
+            ReplicationWorldObjectDelta delta)
+        {
+            return string.Equals(delta.DeltaKind, CombatHealthDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationMedicalWoundStateDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryResourceChanged", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryResourceCleared", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryEquipped", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryCleared", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentSkillExperience", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCharacterState", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, AnimalStateDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentAnimationParameter", StringComparison.Ordinal);
+        }
+
+        // Caller holds ReplicationWorldObjectDeltaLock. These rows carry complete
+        // current state. If a newer row for the same entity/state key exists, keeping
+        // the older unacknowledged row only multiplies retries and can starve the
+        // client's frame-budgeted apply queue.
+        private static void SupersedePendingReplicationAbsoluteStateDelta(
+            ReplicationWorldObjectDelta newest)
+        {
+            var absoluteKey = FormatReplicationWorldObjectDeltaAppliedHighWaterKey(newest);
+            if (absoluteKey.Length == 0)
+            {
+                return;
+            }
+
+            var key = "absolute|" + absoluteKey;
+            if (ReplicationPendingSupersedableWorldDeltaSequenceByKey.TryGetValue(
+                    key,
+                    out var obsoleteSequence)
+                && obsoleteSequence < newest.Sequence)
+            {
+                replicationPendingWorldObjectDeltas.Remove(obsoleteSequence);
+            }
+
+            ReplicationPendingSupersedableWorldDeltaSequenceByKey[key] = newest.Sequence;
         }
 
         // Caller holds ReplicationWorldObjectDeltaLock. Storage policy rows are full,
