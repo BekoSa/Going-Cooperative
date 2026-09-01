@@ -180,6 +180,55 @@ internal static class CorePolicyTests
             MultiplayerLifecyclePolicy.IsHostWorldReady(0, 0),
             "current-world hosting is ready without a native load");
 
+        var projectilePayload = CombatProjectilePresentationPayloads.Create(
+            new CombatProjectilePresentationState(
+                17L,
+                "uid:attacker",
+                1.25d,
+                2.5d,
+                3.75d,
+                10d,
+                11d,
+                12d,
+                0.1d,
+                0.2d,
+                0.3d,
+                14.5d,
+                2.25d,
+                0.75d,
+                true,
+                true,
+                false,
+                true,
+                "ProjectileHitCreature"));
+        Equal(true,
+            CombatProjectilePresentationPayloads.TryRead(
+                projectilePayload,
+                out var projectileState,
+                out _),
+            "combat projectile payload roundtrip parses");
+        Equal(17L,
+            projectileState == null ? 0L : projectileState.Sequence,
+            "combat projectile sequence roundtrip");
+        Equal("uid:attacker",
+            projectileState == null ? string.Empty : projectileState.AttackerEntityId,
+            "combat projectile attacker roundtrip");
+        Equal(14.5d,
+            projectileState == null ? 0d : projectileState.Speed,
+            "combat projectile speed roundtrip");
+        Equal(true,
+            projectileState != null && projectileState.FireEffect,
+            "combat projectile fire effect roundtrip");
+        Equal(true,
+            projectileState != null && projectileState.PenaltyTrail,
+            "combat projectile penalty trail roundtrip");
+        Equal(false,
+            CombatProjectilePresentationPayloads.TryRead(
+                "combat-projectile-v1|0",
+                out _,
+                out _),
+            "combat projectile payload rejects malformed rows");
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
