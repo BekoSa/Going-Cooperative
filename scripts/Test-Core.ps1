@@ -29,11 +29,11 @@ else {
 $outputDirectory = Join-Path $repositoryRoot "artifacts\tests"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $output = Join-Path $outputDirectory "CorePolicyTests.exe"
-$legacyMonoSplitViolations = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src\GoingCooperative.Core") -Recurse -Filter "*.cs" |
+$legacyMonoSplitViolations = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src") -Recurse -Filter "*.cs" |
     Select-String -Pattern "\.Split\(\s*'[^']+'\s*\)"
 if ($legacyMonoSplitViolations) {
     $locations = ($legacyMonoSplitViolations | ForEach-Object { "$($_.Path):$($_.LineNumber)" }) -join ", "
-    throw "Core uses String.Split(char), which can bind to an API missing from Going Medieval Mono: $locations"
+    throw "Runtime source uses String.Split(char), which can bind to an API missing from Going Medieval Mono: $locations"
 }
 
 $sources = @(
