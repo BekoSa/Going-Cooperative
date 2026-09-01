@@ -312,6 +312,9 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextGameTimeSnapshotRealtime = 0f;
             replicationLastRuntimeUpdateFrame = -1;
             replicationHellosReceived = 0;
+            replicationSnapshotsSent = 0;
+            replicationSnapshotsReceived = 0;
+            replicationSnapshotsApplied = 0;
             replicationIntentSequence = 0;
             replicationResourcePileStateSnapshotSequence = 0;
             replicationAgentCarryStateSnapshotSequence = 0;
