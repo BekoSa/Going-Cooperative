@@ -114,12 +114,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 var result = new List<MultiplayerTransferPeerSnapshot>();
                 if (hostMode)
                 {
+                    var hostWorldReady =
+                        loadGeneration <= resumeGeneration;
                     result.Add(new MultiplayerTransferPeerSnapshot(
                         MultiplayerPeerIds.Host,
                         localNickname,
-                        "Playing",
+                        hostWorldReady ? "Playing" : "Loading Host World",
                         true,
-                        true));
+                        hostWorldReady));
                     foreach (var peer in hostPeers.Values)
                     {
                         result.Add(new MultiplayerTransferPeerSnapshot(
@@ -692,11 +694,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                // RESYNC_REQUEST temporarily removes the peer from gameplay and
-                // durable-delta recipient sets. A checkpoint capture failure means
-                // the old live world remains authoritative, so restore the peer to
-                // the exact pre-resync gameplay state while its UDP runtime performs
-                // a fresh authenticated hello.
+                // RESYNC_REQUEST temporarily removes the peer from gameplay while
+                // retaining post-reset durable mutations. A checkpoint capture
+                // failure means the old live world remains authoritative, so restore
+                // gameplay and let the restarted UDP runtime consume that backlog.
                 peer.ReadyForReplication = true;
                 peer.RequiresCatchup = true;
                 peer.CatchupPending = false;
@@ -1640,6 +1641,18 @@ namespace GoingCooperative.Plugin.BepInEx
                         playing++;
                     }
                 }
+            }
+
+            if (loadGeneration > resumeGeneration)
+            {
+                SetState(
+                    "Loading Host World",
+                    connected.ToString(CultureInfo.InvariantCulture)
+                        + "/"
+                        + maxPlayers.ToString(CultureInfo.InvariantCulture)
+                        + " connected. Waiting for the authoritative host world.",
+                    1f);
+                return;
             }
 
             SetState(
