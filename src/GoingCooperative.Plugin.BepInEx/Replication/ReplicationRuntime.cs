@@ -1578,7 +1578,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     && !string.IsNullOrWhiteSpace(targetPeerId))
                 {
                     replicationTransport.SendToPeer(
-                        targetPeerId,
+                        targetPeerId!,
                         envelope);
                 }
                 else
