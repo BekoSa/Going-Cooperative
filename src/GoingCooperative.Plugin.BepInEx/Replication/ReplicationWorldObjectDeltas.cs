@@ -4804,8 +4804,15 @@ namespace GoingCooperative.Plugin.BepInEx
                         StringComparison.Ordinal))
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
                 || IsReplicationHighFrequencyPresentationUpdate(delta)
+                // Action status and progress-bar clear are current presentation state,
+                // not durable gameplay events. The client already coalesces them by
+                // entity/overlay and action heartbeat repairs a lost current status.
+                // Keeping them reliable multiplies every construction goal transition
+                // into up to five datagrams and can create a low-FPS retry feedback loop.
+                || string.Equals(delta.DeltaKind, "AgentActionStatus", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentProgressUpdated", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentProgressCleared", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationWorkstationRuntimeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationTriggered", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationReset", StringComparison.Ordinal)
