@@ -308,6 +308,23 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        public bool IsClientPeerReadyForGameplay(string peerId)
+        {
+            if (!hostMode)
+            {
+                return false;
+            }
+
+            lock (stateLock)
+            {
+                return hostPeers.TryGetValue(peerId, out var peer)
+                    && !peer.Closed
+                    && peer.ReadyForReplication
+                    && !peer.CatchupPending
+                    && peer.WorldLoaded;
+            }
+        }
+
         public bool IsClientPeerConnected(string peerId)
         {
             if (!hostMode)
