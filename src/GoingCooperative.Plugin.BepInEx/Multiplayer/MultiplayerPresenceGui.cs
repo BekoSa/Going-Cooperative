@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GoingCooperative.Core;
 using TMPro;
 using UnityEngine;
 
