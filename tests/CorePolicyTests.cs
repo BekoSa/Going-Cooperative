@@ -179,6 +179,34 @@ internal static class CorePolicyTests
         Equal(true,
             MultiplayerLifecyclePolicy.IsHostWorldReady(0, 0),
             "current-world hosting is ready without a native load");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                false,
+                5d,
+                1d),
+            "native load cannot finalize before completion callback");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                true,
+                0.5d,
+                1d),
+            "native load waits through the settle barrier");
+        Equal(true,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                true,
+                1d,
+                1d),
+            "native load finalizes after settle barrier");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                false,
+                true,
+                2d,
+                1d),
+            "inactive native load cannot finalize");
 
         var hostSyncBarrier = new MultiplayerHostSyncBarrier();
         Equal(true,
