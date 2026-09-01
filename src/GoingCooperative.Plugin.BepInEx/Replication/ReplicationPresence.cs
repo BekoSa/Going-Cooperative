@@ -745,6 +745,27 @@ namespace GoingCooperative.Plugin.BepInEx
             return replicationPresenceCamera;
         }
 
+        private static void RemoveReplicationRemotePeerPresence(
+            string peerId)
+        {
+            if (string.IsNullOrWhiteSpace(peerId))
+            {
+                return;
+            }
+
+            ReplicationRemotePresenceByPeerId.Remove(peerId);
+            for (var i = ReplicationPresencePings.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(
+                        ReplicationPresencePings[i].PeerId,
+                        peerId,
+                        StringComparison.Ordinal))
+                {
+                    ReplicationPresencePings.RemoveAt(i);
+                }
+            }
+        }
+
         private static void SetReplicationRemotePeerDisplayName(
             string peerId,
             string displayName)
