@@ -16,6 +16,7 @@ namespace GoingCooperative.Core
         ReplicationPlayerPresence = 29,
         ReplicationPlayerPing = 30,
         ReplicationPlayerSelection = 31,
+        ReplicationPeerStatus = 32,
         Chunk = 100
     }
 
