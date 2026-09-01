@@ -18,5 +18,17 @@ namespace GoingCooperative.Core
         {
             return loadGeneration <= resumeGeneration;
         }
+
+        public static bool IsPeerGameplayReady(
+            bool peerClosed,
+            bool readyForReplication,
+            bool catchupPending,
+            bool worldLoaded)
+        {
+            return !peerClosed
+                && readyForReplication
+                && !catchupPending
+                && worldLoaded;
+        }
     }
 }
