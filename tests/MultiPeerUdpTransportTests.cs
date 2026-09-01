@@ -68,7 +68,12 @@ internal static class MultiPeerUdpTransportTests
                         TransportMessageKind.ReplicationHello,
                         0L,
                         peerId,
-                        "bind-" + peerId));
+                        "bind-"
+                            + peerId
+                            + "-"
+                            + new string(
+                                (char)('a' + i),
+                                5000)));
             }
 
             var receivedHelloIds = new HashSet<string>(StringComparer.Ordinal);
@@ -93,6 +98,14 @@ internal static class MultiPeerUdpTransportTests
                     "multi-peer UDP host did not bind all client hello IDs",
                     ref failures);
                 return failures;
+            }
+
+            if (host.PeerBindingFailures != 0L)
+            {
+                Fail(
+                    "chunked initial peer hello caused binding failures actual="
+                        + host.PeerBindingFailures.ToString(),
+                    ref failures);
             }
 
             for (var i = 0; i < clients.Count; i++)
@@ -212,7 +225,8 @@ internal static class MultiPeerUdpTransportTests
                         TransportMessageKind.ReplicationHello,
                         0L,
                         "client-2",
-                        "duplicate-client-2"));
+                        "duplicate-client-2-"
+                            + new string('z', 5000)));
                 if (!WaitUntil(
                         () =>
                         {
