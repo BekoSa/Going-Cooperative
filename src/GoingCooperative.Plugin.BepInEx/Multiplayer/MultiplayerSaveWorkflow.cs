@@ -453,6 +453,14 @@ namespace GoingCooperative.Plugin.BepInEx
                         "Going Medieval did not create the resync checkpoint.");
                 }
 
+                // Everything retained for this peer up to the completed native
+                // save is now represented by the checkpoint. Drop only those old
+                // obligations; RequiresCatchup remains set so mutations from the next
+                // frame onward are retained until the reloaded peer ACKs them.
+                ReleaseReplicationPeerWorldDeltaObligations(
+                    peerId,
+                    "resync-checkpoint-boundary");
+
                 LogReplicationInfo("[MP/SAVE] targeted resync checkpoint created peer="
                     + peerId
                     + " path="
