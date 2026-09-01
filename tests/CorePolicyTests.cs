@@ -113,6 +113,45 @@ internal static class CorePolicyTests
         Equal(24, MultiplayerNickname.Normalize(new string('X', 40)).Length, "nickname length bounded");
         Equal("Игрок 2", MultiplayerNickname.Normalize("Игрок 2"), "unicode nickname preserved");
 
+        var peerStatusEnvelope = ReplicationPeerStatusCodec.ForStatus(
+            MultiplayerPeerIds.Host,
+            new ReplicationPeerStatus(
+                "client-2",
+                "Игрок 2",
+                "Loading",
+                true,
+                false));
+        Equal(true,
+            ReplicationPeerStatusCodec.TryReadStatus(
+                peerStatusEnvelope,
+                out var peerStatus,
+                out _),
+            "peer status payload roundtrip parses");
+        Equal("client-2",
+            peerStatus == null ? string.Empty : peerStatus.PeerId,
+            "peer status id roundtrip");
+        Equal("Игрок 2",
+            peerStatus == null ? string.Empty : peerStatus.DisplayName,
+            "peer status nickname roundtrip");
+        Equal("Loading",
+            peerStatus == null ? string.Empty : peerStatus.Phase,
+            "peer status phase roundtrip");
+        Equal(true,
+            peerStatus != null && peerStatus.Connected,
+            "peer status connected roundtrip");
+        Equal(false,
+            peerStatus != null && peerStatus.Playing,
+            "peer status playing roundtrip");
+        var disconnectedPeerStatus = new ReplicationPeerStatus(
+            "client-3",
+            "Player 3",
+            "Left",
+            false,
+            true);
+        Equal(false,
+            disconnectedPeerStatus.Playing,
+            "disconnected peer status cannot remain playing");
+
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
         Equal(true, paused, "pause payload value");
