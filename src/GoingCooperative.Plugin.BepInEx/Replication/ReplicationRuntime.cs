@@ -1496,7 +1496,8 @@ namespace GoingCooperative.Plugin.BepInEx
             string saveId,
             string hash,
             long byteLength,
-            string detail)
+            string detail,
+            string? targetPeerId = null)
         {
             if (replicationTransport == null)
             {
@@ -1514,7 +1515,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 detail);
             try
             {
-                replicationTransport.Send(ReplicationPayloadCodec.ForResyncControl(senderId, control));
+                var envelope =
+                    ReplicationPayloadCodec.ForResyncControl(
+                        senderId,
+                        control);
+                if (replicationConfigHostMode
+                    && !string.IsNullOrWhiteSpace(targetPeerId))
+                {
+                    replicationTransport.SendToPeer(
+                        targetPeerId,
+                        envelope);
+                }
+                else
+                {
+                    replicationTransport.Send(envelope);
+                }
                 replicationResyncControlsSent++;
                 replicationLastResyncSummary = "sent " + FormatReplicationResyncControl(control);
                 LogReplicationInfo("Going Cooperative replication resync control sent " + FormatReplicationResyncControl(control));
@@ -1543,19 +1558,57 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (replicationConfigHostMode)
             {
-                HandleReplicationResyncControlOnHost(control);
+                HandleReplicationResyncControlOnHost(
+                    envelope.SenderId,
+                    control);
                 return;
             }
 
-            replicationLastResyncSummary = "received " + FormatReplicationResyncControl(control);
-            LogReplicationInfo("Going Cooperative replication resync control received " + FormatReplicationResyncControl(control));
+            if (!string.Equals(
+                    envelope.SenderId,
+                    ReplicationHostPeerId,
+                    StringComparison.Ordinal))
+            {
+                LogReplicationWarning(
+                    "[MP/SYNC] resync control rejected non-host sender="
+                    + envelope.SenderId);
+                return;
+            }
+
+            replicationLastResyncSummary =
+                "received " + FormatReplicationResyncControl(control);
+            LogReplicationInfo(
+                "Going Cooperative replication resync control received "
+                + FormatReplicationResyncControl(control));
         }
 
-        private void HandleReplicationResyncControlOnHost(ReplicationResyncControl control)
+        private void HandleReplicationResyncControlOnHost(
+            string peerId,
+            ReplicationResyncControl control)
         {
-            replicationLastResyncSummary = "host-received " + FormatReplicationResyncControl(control);
-            LogReplicationInfo("Going Cooperative replication resync control host received " + FormatReplicationResyncControl(control));
-            if (!string.Equals(control.Phase, "Request", StringComparison.Ordinal))
+            if (!MultiplayerPeerIds.TryParseClientSlot(
+                    peerId,
+                    out _)
+                || !ReplicationCompatiblePeerIds.Contains(peerId))
+            {
+                LogReplicationWarning(
+                    "[MP/SYNC] resync control rejected sender="
+                    + peerId);
+                return;
+            }
+
+            replicationLastResyncSummary =
+                "host-received peer="
+                + peerId
+                + " "
+                + FormatReplicationResyncControl(control);
+            LogReplicationInfo(
+                "Going Cooperative replication resync control host received "
+                + replicationLastResyncSummary);
+            if (!string.Equals(
+                    control.Phase,
+                    "Request",
+                    StringComparison.Ordinal))
             {
                 return;
             }
@@ -1567,7 +1620,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 string.Empty,
                 string.Empty,
                 0L,
-                "control-scaffold save-api-not-wired");
+                "legacy-control-scaffold; use Full Resync for live checkpoint recovery",
+                peerId);
             SendReplicationResyncControl(
                 ReplicationHostPeerId,
                 "Blocked",
@@ -1575,7 +1629,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 string.Empty,
                 string.Empty,
                 0L,
-                "blocked=pending-save-load-api-discovery next=scan-save-load-apis");
+                "legacy-control-scaffold blocked; use Full Resync",
+                peerId);
         }
 
         private static string FormatReplicationResyncControl(ReplicationResyncControl control)
