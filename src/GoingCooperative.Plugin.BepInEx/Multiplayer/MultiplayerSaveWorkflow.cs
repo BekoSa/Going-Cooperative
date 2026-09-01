@@ -311,6 +311,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             multiplayerResyncCaptureInProgress = true;
             var paused = false;
+            var previousSpeedIndex = replicationAuthoritativeSpeedIndex;
             try
             {
                 if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
@@ -355,8 +356,8 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 if (paused)
                 {
-                    TryInvokeStoredGameSpeedManagerMethod(
-                        "SetSpeedNormal",
+                    RestoreReplicationAuthoritativeSpeed(
+                        previousSpeedIndex,
                         out var resumeDetail);
                     LogReplicationInfo("[MP/SAVE] host resumed after join checkpoint peer="
                         + peerId
@@ -372,6 +373,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             multiplayerResyncCaptureInProgress = true;
             var paused = false;
+            var previousSpeedIndex = replicationAuthoritativeSpeedIndex;
             try
             {
                 if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
@@ -418,8 +420,8 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 if (paused)
                 {
-                    TryInvokeStoredGameSpeedManagerMethod(
-                        "SetSpeedNormal",
+                    RestoreReplicationAuthoritativeSpeed(
+                        previousSpeedIndex,
                         out var resumeDetail);
                     LogReplicationInfo("[MP/SAVE] host resumed after resync checkpoint peer="
                         + peerId
