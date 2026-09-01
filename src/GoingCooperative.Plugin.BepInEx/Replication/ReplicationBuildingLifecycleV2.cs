@@ -2045,12 +2045,33 @@ namespace GoingCooperative.Plugin.BepInEx
             var pendingRecoveryKey = ReplicationBuildingRecoveryRequiredV2DeltaKind
                 + "|epoch=" + epoch.ToString(CultureInfo.InvariantCulture);
             var forceRecovery = false;
+            var existingForcedRecovery = false;
             lock (ReplicationWorldObjectDeltaLock)
             {
-                forceRecovery = ReplicationPendingSupersedableWorldDeltaSequenceByKey.TryGetValue(
+                if (ReplicationPendingSupersedableWorldDeltaSequenceByKey.TryGetValue(
                         pendingRecoveryKey,
                         out var pendingRecoverySequence)
-                    && replicationPendingWorldObjectDeltas.ContainsKey(pendingRecoverySequence);
+                    && replicationPendingWorldObjectDeltas.TryGetValue(
+                        pendingRecoverySequence,
+                        out var pendingRecovery))
+                {
+                    forceRecovery = true;
+                    existingForcedRecovery =
+                        TryReadReplicationWorldObjectDetailBool(
+                            pendingRecovery.Delta.Detail,
+                            "forceRecovery",
+                            out var pendingForceRecovery)
+                        && pendingForceRecovery;
+                }
+            }
+
+            // One advisory marker and, if it remains unacknowledged, one forced
+            // marker are sufficient for the whole epoch. Previously every building
+            // repair exhaustion emitted another RecoveryRequired delta, creating a
+            // self-amplifying storm while the client was already backpressured.
+            if (existingForcedRecovery)
+            {
+                return false;
             }
 
             var detail = "epoch="
