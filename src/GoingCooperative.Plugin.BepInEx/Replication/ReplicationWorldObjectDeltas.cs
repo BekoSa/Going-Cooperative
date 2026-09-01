@@ -4764,14 +4764,49 @@ namespace GoingCooperative.Plugin.BepInEx
             return string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
-                || string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
-                || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal)
+                || IsReplicationHighFrequencyPresentationUpdate(delta)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentProgressUpdated", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationWorkstationRuntimeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationTriggered", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationReset", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationQuit", StringComparison.Ordinal);
+        }
+
+        private static bool IsReplicationHighFrequencyPresentationUpdate(
+            ReplicationWorldObjectDelta delta)
+        {
+            if (string.Equals(
+                    delta.DeltaKind,
+                    ReplicationAgentMotionPresentationDeltaKind,
+                    StringComparison.Ordinal))
+            {
+                return string.Equals(
+                        delta.BlueprintId,
+                        "PathChanged",
+                        StringComparison.Ordinal)
+                    || (TryReadReplicationWorldObjectDetailToken(
+                            delta.Detail,
+                            "phase",
+                            out var motionPhase)
+                        && string.Equals(
+                            motionPhase,
+                            "PathChanged",
+                            StringComparison.Ordinal));
+            }
+
+            return string.Equals(
+                    delta.DeltaKind,
+                    ReplicationAgentWorkPresentationDeltaKind,
+                    StringComparison.Ordinal)
+                && TryReadReplicationWorldObjectDetailToken(
+                    delta.Detail,
+                    "phase",
+                    out var workPhase)
+                && string.Equals(
+                    workPhase,
+                    "Pulse",
+                    StringComparison.Ordinal);
         }
 
         private static bool IsNoisyReplicationWorldObjectDelta(ReplicationWorldObjectDelta delta)
@@ -16216,13 +16251,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 return GameEventSpeedStateDeltaKind;
             }
 
-            if (string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
-                || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal))
+            if (IsReplicationHighFrequencyPresentationUpdate(delta))
             {
-                // Presentation is current state, not a durable mutation. Path/work
-                // revisions can arrive many times per second; one queued slot per
-                // entity is sufficient and prevents presentation traffic from
-                // starving authoritative world mutations.
+                // PathChanged/Pulse are replaceable presentation updates. Lifecycle
+                // Start/Begin, Anchor and End remain reliable and ordered.
                 return FormatReplicationEntityWorldObjectDeltaCoalesceKey(delta);
             }
 
