@@ -653,12 +653,34 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 SendHostCommand(peer, "RESYNC_FAILED", peer.Epoch, reason);
             }
-            catch
+            catch (Exception ex)
             {
+                FailPeer(peer, ex);
+                return;
             }
 
-            peer.Phase = "Playing";
-            peer.Detail = "Resync failed; peer remains in the session.";
+            lock (stateLock)
+            {
+                if (peer.Closed)
+                {
+                    return;
+                }
+
+                // RESYNC_REQUEST temporarily removes the peer from gameplay and
+                // durable-delta recipient sets. A checkpoint capture failure means
+                // the old live world remains authoritative, so restore the peer to
+                // the exact pre-resync gameplay state while its UDP runtime performs
+                // a fresh authenticated hello.
+                peer.ReadyForReplication = true;
+                peer.RequiresCatchup = true;
+                peer.CatchupPending = false;
+                peer.WorldLoaded = true;
+                peer.Phase = "Playing";
+                peer.Detail =
+                    "Resync failed; continuing in the existing live world.";
+            }
+
+            SetHostSummaryDetail();
         }
 
         public void NotifyNativeLoadFinished()
