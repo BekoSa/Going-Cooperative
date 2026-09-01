@@ -4098,6 +4098,8 @@ namespace GoingCooperative.Plugin.BepInEx
             var staleIncoming = false;
             var queueCount = 0;
             PendingReplicationClientWorldObjectDeltaApply? replacedPending = null;
+            ReplicationWorldObjectDelta? replacedDelta = null;
+            var coalescedInPlace = false;
             var coalesceKey = FormatReplicationWorldObjectDeltaCoalesceKey(delta);
             var priority = IsReplicationPriorityWorldObjectDelta(delta);
             lock (ReplicationWorldObjectDeltaLock)
@@ -4121,7 +4123,40 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                if (ReplicationClientPriorityWorldObjectDeltaApplies.Count
+                if (!string.IsNullOrEmpty(coalesceKey)
+                    && ReplicationClientCoalescableWorldObjectDeltaApplies.TryGetValue(
+                        coalesceKey,
+                        out replacedPending))
+                {
+                    if (!ReplicationOrderingPolicy.ShouldReplaceQueuedAbsoluteState(
+                        replacedPending.Delta.Sequence,
+                        delta.Sequence))
+                    {
+                        RecordReplicationClientAppliedWorldObjectDeltaSequence(delta.Sequence);
+                        staleIncoming = true;
+                        replacedPending = null;
+                    }
+                    else
+                    {
+                        // Replace the queued absolute state in-place. The old
+                        // implementation marked the existing node stale and enqueued
+                        // another one, so Queue.Count still grew without bound even
+                        // though only the newest state was logically useful.
+                        replacedDelta = replacedPending.Delta;
+                        ReplicationClientQueuedWorldObjectDeltaSequences.Remove(
+                            replacedDelta.Sequence);
+                        RecordReplicationClientAppliedWorldObjectDeltaSequence(
+                            replacedDelta.Sequence);
+                        replacedPending.Delta = delta;
+                        replacedPending.IsStale = false;
+                        ReplicationClientQueuedWorldObjectDeltaSequences.Add(
+                            delta.Sequence);
+                        coalescedInPlace = true;
+                        queueCount = ReplicationClientPriorityWorldObjectDeltaApplies.Count
+                            + ReplicationClientPendingWorldObjectDeltaApplies.Count;
+                    }
+                }
+                else if (ReplicationClientPriorityWorldObjectDeltaApplies.Count
                     + ReplicationClientPendingWorldObjectDeltaApplies.Count
                     >= replicationConfigWorldObjectDeltaApplyQueueMax)
                 {
@@ -4129,46 +4164,26 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
                 else
                 {
-                    if (!string.IsNullOrEmpty(coalesceKey)
-                        && ReplicationClientCoalescableWorldObjectDeltaApplies.TryGetValue(coalesceKey, out replacedPending))
+                    var pending = new PendingReplicationClientWorldObjectDeltaApply(
+                        delta,
+                        coalesceKey);
+                    if (priority)
                     {
-                        if (!ReplicationOrderingPolicy.ShouldReplaceQueuedAbsoluteState(
-                            replacedPending.Delta.Sequence,
-                            delta.Sequence))
-                        {
-                            RecordReplicationClientAppliedWorldObjectDeltaSequence(delta.Sequence);
-                            staleIncoming = true;
-                            replacedPending = null;
-                        }
-                        else
-                        {
-                            replacedPending.IsStale = true;
-                            ReplicationClientQueuedWorldObjectDeltaSequences.Remove(replacedPending.Delta.Sequence);
-                            RecordReplicationClientAppliedWorldObjectDeltaSequence(replacedPending.Delta.Sequence);
-                        }
+                        ReplicationClientPriorityWorldObjectDeltaApplies.Enqueue(pending);
+                    }
+                    else
+                    {
+                        ReplicationClientPendingWorldObjectDeltaApplies.Enqueue(pending);
+                    }
+                    ReplicationClientQueuedWorldObjectDeltaSequences.Add(delta.Sequence);
+                    if (!string.IsNullOrEmpty(coalesceKey))
+                    {
+                        ReplicationClientCoalescableWorldObjectDeltaApplies[coalesceKey] = pending;
                     }
 
-                    if (!staleIncoming)
-                    {
-                        var pending = new PendingReplicationClientWorldObjectDeltaApply(delta, coalesceKey);
-                        if (priority)
-                        {
-                            ReplicationClientPriorityWorldObjectDeltaApplies.Enqueue(pending);
-                        }
-                        else
-                        {
-                            ReplicationClientPendingWorldObjectDeltaApplies.Enqueue(pending);
-                        }
-                        ReplicationClientQueuedWorldObjectDeltaSequences.Add(delta.Sequence);
-                        if (!string.IsNullOrEmpty(coalesceKey))
-                        {
-                            ReplicationClientCoalescableWorldObjectDeltaApplies[coalesceKey] = pending;
-                        }
-
-                        queueCount = ReplicationClientPriorityWorldObjectDeltaApplies.Count
-                            + ReplicationClientPendingWorldObjectDeltaApplies.Count;
-                        queued = true;
-                    }
+                    queueCount = ReplicationClientPriorityWorldObjectDeltaApplies.Count
+                        + ReplicationClientPendingWorldObjectDeltaApplies.Count;
+                    queued = true;
                 }
             }
 
@@ -4188,15 +4203,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            if (replacedPending != null)
+            if (coalescedInPlace
+                && replacedPending != null
+                && replacedDelta != null)
             {
                 replicationWorldObjectDeltasCoalesced++;
-                RecordReplicationTerminalBuildingStateSnapshotMembership(replacedPending.Delta);
+                RecordReplicationTerminalBuildingStateSnapshotMembership(replacedDelta);
                 SendReplicationWorldObjectDeltaAck(
-                    replacedPending.Delta,
+                    replacedDelta,
                     applied: true,
                     duplicate: false,
                     detail: "coalesced-replaced key=" + replacedPending.CoalesceKey);
+                replicationLastWorldObjectDeltaSummary = "coalesced-in-place queue="
+                    + queueCount.ToString(CultureInfo.InvariantCulture)
+                    + " key="
+                    + replacedPending.CoalesceKey
+                    + " sequence="
+                    + delta.Sequence.ToString(CultureInfo.InvariantCulture);
+                return;
             }
 
             if (queued)
@@ -4740,6 +4764,8 @@ namespace GoingCooperative.Plugin.BepInEx
             return string.Equals(delta.DeltaKind, CombatOutcomeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentActionHeartbeat", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentProgressUpdated", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationWorkstationRuntimeDeltaKind, StringComparison.Ordinal)
@@ -16190,6 +16216,16 @@ namespace GoingCooperative.Plugin.BepInEx
                 return GameEventSpeedStateDeltaKind;
             }
 
+            if (string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal))
+            {
+                // Presentation is current state, not a durable mutation. Path/work
+                // revisions can arrive many times per second; one queued slot per
+                // entity is sufficient and prevents presentation traffic from
+                // starving authoritative world mutations.
+                return FormatReplicationEntityWorldObjectDeltaCoalesceKey(delta);
+            }
+
             if (string.Equals(delta.DeltaKind, CombatHealthDeltaKind, StringComparison.Ordinal))
             {
                 // Health is current authoritative state. Preserve only the newest
@@ -16636,7 +16672,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            public ReplicationWorldObjectDelta Delta { get; }
+            public ReplicationWorldObjectDelta Delta { get; set; }
             public float LastSentRealtime { get; set; }
             public int SendCount { get; set; }
             public bool PositiveAckSeen { get; private set; }
