@@ -32,6 +32,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private bool multiplayerNativeLoadFinishedObserved;
         private float multiplayerNativeLoadFinishedObservedRealtime;
         private bool multiplayerNativeLoadFinishedAfterLoad;
+        private float multiplayerNextCatchupWaitLogRealtime;
 
         private List<VillageSaveInfo> GetMultiplayerSaves()
         {
@@ -252,12 +253,40 @@ namespace GoingCooperative.Plugin.BepInEx
                     catchupIndex++)
                 {
                     var catchupPeerId = catchupPeers[catchupIndex];
-                    if (replicationTransport == null
-                        || !replicationTransport.IsPeerApplicationReady(
-                            catchupPeerId)
-                        || HasPendingReplicationWorldDeltasForPeer(
-                            catchupPeerId))
+                    var udpReady = replicationTransport != null
+                        && replicationTransport.IsPeerApplicationReady(
+                            catchupPeerId);
+                    var pendingDurable =
+                        HasPendingReplicationWorldDeltasForPeer(
+                            catchupPeerId);
+                    if (!udpReady || pendingDurable)
                     {
+                        if (Time.realtimeSinceStartup
+                            >= multiplayerNextCatchupWaitLogRealtime)
+                        {
+                            multiplayerNextCatchupWaitLogRealtime =
+                                Time.realtimeSinceStartup + 2f;
+                            LogReplicationInfo(
+                                "[MP/SYNC] catch-up waiting peer="
+                                + catchupPeerId
+                                + " udpReady="
+                                + udpReady
+                                + " pendingDurable="
+                                + pendingDurable
+                                + " boundPeers="
+                                + (replicationTransport?.BoundPeerCount ?? 0)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                + " authFailures="
+                                + (replicationTransport?.AuthenticationFailures ?? 0L)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                + " bindingFailures="
+                                + (replicationTransport?.PeerBindingFailures ?? 0L)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
                         continue;
                     }
 
