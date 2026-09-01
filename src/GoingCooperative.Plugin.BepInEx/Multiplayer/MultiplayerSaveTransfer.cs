@@ -213,6 +213,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             HostPeerConnection peer;
+            int catchupEpoch;
             lock (stateLock)
             {
                 if (!hostPeers.TryGetValue(peerId, out peer)
@@ -228,6 +229,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
+                catchupEpoch = peer.Epoch;
                 peer.CatchupPending = false;
                 peer.ReadyForReplication = true;
                 peer.Phase = "Playing";
@@ -239,13 +241,31 @@ namespace GoingCooperative.Plugin.BepInEx
                 SendHostCommand(
                     peer,
                     "CATCHUP_COMPLETE",
-                    peer.Epoch);
+                    catchupEpoch);
                 SetHostSummaryDetail();
                 return true;
             }
             catch (Exception ex)
             {
+                lock (stateLock)
+                {
+                    if (hostPeers.TryGetValue(peerId, out var currentPeer)
+                        && ReferenceEquals(currentPeer, peer)
+                        && !peer.Closed
+                        && peer.Epoch == catchupEpoch
+                        && peer.WorldLoaded)
+                    {
+                        peer.ReadyForReplication = false;
+                        peer.CatchupPending = true;
+                        peer.CatchupStartedUtc = DateTime.UtcNow;
+                        peer.Phase = "Catching Up";
+                        peer.Detail =
+                            "Catch-up completion signal failed. Retrying.";
+                    }
+                }
+
                 error = ex.GetType().Name + ":" + ex.Message;
+                SetHostSummaryDetail();
                 return false;
             }
         }
