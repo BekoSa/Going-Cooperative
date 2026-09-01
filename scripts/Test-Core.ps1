@@ -52,6 +52,7 @@ $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\StoragePolicyContracts.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MedicalReplicationPayloads.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerPeerRoster.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerLifecyclePolicy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\ReplicationPeerStatus.cs"),
     (Join-Path $repositoryRoot "tests\BuildingReplicationV2PolicyTests.cs"),
     (Join-Path $repositoryRoot "tests\DirectTransportSecurityTests.cs"),
