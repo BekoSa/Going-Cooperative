@@ -34,6 +34,7 @@ internal static class CorePolicyTests
     public static int Main()
     {
         failures += DirectTransportSecurityTests.Run();
+        failures += MultiPeerUdpTransportTests.Run();
 
         Equal(true,
             MultiplayerActionRegistry.ClientIntentFingerprint.StartsWith(
