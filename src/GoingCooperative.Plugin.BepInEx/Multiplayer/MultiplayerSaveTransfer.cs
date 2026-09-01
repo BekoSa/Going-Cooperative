@@ -700,17 +700,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
-                // RESYNC_REQUEST temporarily removes the peer from gameplay while
-                // retaining post-reset durable mutations. A checkpoint capture
-                // failure means the old live world remains authoritative, so restore
-                // gameplay and let the restarted UDP runtime consume that backlog.
-                peer.ReadyForReplication = true;
+                // RESYNC_REQUEST stops gameplay but keeps post-reset durable
+                // mutations. If checkpoint capture fails, the client resumes its
+                // existing world and must consume that backlog before gameplay is
+                // allowed again.
+                peer.ReadyForReplication = false;
                 peer.RequiresCatchup = true;
-                peer.CatchupPending = false;
+                peer.CatchupPending = true;
                 peer.WorldLoaded = true;
-                peer.Phase = "Playing";
+                peer.CatchupStartedUtc = DateTime.UtcNow;
+                peer.Phase = "Catching Up";
                 peer.Detail =
-                    "Resync failed; continuing in the existing live world.";
+                    "Resync failed. Catching up with the existing live world.";
             }
 
             SetHostSummaryDetail();
@@ -1264,9 +1265,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     var reason = reader.ReadString();
                     resumeGeneration++;
                     SetState(
-                        "Playing",
+                        "Catching Up",
                         "Host could not create a resync checkpoint. "
-                            + reason,
+                            + reason
+                            + " Resuming the existing world and catching up.",
                         1f);
                 }
                 else if (command == "JOIN_FAILED")
