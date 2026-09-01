@@ -254,6 +254,16 @@ namespace GoingCooperative.Plugin.BepInEx
             SendReplicationLocalCommandIntent(command, source);
         }
 
+        private static bool IsReplicationLocalGameplayReady()
+        {
+            var current = instance;
+            return !ReferenceEquals(current, null)
+                && string.Equals(
+                    current.multiplayerSaveTransfer.Phase,
+                    "Playing",
+                    StringComparison.Ordinal);
+        }
+
         private static bool ShouldSendReplicationLocalCommandIntent()
         {
             return replicationConfigEnabled
@@ -262,7 +272,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRemoteHelloReceived
                 && replicationTransport != null
                 && replicationSnapshotsReceived > 0
-                && replicationLastSnapshotEntities > 0;
+                && replicationLastSnapshotEntities > 0
+                && IsReplicationLocalGameplayReady();
         }
 
         private static bool ShouldSkipDuplicateReplicationLocalCommand(LockstepCommand command)
@@ -386,7 +397,9 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void SendPendingReplicationCommandIntentsIfDue()
         {
-            if (ReplicationPendingCommandIntents.Count == 0 || replicationTransport == null)
+            if (ReplicationPendingCommandIntents.Count == 0
+                || replicationTransport == null
+                || !IsReplicationLocalGameplayReady())
             {
                 return;
             }
