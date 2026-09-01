@@ -1837,10 +1837,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     command.PlayerId,
                     StringComparison.Ordinal)
                 || !ReplicationCompatiblePeerIds.Contains(
+                    envelope.SenderId)
+                || !multiplayerSaveTransfer.IsClientPeerReadyForGameplay(
                     envelope.SenderId))
             {
                 replicationLastIntentSummary =
-                    "rejected-sender peer="
+                    "rejected-sender-or-not-ready peer="
                     + envelope.SenderId
                     + " commandPlayer="
                     + command.PlayerId;
