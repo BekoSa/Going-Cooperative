@@ -16797,7 +16797,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 CoalesceKey = coalesceKey;
             }
 
-            public ReplicationWorldObjectDelta Delta { get; }
+            public ReplicationWorldObjectDelta Delta { get; set; }
 
             public string CoalesceKey { get; }
 
