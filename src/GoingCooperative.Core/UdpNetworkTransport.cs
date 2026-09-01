@@ -1369,7 +1369,7 @@ namespace GoingCooperative.Core
             }
 
             var line = Encoding.UTF8.GetString(datagram);
-            var fields = line.Split('\t');
+            var fields = line.Split(\n                new[] { '\\t' },\n                StringSplitOptions.None);
             try
             {
                 if (fields.Length == 3
@@ -1573,7 +1573,7 @@ namespace GoingCooperative.Core
             }
 
             var line = Encoding.UTF8.GetString(datagram);
-            var fields = line.Split('\t');
+            var fields = line.Split(\n                new[] { '\\t' },\n                StringSplitOptions.None);
             try
             {
                 if (fields.Length == 4
