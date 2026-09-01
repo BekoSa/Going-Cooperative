@@ -207,6 +207,7 @@ namespace GoingCooperative.Plugin.BepInEx
             WarnReplicationTransportDropsIfDue();
             SendReplicationHelloIfDue();
             UpdateReplicationPresence();
+            UpdateReplicationPeerRosterStatus();
             if (replicationConfigHostMode)
             {
                 // All host channels gate on the same handshake state. Previously only some
@@ -279,6 +280,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationRemoteCompatibilityRefused = false;
             ReplicationCompatiblePeerIds.Clear();
             ReplicationCompatiblePeerHellos.Clear();
+            ResetReplicationPeerRosterStatus();
             replicationLocalBuildHash = string.Empty;
             ResetReplicationCombatRuntimeState();
             ResetReplicationMedicalV1State();
@@ -526,6 +528,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         case TransportMessageKind.ReplicationPlayerSelection:
                             HandleReplicationPlayerSelection(envelope);
                             break;
+                        case TransportMessageKind.ReplicationPeerStatus:
+                            HandleReplicationPeerStatus(envelope);
+                            break;
                     }
                 }
                 catch (Exception ex)
@@ -771,6 +776,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     AnnounceReplicationPeersToNewClient(
                         hello.PeerId,
                         envelope);
+                    SendReplicationPeerRosterToPeer(hello.PeerId);
                 }
             }
 
