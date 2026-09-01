@@ -2606,6 +2606,28 @@ namespace GoingCooperative.Plugin.BepInEx
                     + FormatReplicationWorldObjectDetailToken(result.Detail)));
         }
 
+        private bool HasPendingReplicationWorldDeltasForPeer(
+            string peerId)
+        {
+            if (string.IsNullOrWhiteSpace(peerId))
+            {
+                return false;
+            }
+
+            lock (ReplicationWorldObjectDeltaLock)
+            {
+                foreach (var pending in replicationPendingWorldObjectDeltas.Values)
+                {
+                    if (pending.RequiresPeer(peerId))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
         private void HandleReplicationPeerDisconnectedFromWorldDeltas(
             string peerId)
         {
@@ -16636,6 +16658,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     peerId => !active.Contains(peerId));
                 acknowledgedPeerIds.RemoveWhere(
                     peerId => !requiredPeerIds.Contains(peerId));
+            }
+
+            public bool RequiresPeer(string peerId)
+            {
+                return requiredPeerIds.Contains(peerId)
+                    && !acknowledgedPeerIds.Contains(peerId);
             }
 
             public bool RemoveRequiredPeer(string peerId)
