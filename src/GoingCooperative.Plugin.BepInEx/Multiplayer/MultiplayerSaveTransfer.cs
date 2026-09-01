@@ -14,7 +14,7 @@ namespace GoingCooperative.Plugin.BepInEx
 {
     internal sealed class MultiplayerSaveTransfer : IDisposable
     {
-        private const string Magic = "GOING_COOPERATIVE_CONTROL_V5";
+        private const string Magic = "GOING_COOPERATIVE_CONTROL_V6";
         private readonly object stateLock = new object();
         private readonly object clientWriteLock = new object();
         private readonly Dictionary<string, HostPeerConnection> hostPeers =
