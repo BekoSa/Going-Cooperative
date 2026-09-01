@@ -326,7 +326,7 @@ namespace GoingCooperative.Plugin.BepInEx
             // Worker jobs retransmit from WorkerBehaviour.ModifyJobPriority so every
             // host mutation path is covered. Do not also echo the surrounding UI call.
             if (!string.IsNullOrWhiteSpace(__state)
-                && LockstepCommandPayloads.TryReadManagementPolicyPayload(__state, out var policy, out _, out _, out _, out _, out _)
+                && LockstepCommandPayloads.TryReadManagementPolicyPayload(__state!, out var policy, out _, out _, out _, out _, out _)
                 && string.Equals(policy, "WorkerJob", StringComparison.Ordinal)) return;
             BroadcastHostManagementMutation(__state, "management-policy-local");
         }
