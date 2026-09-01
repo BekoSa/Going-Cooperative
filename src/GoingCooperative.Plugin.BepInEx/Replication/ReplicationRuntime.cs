@@ -2143,7 +2143,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 ReplicationCompatiblePeerIds.Count > 0;
             replicationRemoteCompatibilityRefused = false;
 
-            HandleReplicationPeerDisconnectedFromWorldDeltas(peerId);
+            ReleaseReplicationPeerWorldDeltaObligations(
+                peerId,
+                reason);
             ForgetReplicationHostCommandResultsForPeer(peerId);
             RemoveReplicationRemotePeerPresence(peerId);
 
