@@ -643,37 +643,102 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private string BuildMultiplayerCanvasRosterText()
         {
-            var peers = multiplayerSaveTransfer.GetPeerSnapshots();
             var builder = new StringBuilder();
             builder.Append("PLAYERS  ");
-            builder.Append(multiplayerSaveTransfer.ConnectedPeerCount.ToString(
-                CultureInfo.InvariantCulture));
+            builder.Append(
+                GetReplicationVisibleConnectedPeerCount().ToString(
+                    CultureInfo.InvariantCulture));
             builder.Append("/");
-            builder.Append(multiplayerSaveTransfer.MaxPlayers.ToString(
-                CultureInfo.InvariantCulture));
+            builder.Append(
+                multiplayerSaveTransfer.MaxPlayers.ToString(
+                    CultureInfo.InvariantCulture));
             builder.AppendLine();
 
-            for (var i = 0; i < peers.Count; i++)
+            if (replicationConfigHostMode)
             {
-                var peer = peers[i];
-                builder.Append(peer.Playing ? "● " : peer.Connected ? "○ " : "× ");
-                builder.Append(peer.Nickname);
-                builder.Append("  [");
-                builder.Append(peer.PeerId);
-                builder.Append("]  ");
-                builder.Append(peer.Phase);
-                if (i + 1 < peers.Count)
+                var peers = multiplayerSaveTransfer.GetPeerSnapshots();
+                for (var i = 0; i < peers.Count; i++)
+                {
+                    var peer = peers[i];
+                    AppendMultiplayerCanvasRosterRow(
+                        builder,
+                        peer.PeerId,
+                        peer.Nickname,
+                        peer.Phase,
+                        peer.Connected,
+                        peer.Playing);
+                    if (i + 1 < peers.Count)
+                    {
+                        builder.AppendLine();
+                    }
+                }
+
+                return builder.ToString();
+            }
+
+            if (ReplicationPeerStatuses.Count > 0)
+            {
+                var ids = new List<string>(
+                    ReplicationPeerStatuses.Keys);
+                ids.Sort(StringComparer.Ordinal);
+                for (var i = 0; i < ids.Count; i++)
+                {
+                    var peer = ReplicationPeerStatuses[ids[i]];
+                    AppendMultiplayerCanvasRosterRow(
+                        builder,
+                        peer.PeerId,
+                        peer.DisplayName,
+                        peer.Phase,
+                        peer.Connected,
+                        peer.Playing);
+                    if (i + 1 < ids.Count)
+                    {
+                        builder.AppendLine();
+                    }
+                }
+
+                return builder.ToString();
+            }
+
+            var fallback = multiplayerSaveTransfer.GetPeerSnapshots();
+            for (var i = 0; i < fallback.Count; i++)
+            {
+                var peer = fallback[i];
+                AppendMultiplayerCanvasRosterRow(
+                    builder,
+                    peer.PeerId,
+                    peer.Nickname,
+                    peer.Phase,
+                    peer.Connected,
+                    peer.Playing);
+                if (i + 1 < fallback.Count)
                 {
                     builder.AppendLine();
                 }
             }
 
-            if (peers.Count == 0)
+            if (fallback.Count == 0)
             {
                 builder.Append("No active peer information yet.");
             }
 
             return builder.ToString();
+        }
+
+        private static void AppendMultiplayerCanvasRosterRow(
+            StringBuilder builder,
+            string peerId,
+            string nickname,
+            string phase,
+            bool connected,
+            bool playing)
+        {
+            builder.Append(playing ? "● " : connected ? "○ " : "× ");
+            builder.Append(MultiplayerNickname.Normalize(nickname));
+            builder.Append("  [");
+            builder.Append(peerId);
+            builder.Append("]  ");
+            builder.Append(phase);
         }
 
         private void BuildMultiplayerCanvasSettingsPage()
@@ -1046,20 +1111,38 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private string BuildMultiplayerCanvasStatusValues()
         {
+            var connected = GetReplicationVisibleConnectedPeerCount();
+            var maximum = multiplayerSaveTransfer.MaxPlayers;
+            var handshake = replicationConfigHostMode
+                ? ReplicationCompatiblePeerIds.Count.ToString(
+                        CultureInfo.InvariantCulture)
+                    + " client"
+                    + (ReplicationCompatiblePeerIds.Count == 1 ? string.Empty : "s")
+                    + " verified"
+                : replicationRemoteHelloReceived
+                    ? "Host verified"
+                    : replicationRemoteCompatibilityRefused
+                        ? "Refused"
+                        : "Pending";
+
             return GetMultiplayerConnectionLabel() + "\n"
                 + (replicationConfigHostMode ? "Host" : "Client") + "\n"
-                + MultiplayerNickname.Normalize(MultiplayerMenu.Nickname)
-                + (replicationRemoteHelloReceived
-                    ? " / " + GetReplicationRemoteDisplayName()
-                    : string.Empty) + "\n"
-                + replicationConfigHost + ":" + replicationConfigPort.ToString(CultureInfo.InvariantCulture) + "\n"
-                + "1/" + MultiplayerPeerLimits.CurrentDirectRuntimePlayers.ToString(CultureInfo.InvariantCulture)
-                + " runtime · 4 target · 8 experimental" + "\n"
+                + MultiplayerNickname.Normalize(MultiplayerMenu.Nickname) + "\n"
+                + replicationConfigHost
+                + ":"
+                + replicationConfigPort.ToString(
+                    CultureInfo.InvariantCulture)
+                + "\n"
+                + connected.ToString(CultureInfo.InvariantCulture)
+                + "/"
+                + maximum.ToString(CultureInfo.InvariantCulture)
+                + (maximum > MultiplayerPeerLimits.StableTargetPlayers
+                    ? " experimental"
+                    : " Direct")
+                + "\n"
                 + GetMultiplayerProtocolLabel() + "\n"
                 + GoingCooperativeConstants.Version + "\n"
-                + (replicationRemoteHelloReceived
-                    ? "Compatible peer verified"
-                    : replicationRemoteCompatibilityRefused ? "Refused" : "Pending");
+                + handshake;
         }
 
         private static string GetMultiplayerLanAddressSummary()
