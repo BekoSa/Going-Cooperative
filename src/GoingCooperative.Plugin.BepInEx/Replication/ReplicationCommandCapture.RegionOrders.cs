@@ -222,6 +222,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     ? "Deconstruct"
                     : string.Empty;
             var hostSemanticRemoval = replicationConfigHostMode
+                && applyingRuntimeCommandDepth <= 0
                 && IsReplicationMassBuildingRegionOrder(semanticOrderType)
                 && replicationLastRegionSelectionValid;
 
