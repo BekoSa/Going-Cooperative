@@ -14,6 +14,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationPresenceSendIntervalSeconds = 0.1f;
         private const float ReplicationPresenceTimeoutSeconds = 1.25f;
         private const float ReplicationSelectionHeartbeatSeconds = 2f;
+        private const float ReplicationSelectionPollIntervalSeconds = 0.1f;
         private const float ReplicationSelectionTimeoutSeconds = 5f;
         private const float ReplicationSelectionResolveSeconds = 0.5f;
         private const float ReplicationPingLifetimeSeconds = 4f;
@@ -21,6 +22,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const int ReplicationMaxSelectedEntities = 16;
 
         private static float replicationNextPresenceSendRealtime;
+        private static float replicationNextSelectionPollRealtime;
         private static float replicationNextSelectionHeartbeatRealtime;
         private static float replicationNextSelectionResolveRealtime;
         private static float replicationNextPresenceDiagnosticsRealtime;
@@ -42,6 +44,15 @@ namespace GoingCooperative.Plugin.BepInEx
         private static readonly List<ReplicationPresencePingState>
             ReplicationPresencePings =
                 new List<ReplicationPresencePingState>();
+        private static readonly List<ReplicationRemotePresenceState>
+            ReplicationRemotePresenceScratch =
+                new List<ReplicationRemotePresenceState>();
+        private static readonly HashSet<string>
+            ReplicationRemoteSelectionWantedScratch =
+                new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, Transform>
+            ReplicationRemoteSelectionResolvedScratch =
+                new Dictionary<string, Transform>(StringComparer.Ordinal);
 
         private sealed class ReplicationRemotePresenceState
         {
@@ -145,6 +156,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            // Selection discovery walks Unity objects and resolves stable IDs. It used
+            // to run every render frame even though selection replication itself is a
+            // low-frequency presence feature. Poll at 10 Hz, while still honoring the
+            // 2-second heartbeat if a frame arrives after the normal poll deadline.
+            if (now < replicationNextSelectionPollRealtime
+                && now < replicationNextSelectionHeartbeatRealtime)
+            {
+                return;
+            }
+
+            replicationNextSelectionPollRealtime =
+                now + ReplicationSelectionPollIntervalSeconds;
             var entityIds = CollectReplicationLocalSelectedEntityIds(out var unresolved);
             var signature = string.Join("\n", entityIds);
             if (string.Equals(signature, replicationLastLocalSelectionSignature, StringComparison.Ordinal)
@@ -871,7 +894,8 @@ namespace GoingCooperative.Plugin.BepInEx
             GetReplicationRemotePresenceStates()
         {
             var now = Time.realtimeSinceStartup;
-            var result = new List<ReplicationRemotePresenceState>();
+            var result = ReplicationRemotePresenceScratch;
+            result.Clear();
             foreach (var state in ReplicationRemotePresenceByPeerId.Values)
             {
                 if (string.Equals(
@@ -992,7 +1016,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
             replicationNextSelectionResolveRealtime =
                 now + ReplicationSelectionResolveSeconds;
-            var wanted = new HashSet<string>(StringComparer.Ordinal);
+            var wanted = ReplicationRemoteSelectionWantedScratch;
+            wanted.Clear();
             foreach (var state in ReplicationRemotePresenceByPeerId.Values)
             {
                 state.SelectionTransforms.Clear();
@@ -1015,8 +1040,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            var resolved =
-                new Dictionary<string, Transform>(StringComparer.Ordinal);
+            var resolved = ReplicationRemoteSelectionResolvedScratch;
+            resolved.Clear();
             var views = FindReplicationAnimatedAgentViews();
             for (var i = 0;
                 i < views.Length && wanted.Count > 0;
@@ -1159,6 +1184,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ResetReplicationPresence()
         {
             replicationNextPresenceSendRealtime = 0f;
+            replicationNextSelectionPollRealtime = 0f;
             replicationNextSelectionHeartbeatRealtime = 0f;
             replicationNextSelectionResolveRealtime = 0f;
             replicationNextPresenceDiagnosticsRealtime = 0f;
@@ -1175,6 +1201,9 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationLastLocalSelectionUnresolved = 0;
             ReplicationRemotePresenceByPeerId.Clear();
             ReplicationPresencePings.Clear();
+            ReplicationRemotePresenceScratch.Clear();
+            ReplicationRemoteSelectionWantedScratch.Clear();
+            ReplicationRemoteSelectionResolvedScratch.Clear();
         }
     }
 }
