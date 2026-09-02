@@ -249,6 +249,12 @@ namespace GoingCooperative.Plugin.BepInEx
 
                     SendHostReplicationPlantLifecycleIfDue();
                     UpdateReplicationBuildingLifecycleV2();
+                    ProcessPendingReplicationHostBuildReplayChunks();
+                    if (ShouldYieldReplicationMainThreadWork())
+                    {
+                        return;
+                    }
+
                     if (!replicationConfigProductionStateV2)
                     {
                         UpdateReplicationWorkstationRuntimePresentation();
@@ -2251,6 +2257,11 @@ namespace GoingCooperative.Plugin.BepInEx
             ReleaseReplicationPeerWorldDeltaObligations(
                 peerId,
                 reason);
+            // Any host-local build chunks not yet admitted to the reliable map are
+            // already represented by the checkpoint used for resync. Replaying them
+            // after the peer crosses the checkpoint boundary would duplicate builds
+            // and preserve a stale epoch manifest.
+            ClearPendingReplicationHostBuildReplayChunks();
             ForgetReplicationHostCommandResultsForPeer(peerId);
             RemoveReplicationRemotePeerPresence(peerId);
 
