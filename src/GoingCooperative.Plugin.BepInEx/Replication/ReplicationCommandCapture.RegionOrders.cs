@@ -34,6 +34,16 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationNextRegionSelectionLogRealtime;
         private static int replicationRegionSelectionActionFrame = -1;
         private static int replicationRegionSelectionActionDepth;
+        private static bool replicationHostLocalSemanticRegionArmed;
+        private static int replicationHostLocalSemanticRegionFrame = -1;
+        private static string replicationHostLocalSemanticRegionOrderType = string.Empty;
+        private static string replicationHostLocalSemanticRegionAllowType = "All";
+        private static int replicationHostLocalSemanticRegionStartX;
+        private static int replicationHostLocalSemanticRegionStartY;
+        private static int replicationHostLocalSemanticRegionStartZ;
+        private static int replicationHostLocalSemanticRegionEndX;
+        private static int replicationHostLocalSemanticRegionEndY;
+        private static int replicationHostLocalSemanticRegionEndZ;
         private static string replicationZoneModifyOperation = string.Empty;
         private static string replicationZoneModifyId = string.Empty;
         private static float replicationZoneModifyRealtime;
@@ -223,8 +233,13 @@ namespace GoingCooperative.Plugin.BepInEx
                     : string.Empty;
             var hostSemanticRemoval = replicationConfigHostMode
                 && applyingRuntimeCommandDepth <= 0
-                && IsReplicationMassBuildingRegionOrder(semanticOrderType)
-                && replicationLastRegionSelectionValid;
+                && replicationHostLocalSemanticRegionArmed
+                && replicationHostLocalSemanticRegionFrame == Time.frameCount
+                && string.Equals(
+                    replicationHostLocalSemanticRegionOrderType,
+                    semanticOrderType,
+                    StringComparison.Ordinal)
+                && IsReplicationMassBuildingRegionOrder(semanticOrderType);
 
             // This postfix runs after the native SelectionManager operation. For a
             // host-local Cancel/Deconstruct, publish the one authoritative region
@@ -239,16 +254,23 @@ namespace GoingCooperative.Plugin.BepInEx
                 MarkReplicationBuildingSemanticRegionReplayV2();
                 instance?.SendReplicationRegionOrderState(
                     semanticOrderType,
-                    replicationLastRegionStartX,
-                    replicationLastRegionStartY,
-                    replicationLastRegionStartZ,
-                    replicationLastRegionEndX,
-                    replicationLastRegionEndY,
-                    replicationLastRegionEndZ,
-                    "All",
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartY,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndY,
+                    replicationHostLocalSemanticRegionEndZ,
+                    replicationHostLocalSemanticRegionAllowType,
                     "None",
                     "None",
                     "host-local source=selection:" + methodName);
+            }
+
+            if (replicationConfigHostMode
+                && replicationHostLocalSemanticRegionFrame == Time.frameCount
+                && IsReplicationMassBuildingRegionOrder(semanticOrderType))
+            {
+                replicationHostLocalSemanticRegionArmed = false;
             }
 
             if (replicationRegionSelectionActionDepth > 0
@@ -293,6 +315,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 replicationRegionSelectionActionDepth++;
+                if (replicationConfigHostMode
+                    && applyingRuntimeCommandDepth <= 0)
+                {
+                    // Disarm before resolving this drag. A failed resolution must
+                    // never let a later postfix reuse the previous area's bounds.
+                    replicationHostLocalSemanticRegionArmed = false;
+                    replicationHostLocalSemanticRegionFrame = Time.frameCount;
+                }
             }
             if (!TryResolveReplicationSelectionRegion(
                     __instance,
@@ -314,6 +344,23 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var allowType = ResolveReplicationRegionAllowType(__instance, orderType);
+            if (replicationConfigHostMode
+                && applyingRuntimeCommandDepth <= 0
+                && IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                replicationHostLocalSemanticRegionArmed = true;
+                replicationHostLocalSemanticRegionFrame = Time.frameCount;
+                replicationHostLocalSemanticRegionOrderType = orderType;
+                replicationHostLocalSemanticRegionAllowType =
+                    string.IsNullOrWhiteSpace(allowType) ? "All" : allowType;
+                replicationHostLocalSemanticRegionStartX = startX;
+                replicationHostLocalSemanticRegionStartY = startY;
+                replicationHostLocalSemanticRegionStartZ = startZ;
+                replicationHostLocalSemanticRegionEndX = endX;
+                replicationHostLocalSemanticRegionEndY = endY;
+                replicationHostLocalSemanticRegionEndZ = endZ;
+            }
+
             instance?.LogReplicationInfo("Going Cooperative replication region selection action mode="
                 + replicationConfigRegionCommandMode
                 + " method="
