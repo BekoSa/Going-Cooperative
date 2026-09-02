@@ -15,6 +15,7 @@ $paths = @{
     Capture = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.Building.cs"
     Lifecycle = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
     WorldDeltas = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
+    SaveTransfer = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveTransfer.cs"
 }
 
 $sources = @{}
@@ -109,6 +110,27 @@ if ([regex]::IsMatch(
         [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
     $contractFailures.Add("Host-placement transaction identity regressed to transport delta.Sequence.")
 }
+
+# A targeted full resync advances the peer checkpoint epoch on the host and the
+# received epoch on the client. Building exact-once fences must read the shared
+# replication epoch rather than the host-global transfer epoch, which stays zero.
+Require-SourcePattern $sources.SaveTransfer 'public\s+int\s+ReplicationEpoch.*?if\s*\(!hostMode\).*?return\s+Math\.Max\(0,\s*epoch\).*?foreach\s*\(var\s+peer\s+in\s+hostPeers\.Values\).*?peer\.Epoch' `
+    "Multiplayer save transfer does not expose the peer checkpoint epoch to host building replication."
+Require-SourcePattern $sources.SaveTransfer 'lock\s*\(stateLock\).*?if\s*\(isResync\).*?peer\.Epoch\+\+.*?bundleEpoch\s*=\s*peer\.Epoch' `
+    "Targeted resync does not atomically publish the incremented peer epoch before sending the bundle."
+Require-SourcePattern $sources.BuildBatch 'GetReplicationBuildBatchEpoch\(\).*?multiplayerSaveTransfer\.ReplicationEpoch' `
+    "Building transaction fences still use the host-global transfer epoch and will diverge after resync."
+
+# Host-local large drags are staged before the reliable map and admitted only
+# after the previous placement/result transaction is ACKed.
+Require-SourcePattern $sources.Capture 'ReplicationPendingHostBuildReplayChunks.*?EmitHostLocalReplicationBuildPlacements\(.*?ReplicationPendingHostBuildReplayChunks\.Enqueue' `
+    "Host-local build chunks are still registered into the reliable map in one placement frame."
+Require-SourcePattern $sources.Capture 'ProcessPendingReplicationHostBuildReplayChunks\(\).*?IsReplicationBuildingDurableBackpressured\(out\s+var\s+durablePending\).*?if\s*\(durablePending\s*>\s*0\).*?SendReplicationWorldObjectDelta' `
+    "Host-local build replay is not ACK-paced before reliable admission."
+Require-SourcePattern $sources.Runtime 'UpdateReplicationBuildingLifecycleV2\(\);.*?ProcessPendingReplicationHostBuildReplayChunks\(\);.*?ShouldYieldReplicationMainThreadWork\(\)' `
+    "The host runtime does not pump staged build replay inside the shared frame budget."
+Require-SourcePattern $sources.Runtime 'ResetReplicationPeerRuntimeState\(.*?ReleaseReplicationPeerWorldDeltaObligations\(.*?ClearPendingReplicationHostBuildReplayChunks\(\)' `
+    "A resync can retain pre-checkpoint host build replay chunks with stale epoch manifests."
 
 # V2 routine play must never enter the whole-scene BuildingState collector. The
 # legacy scan remains available only when both peers explicitly select rollback.
