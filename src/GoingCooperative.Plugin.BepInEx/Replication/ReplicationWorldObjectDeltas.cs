@@ -4073,12 +4073,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 ClearReplicationPendingBuildingLifecycleSupersessionIndex(delta);
             }
 
-            if (string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal))
+            if (string.Equals(delta.DeltaKind, ReplicationBuildingRepairV2DeltaKind, StringComparison.Ordinal))
             {
-                TrySendReplicationBuildingRepairV2(delta, "lifecycle-retry-exhausted");
-            }
-            else if (string.Equals(delta.DeltaKind, ReplicationBuildingRepairV2DeltaKind, StringComparison.Ordinal))
-            {
+                // A targeted repair exists only after an explicit client negative ACK.
+                // If even that repair exhausts its retry budget, escalate once to
+                // full recovery. Ordinary lifecycle rows never reach this drop path:
+                // their latest revision remains durable until ACK or supersession.
                 TrySendReplicationBuildingRecoveryRequiredV2(
                     delta,
                     "building-repair-v2-retry-exhausted");
