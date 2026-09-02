@@ -1412,6 +1412,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " idleTracksSkipped=" + replicationPresentationIdleTracksSkipped
                 + " presentationBudgetStops=" + replicationPresentationApplyBudgetStops
                 + " presentationCursor=" + replicationPresentationApplyCursor
+                + " viewCacheScans=" + replicationTransformViewCacheScans
+                + " viewCacheInvalidations=" + replicationTransformViewCacheInvalidations
+                + " viewCacheEventDriven=" + replicationTransformViewCacheInvalidationReady
                 + " " + FormatReplicationSemanticMotionStatus();
         }
     }
