@@ -303,6 +303,16 @@ namespace GoingCooperative.Plugin.BepInEx
                 return replicationSemanticAnimatedAgentViewCache;
             }
 
+            // Lifecycle callbacks can burst during load, mass construction and
+            // destruction. Coalesce them into one delayed refresh instead of turning
+            // every callback into an immediate global FindObjectsOfType scene walk.
+            if (replicationSemanticAnimatedAgentViewCacheInitialized
+                && replicationSemanticAnimatedAgentViewCacheDirty
+                && replicationTransformViewCacheFollowupRefreshRealtime > now)
+            {
+                return replicationSemanticAnimatedAgentViewCache;
+            }
+
             // Never trigger the expensive global scene scan while the player is
             // dragging/selecting/committing a placement. A slightly stale actor list
             // is harmless for presentation and refreshes immediately after interaction.
@@ -348,23 +358,12 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 "Awake",
                 "OnEnable",
-                "Start",
-                "Initialize",
-                "Init",
-                "Setup",
-                "SetupView",
-                "Spawn",
-                "OnSpawned"
+                "Start"
             };
             var removalLifecycleNames = new[]
             {
                 "OnDisable",
-                "OnDestroy",
-                "Dispose",
-                "Deinitialize",
-                "Deinit",
-                "Despawn",
-                "OnDespawned"
+                "OnDestroy"
             };
 
             for (var currentType = animatedAgentViewType;
@@ -394,6 +393,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         Array.IndexOf(removalLifecycleNames, method.Name) >= 0;
                     if (method.IsAbstract
                         || method.IsGenericMethod
+                        || method.GetParameters().Length != 0
                         || (!isCreationLifecycle && !isRemovalLifecycle)
                         || !patchedMethods.Add(method))
                     {
