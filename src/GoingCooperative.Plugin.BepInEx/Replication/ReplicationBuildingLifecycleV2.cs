@@ -21,11 +21,14 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildingRepairV2CooldownSeconds = 2f;
         private const float ReplicationBuildingPresentationStepSecondsV2 = 0.25f;
         private const int ReplicationBuildingPresentationApplyBudgetV2 = 16;
+        private const int ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4;
 
         private static readonly Dictionary<long, ReplicationTrackedBuildingV2> ReplicationTrackedHostBuildingsV2 =
             new Dictionary<long, ReplicationTrackedBuildingV2>();
         private static readonly Dictionary<long, bool> ReplicationClientBuildingProgressingV2 =
             new Dictionary<long, bool>();
+        private static readonly Queue<ReplicationPendingBuildingTerminalV2> ReplicationPendingBuildingTerminalsV2 =
+            new Queue<ReplicationPendingBuildingTerminalV2>();
         private static readonly Dictionary<long, long> ReplicationClientBuildingTerminalRevisionV2 =
             new Dictionary<long, long>();
         private static readonly Dictionary<long, ReplicationClientBuildingPresentationV2> ReplicationClientBuildingPresentationByHostIdV2 =
@@ -367,11 +370,9 @@ namespace GoingCooperative.Plugin.BepInEx
                     reason = replicationBuildingTerminalRootReasonV2!;
                 }
 
-                EmitReplicationBuildingLifecycleV2(
+                QueueReplicationBuildingTerminalV2(
                     tracked,
-                    ReplicationBuildingAbsoluteStateV2.Removed,
-                    reason,
-                    force: true);
+                    reason);
                 if (ReferenceEquals(replicationBuildingTerminalRootTargetV2, __state.TargetKey)
                     || ReferenceEquals(
                         replicationBuildingTerminalRootTargetV2,
@@ -508,13 +509,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 existing.View.Target = placement.View;
                 existing.BuildingInstance.Target = placement.BuildingInstance;
                 existing.CanonicalRecord = placement.Record;
-                if (!existing.HasLastSentState
-                    && TryCaptureReplicationBuildingAbsoluteStateV2(existing, out var existingState))
-                {
-                    existing.LastSentState = existingState;
-                    existing.HasLastSentState = true;
-                }
-
+                // Placement itself is already represented by the authoritative
+                // BuildBatch. Avoid a reflection-heavy absolute-state read for every
+                // tile in a large drag; the first real lifecycle mutation will capture
+                // and publish the current state if needed.
                 return;
             }
 
@@ -527,12 +525,6 @@ namespace GoingCooperative.Plugin.BepInEx
                 placement.View,
                 placement.BuildingInstance,
                 placement.Record);
-            if (TryCaptureReplicationBuildingAbsoluteStateV2(tracked, out var initial))
-            {
-                tracked.LastSentState = initial;
-                tracked.HasLastSentState = true;
-            }
-
             ReplicationTrackedHostBuildingsV2[placement.UniqueId] = tracked;
         }
 
@@ -698,6 +690,70 @@ namespace GoingCooperative.Plugin.BepInEx
                 forbidden,
                 marked);
             return true;
+        }
+
+        private static void QueueReplicationBuildingTerminalV2(
+            ReplicationTrackedBuildingV2 tracked,
+            string lifecycle)
+        {
+            if (tracked.TerminalSent || tracked.TerminalQueued)
+            {
+                return;
+            }
+
+            // Native mass deconstruct/cancel can invoke hundreds of lifecycle
+            // callbacks in one SelectionManager call. Keep that callback O(1):
+            // defer string formatting, reliable-map mutation and transport work
+            // until the normal replication frame pump.
+            tracked.Progressing = false;
+            tracked.TerminalQueued = true;
+            ReplicationPendingBuildingTerminalsV2.Enqueue(
+                new ReplicationPendingBuildingTerminalV2(
+                    tracked,
+                    lifecycle));
+        }
+
+        private static void ProcessPendingReplicationBuildingTerminalsV2()
+        {
+            if (!replicationConfigHostMode
+                || ReplicationPendingBuildingTerminalsV2.Count == 0)
+            {
+                return;
+            }
+
+            var processed = 0;
+            while (processed < ReplicationBuildingTerminalEmitBudgetPerFrameV2
+                && ReplicationPendingBuildingTerminalsV2.Count > 0)
+            {
+                if (!ShouldCaptureReplicationBuildingLifecycleV2())
+                {
+                    break;
+                }
+
+                var pending = ReplicationPendingBuildingTerminalsV2.Dequeue();
+                var tracked = pending.Tracked;
+                if (tracked.TerminalSent)
+                {
+                    tracked.TerminalQueued = false;
+                    continue;
+                }
+
+                tracked.TerminalQueued = false;
+                EmitReplicationBuildingLifecycleV2(
+                    tracked,
+                    ReplicationBuildingAbsoluteStateV2.Removed,
+                    pending.Lifecycle,
+                    force: true);
+
+                if (tracked.TerminalSent)
+                {
+                    // The reliable delta owns all information required for later
+                    // retries. Do not retain destroyed Unity targets indefinitely.
+                    ReplicationTrackedHostBuildingsV2.Remove(tracked.HostId);
+                }
+
+                processed++;
+            }
         }
 
         private static void EmitReplicationBuildingLifecycleV2(
@@ -2433,6 +2489,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (replicationConfigHostMode)
+            {
+                ProcessPendingReplicationBuildingTerminalsV2();
+            }
+
             UpdateReplicationBuildingConstructionMaterialsV2();
 
             if (!replicationConfigHostMode)
@@ -2674,6 +2735,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             ResetReplicationBuildingConstructionMaterialsV2();
             ReplicationTrackedHostBuildingsV2.Clear();
+            ReplicationPendingBuildingTerminalsV2.Clear();
             ReplicationClientBuildingProgressingV2.Clear();
             ReplicationClientBuildingTerminalRevisionV2.Clear();
             ReplicationClientBuildingPresentationByHostIdV2.Clear();
@@ -2713,6 +2775,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 + replicationBuildingLifecycleDeltasSentV2.ToString(CultureInfo.InvariantCulture)
                 + " lifecycleApplied="
                 + replicationBuildingLifecycleDeltasAppliedV2.ToString(CultureInfo.InvariantCulture)
+                + " terminalQueue="
+                + ReplicationPendingBuildingTerminalsV2.Count.ToString(CultureInfo.InvariantCulture)
                 + " repairSent="
                 + replicationBuildingRepairDeltasSentV2.ToString(CultureInfo.InvariantCulture)
                 + " repairApplied="
@@ -2729,6 +2793,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 + FormatReplicationBuildingConstructionMaterialsV2Status()
                 + " selectedHostId="
                 + replicationClientSelectedBuildingHostIdV2.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private sealed class ReplicationPendingBuildingTerminalV2
+        {
+            public ReplicationPendingBuildingTerminalV2(
+                ReplicationTrackedBuildingV2 tracked,
+                string lifecycle)
+            {
+                Tracked = tracked;
+                Lifecycle = lifecycle ?? string.Empty;
+            }
+
+            public ReplicationTrackedBuildingV2 Tracked { get; }
+
+            public string Lifecycle { get; }
         }
 
         private sealed class ReplicationBuildingMutationCaptureV2
@@ -2818,6 +2897,8 @@ namespace GoingCooperative.Plugin.BepInEx
             public bool Progressing { get; set; }
 
             public bool TerminalSent { get; set; }
+
+            public bool TerminalQueued { get; set; }
 
             public bool HasLastSentState { get; set; }
 
