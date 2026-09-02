@@ -211,15 +211,19 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationConfigWorldObjectDeltaMode = "shadow";
         private static UnityEngine.KeyCode replicationConfigPingKey = UnityEngine.KeyCode.F9;
         private static int replicationConfigPort = 47692;
-        private static int replicationConfigSnapshotHz = 12;
+        private static int replicationConfigSnapshotHz = 10;
         private static int replicationConfigFullResyncSeconds = 45;
         private static int replicationConfigInterpolationMs = 150;
         private static int replicationConfigMaxSnapshotEntities = 128;
         private static int replicationConfigSnapshotValidationSeconds = 10;
         private static int replicationConfigProofIntentDelaySeconds = 5;
-        private static int replicationConfigWorldObjectDeltaApplyBudgetPerFrame = 12;
+        private static int replicationConfigWorldObjectDeltaApplyBudgetPerFrame = 8;
         private static int replicationConfigWorldObjectDeltaApplyQueueMax = 2048;
         private static float replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = 2f;
+        private static float replicationConfigRuntimeMainThreadBudgetMsPerFrame = 4f;
+        private static float replicationConfigPresentationApplyBudgetMsPerFrame = 1.25f;
+        private static int replicationConfigPresentationApplyMaxEntitiesPerFrame = 48;
+        private static float replicationConfigSnapshotViewCacheSafetyRefreshSeconds = 60f;
 
         private static void TryLoadReplicationConfig(GoingCooperativePlugin current)
         {
@@ -479,6 +483,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigWorldObjectDeltaApplyQueueMax.ToString(CultureInfo.InvariantCulture)
                     + " worldObjectDeltaApplyBudgetMsPerFrame="
                     + replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " runtimeMainThreadBudgetMsPerFrame="
+                    + replicationConfigRuntimeMainThreadBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationApplyBudgetMsPerFrame="
+                    + replicationConfigPresentationApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationApplyMaxEntitiesPerFrame="
+                    + replicationConfigPresentationApplyMaxEntitiesPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + " snapshotViewCacheSafetyRefreshSeconds="
+                    + replicationConfigSnapshotViewCacheSafetyRefreshSeconds.ToString("0.###", CultureInfo.InvariantCulture)
                     + " maxSnapshotEntities="
                     + replicationConfigMaxSnapshotEntities.ToString(CultureInfo.InvariantCulture));
                 LogReplicationInventoryAuthority(current);
@@ -1676,6 +1688,62 @@ namespace GoingCooperative.Plugin.BepInEx
                         && applyBudgetMs <= 100f)
                     {
                         replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = applyBudgetMs;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "runtimemainthreadbudgetmsperframe":
+                case "multiplayermainthreadbudgetmsperframe":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var runtimeBudgetMs)
+                        && runtimeBudgetMs >= 0f
+                        && runtimeBudgetMs <= 16f)
+                    {
+                        replicationConfigRuntimeMainThreadBudgetMsPerFrame = runtimeBudgetMs;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "presentationapplybudgetmsperframe":
+                case "presentationbudgetmsperframe":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var presentationBudgetMs)
+                        && presentationBudgetMs >= 0f
+                        && presentationBudgetMs <= 8f)
+                    {
+                        replicationConfigPresentationApplyBudgetMsPerFrame = presentationBudgetMs;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "presentationapplymaxentitiesperframe":
+                case "presentationmaxentitiesperframe":
+                    if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var presentationMaxEntities)
+                        && presentationMaxEntities >= 1
+                        && presentationMaxEntities <= 512)
+                    {
+                        replicationConfigPresentationApplyMaxEntitiesPerFrame = presentationMaxEntities;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "snapshotviewcachesafetyrefreshseconds":
+                case "snapshotviewcacherefreshseconds":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var cacheRefreshSeconds)
+                        && cacheRefreshSeconds >= 0f
+                        && cacheRefreshSeconds <= 600f)
+                    {
+                        replicationConfigSnapshotViewCacheSafetyRefreshSeconds = cacheRefreshSeconds;
                     }
                     else
                     {
