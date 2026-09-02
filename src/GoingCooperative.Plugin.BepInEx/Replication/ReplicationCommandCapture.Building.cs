@@ -1277,7 +1277,16 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            IsUnsupportedReplicationBuildBlueprint(blueprint, out unsupportedCategory);
+            // ConstructableBaseCategory is present on every normal building
+            // blueprint (Building, Stairs, Furniture, Decoration, ProductionBuilding,
+            // etc.). Only beam/socket categories require semantic topology and must
+            // enter the fail-closed lane. Do not leak an ordinary category name into
+            // unsupportedCategory when the classifier returns false.
+            if (!IsUnsupportedReplicationBuildBlueprint(blueprint, out unsupportedCategory))
+            {
+                unsupportedCategory = string.Empty;
+            }
+
             if (ReplicationBuildBlueprintMetadataByIdentity.Count > 512)
             {
                 ReplicationBuildBlueprintMetadataByIdentity.Clear();
