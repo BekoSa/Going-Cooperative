@@ -28,6 +28,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
         private static Type? replicationBeamViewComponentType;
+        private static readonly Dictionary<int, ReplicationBuildBlueprintMetadataCacheEntry> ReplicationBuildBlueprintMetadataByIdentity =
+            new Dictionary<int, ReplicationBuildBlueprintMetadataCacheEntry>();
 
         private static readonly string[] ReplicationBuildBlueprintIdMemberNames =
         {
@@ -432,12 +434,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            if (!TryExtractReplicationBuildPayloadFields(
+            if (!TryGetReplicationBuildBlueprintMetadata(
                     blueprint,
-                    "Player",
                     out var blueprintId,
                     out var buildingType,
                     out var faction,
+                    out var unsupportedCategory,
                     out var payloadDetail)
                 || !TryResolveReplicationBuildingCandidateGrid(view, out var x, out var y, out var z))
             {
@@ -509,7 +511,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            if (IsUnsupportedReplicationBuildBlueprint(blueprint, out var unsupportedCategory)
+            if (unsupportedCategory.Length > 0
                 && !IsSupportedReplicationSemanticRecord(record, unsupportedCategory))
             {
                 unsupportedReason = "semantic-category=" + unsupportedCategory;
@@ -1243,6 +1245,53 @@ namespace GoingCooperative.Plugin.BepInEx
                 && applyingRuntimeCommandDepth <= 0;
         }
 
+        private static bool TryGetReplicationBuildBlueprintMetadata(
+            object blueprint,
+            out string blueprintId,
+            out string buildingType,
+            out string faction,
+            out string unsupportedCategory,
+            out string detail)
+        {
+            var identity = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(blueprint);
+            if (ReplicationBuildBlueprintMetadataByIdentity.TryGetValue(identity, out var cached)
+                && ReferenceEquals(cached.Blueprint, blueprint))
+            {
+                blueprintId = cached.BlueprintId;
+                buildingType = cached.BuildingType;
+                faction = cached.Faction;
+                unsupportedCategory = cached.UnsupportedCategory;
+                detail = "cached";
+                return true;
+            }
+
+            if (!TryExtractReplicationBuildPayloadFields(
+                    blueprint,
+                    "Player",
+                    out blueprintId,
+                    out buildingType,
+                    out faction,
+                    out detail))
+            {
+                unsupportedCategory = string.Empty;
+                return false;
+            }
+
+            IsUnsupportedReplicationBuildBlueprint(blueprint, out unsupportedCategory);
+            if (ReplicationBuildBlueprintMetadataByIdentity.Count > 512)
+            {
+                ReplicationBuildBlueprintMetadataByIdentity.Clear();
+            }
+            ReplicationBuildBlueprintMetadataByIdentity[identity] =
+                new ReplicationBuildBlueprintMetadataCacheEntry(
+                    blueprint,
+                    blueprintId,
+                    buildingType,
+                    faction,
+                    unsupportedCategory);
+            return true;
+        }
+
         private static bool TryExtractReplicationBuildPayloadFields(
             object blueprint,
             object factionOwnership,
@@ -1731,6 +1780,29 @@ namespace GoingCooperative.Plugin.BepInEx
                     ? "Going Cooperative: this roof could not be replicated safely because its committed topology was unavailable."
                 : "Going Cooperative: beam and wall-socket placement is not supported in multiplayer yet.";
             ShowReplicationBuildMessage(message);
+        }
+
+        private sealed class ReplicationBuildBlueprintMetadataCacheEntry
+        {
+            public ReplicationBuildBlueprintMetadataCacheEntry(
+                object blueprint,
+                string blueprintId,
+                string buildingType,
+                string faction,
+                string unsupportedCategory)
+            {
+                Blueprint = blueprint;
+                BlueprintId = blueprintId;
+                BuildingType = buildingType;
+                Faction = faction;
+                UnsupportedCategory = unsupportedCategory;
+            }
+
+            public object Blueprint { get; }
+            public string BlueprintId { get; }
+            public string BuildingType { get; }
+            public string Faction { get; }
+            public string UnsupportedCategory { get; }
         }
 
         private sealed class ReplicationBuildCaptureTransaction
