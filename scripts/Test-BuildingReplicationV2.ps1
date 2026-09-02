@@ -16,6 +16,8 @@ $paths = @{
     Lifecycle = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
     WorldDeltas = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
     SaveTransfer = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveTransfer.cs"
+    RegionOrders = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.RegionOrders.cs"
+    RuntimeActions = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntimeCommandActions.cs"
 }
 
 $sources = @{}
@@ -198,6 +200,27 @@ if ($sources.Lifecycle.Contains('ReplicationBuildingLifecycleV2PollSeconds') -or
 if ($sources.Lifecycle.Contains('TryApplyReplicationBuildingState(delta')) {
     $contractFailures.Add("Building V2 still falls through to the broad legacy BuildingState apply path.")
 }
+
+# Host-local area Cancel/Deconstruct must lead with one semantic region replay.
+# Reliable terminal rows remain as a delayed fallback if that transient state is lost.
+Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionEventPostfix\(.*?hostSemanticRemoval.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(' `
+    "Host-local Cancel/Deconstruct does not publish a semantic region replay after native completion."
+Require-SourcePattern $sources.RegionOrders 'replicationRegionSelectionActionDepth.*?ReplicationRegionResourceSurfacePostfix\(.*?replicationRegionSelectionActionFrame\s*==\s*Time\.frameCount.*?return\s*;' `
+    "Cancel/Deconstruct side-effect resource callbacks can still emit a duplicate region command."
+Require-SourcePattern $sources.RegionOrders 'ZoneSelectionFinished.*?orderType.*?None.*?replicationLastRegionOrderType.*?Cancel.*?Deconstruct.*?return\s+true\s*;' `
+    "Cancel/Deconstruct can still emit a second orderType=None ZoneSelectionFinished command."
+Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTerminalGraceSecondsV2\s*=\s*0\.4f.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2' `
+    "Building terminals do not give semantic area replay a bounded head start."
+Require-SourcePattern $sources.Lifecycle 'ProcessPendingReplicationBuildingTerminalsV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2.*?return\s*;' `
+    "Reliable terminal replay can race the semantic area operation in the same frame."
+Require-SourcePattern $sources.Lifecycle 'ReplicationTrackedHostBuildingsByInstanceV2.*?ReferenceObjectComparer\.Instance' `
+    "Host lifecycle hooks do not maintain an O(1) building-instance tracker cache."
+Require-SourcePattern $sources.Lifecycle 'TryEnsureReplicationHostBuildingTrackerV2\(.*?ReplicationTrackedHostBuildingsByInstanceV2\.TryGetValue' `
+    "Mass removal still starts every lifecycle callback with full building identity reflection."
+Require-SourcePattern $sources.Lifecycle 'replicationDestroyBuildingMethodV2.*?DestroyBuilding\(skipStabilityCheck=true,cachedMethod=true\)' `
+    "Client terminal replay re-enumerates BuildingsManagerMain methods per removed cell."
+Require-SourcePattern $sources.RuntimeActions 'TryInvokeSelectionManagerRegionAction\(.*?actionMs=' `
+    "Native region-action duration is not observable in the next performance logs."
 
 # Rapid lifecycle changes must bypass the generic 500 ms duplicate filter. Reliable
 # lifecycle rows get the extended bounded retry budget; selected progress is visual,
