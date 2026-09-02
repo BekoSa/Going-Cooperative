@@ -2752,17 +2752,26 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            if (string.Equals(
-                    delta.DeltaKind,
-                    ReplicationBuildingLifecycleV2DeltaKind,
-                    StringComparison.Ordinal)
-                && requiredPeers.Length > 0)
+            var deferBuildingInitialSend = requiredPeers.Length > 0
+                && (string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingLifecycleV2DeltaKind,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingBlueprintBatchPlacedDeltaKind,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingBlueprintBatchResultDeltaKind,
+                        StringComparison.Ordinal));
+            if (deferBuildingInitialSend)
             {
-                // Building lifecycle can arrive in bursts of hundreds/thousands
-                // during cancel/deconstruct. The reliable retry scheduler already
-                // owns this pending row; let its bounded queue perform the initial
-                // send as well instead of synchronously sending every object from
-                // the native Unity mutation callback.
+                // Building state can arrive in bursts of hundreds/thousands during
+                // drag placement, cancel or deconstruct. The reliable scheduler
+                // already owns the pending rows; let its bounded queue perform the
+                // initial sends too instead of adding a transport burst to the same
+                // frame that is mutating the Unity world.
                 replicationNextWorldObjectDeltaRetryScanRealtime = Math.Min(
                     replicationNextWorldObjectDeltaRetryScanRealtime,
                     Time.realtimeSinceStartup);
