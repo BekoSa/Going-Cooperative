@@ -25,7 +25,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationBuildBatchRecoveryAttempted;
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
-        private const int ReplicationHostBuildReplayChunkPlacements = 8;
+        private const int ReplicationHostBuildReplayChunkPlacements = 4;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
         private static Type? replicationBeamViewComponentType;
@@ -831,9 +831,9 @@ namespace GoingCooperative.Plugin.BepInEx
             for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             {
                 var group = groups[groupIndex];
-                // One native drag is one semantic command. The transport layer owns
-                // byte fragmentation/reassembly; splitting here would create multiple
-                // independently accepted host transactions and break drag atomicity.
+                // One native drag is one semantic command. Client-authored input
+                // stays atomic here. Host-local state is already committed and its
+                // downstream replay is chunked later only for bounded client apply.
                 if (replicationConfigHostMode)
                 {
                     if (EmitHostLocalReplicationBuildPlacements(
