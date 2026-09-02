@@ -22,6 +22,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildingPresentationStepSecondsV2 = 0.25f;
         private const int ReplicationBuildingPresentationApplyBudgetV2 = 16;
         private const int ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4;
+        private const float ReplicationBuildingSemanticRegionTerminalGraceSecondsV2 = 0.4f;
+        private static float replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2;
 
         private static readonly Dictionary<long, ReplicationTrackedBuildingV2> ReplicationTrackedHostBuildingsV2 =
             new Dictionary<long, ReplicationTrackedBuildingV2>();
@@ -736,11 +738,36 @@ namespace GoingCooperative.Plugin.BepInEx
                     lifecycle));
         }
 
+        private static void MarkReplicationBuildingSemanticRegionReplayV2()
+        {
+            if (!replicationConfigBuildingReplicationV2
+                || !replicationConfigHostMode)
+            {
+                return;
+            }
+
+            replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2 =
+                Math.Max(
+                    replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2,
+                    Time.realtimeSinceStartup
+                        + ReplicationBuildingSemanticRegionTerminalGraceSecondsV2);
+        }
+
         private static void ProcessPendingReplicationBuildingTerminalsV2()
         {
             if (!replicationConfigHostMode
                 || ReplicationPendingBuildingTerminalsV2.Count == 0)
             {
+                return;
+            }
+
+            if (Time.realtimeSinceStartup
+                < replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2)
+            {
+                // A host-local semantic Cancel/Deconstruct state was just sent.
+                // Give that one batched native operation a short head start on the
+                // client before reliable per-building terminal rows are admitted.
+                // If the semantic UDP state is lost, the durable rows still follow.
                 return;
             }
 
@@ -2811,6 +2838,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationClientBuildingPresentationAppliesV2 = 0L;
             replicationBuildingLifecycleProgressStartFallbacksV2 = 0L;
             replicationBuildingLifecycleLastCaptureGateReasonV2 = string.Empty;
+            replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2 = 0f;
             replicationBuildingTerminalRootTargetV2 = null;
             replicationBuildingTerminalRootReasonV2 = null;
             replicationBuildingMutationDepthByTargetV2?.Clear();
@@ -2835,6 +2863,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 + replicationBuildingLifecycleDeltasAppliedV2.ToString(CultureInfo.InvariantCulture)
                 + " terminalQueue="
                 + ReplicationPendingBuildingTerminalsV2.Count.ToString(CultureInfo.InvariantCulture)
+                + " terminalSemanticGraceMs="
+                + Math.Max(
+                    0,
+                    Mathf.RoundToInt(
+                        (replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2
+                            - Time.realtimeSinceStartup) * 1000f))
+                    .ToString(CultureInfo.InvariantCulture)
                 + " repairSent="
                 + replicationBuildingRepairDeltasSentV2.ToString(CultureInfo.InvariantCulture)
                 + " repairApplied="
