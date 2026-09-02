@@ -133,6 +133,21 @@ foreach ($diagnosticGate in @(
         throw "Release config must disable $diagnosticGate."
     }
 }
+$requiredPerfSettings = @{
+    "snapshothz" = "10"
+    "worldobjectdeltaapplybudgetperframe" = "8"
+    "worldobjectdeltaapplybudgetmsperframe" = "2"
+    "runtimemainthreadbudgetmsperframe" = "4"
+    "presentationapplybudgetmsperframe" = "1.25"
+    "presentationapplymaxentitiesperframe" = "48"
+    "snapshotviewcachesafetyrefreshseconds" = "60"
+}
+foreach ($key in $requiredPerfSettings.Keys) {
+    if ($settings[$key] -ne $requiredPerfSettings[$key]) {
+        throw "Release config performance key $key must be $($requiredPerfSettings[$key]), got $($settings[$key])."
+    }
+}
+
 foreach ($disabledGate in @(
     "eventschedulerauthority",
     "eventwarningreplication",
