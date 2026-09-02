@@ -68,6 +68,8 @@ $collectorSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInE
 $smoothingSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationSnapshotSmoothing.cs"
 $presenceSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationPresence.cs"
 $presenceGuiSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerPresenceGui.cs"
+$buildingCaptureSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.Building.cs"
+$buildingLifecycleSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
 $motionSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationAgentMotionPresentation.cs"
 $deltaSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
 $trackedConfig = Join-Path $RepositoryRoot "config\replication.cfg"
@@ -96,6 +98,7 @@ Require-Text $collectorSource '"OnDestroy"' "AnimatedAgentView removal lifecycle
 Require-Text $collectorSource 'ReplicationAnimatedAgentViewLifecyclePostfix' "AnimatedAgentView lifecycle invalidation callback"
 Require-Text $collectorSource 'ReplicationTransformViewCacheFallbackRefreshSeconds = 10f' "rare fallback transform-view refresh"
 Require-Text $collectorSource 'replicationSemanticAnimatedAgentViewCacheDirty' "dirty transform-view cache"
+Require-Text $collectorSource 'replicationTransformViewCacheFollowupRefreshRealtime > now' "coalesced transform-view lifecycle invalidation"
 Require-Text $runtimeSource 'BeginReplicationMainThreadFrameBudget\(\);' "shared replication main-thread frame budget"
 Require-Text $runtimeSource 'ShouldYieldReplicationMainThreadWork\(\)' "main-thread budget yield"
 Require-Text $smoothingSource 'replicationConfigPresentationApplyBudgetMsPerFrame' "presentation time budget"
@@ -112,6 +115,12 @@ Require-Text $presenceGuiSource 'multiplayerPresenceVisiblePeerIdsScratch' "reus
 Require-Text $motionSource 'RecordReplicationPathingCornerExtraction\(' "corner extraction timing"
 Require-Text $motionSource 'RecordReplicationPathingMotionEvent\(' "semantic event counters"
 Require-Text $deltaSource 'RecordReplicationPathingRetryScan\(' "reliable retry work timing"
+Require-Text $deltaSource 'ReplicationWorldObjectDeltaRetrySendMaxPerScan = 32' "bounded reliable retry send fanout"
+Require-Text $deltaSource 'replicationNextWorldObjectDeltaRetryScanRealtime = now \+ 0\.2f' "bounded reliable retry scheduler cadence"
+Require-Text $deltaSource 'ReplicationBuildingLifecycleV2DeltaKind, StringComparison\.Ordinal\).*ReplicationBuildingDurableRetrySeconds' "durable building lifecycle retry policy"
+Require-Text $deltaSource 'building-lifecycle-v2-repair-required' "terminal negative building lifecycle acknowledgement"
+Require-Text $buildingLifecycleSource 'TryHandleReplicationBuildingLifecycleRepairAckV2' "targeted lifecycle negative-ack repair"
+Require-Text $buildingCaptureSource 'ReplicationHostBuildReplayChunkPlacements = 8' "bounded host build replay chunk"
 Require-ConfigValue $trackedConfig "pathingPerfDiagnostics" "false" "safe tracked default"
 Require-ConfigValue $trackedConfig "snapshotHz" "10" "bounded snapshot rate"
 Require-ConfigValue $trackedConfig "worldObjectDeltaApplyBudgetMsPerFrame" "2" "bounded world-delta apply time"
@@ -123,6 +132,11 @@ Require-ConfigValue $trackedConfig "snapshotViewCacheSafetyRefreshSeconds" "0" "
 $diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
 if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
     throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$deltaContent = Get-Content -LiteralPath $deltaSource -Raw
+if ($deltaContent -match 'TrySendReplicationBuildingRepairV2\(delta, "lifecycle-retry-exhausted"\)') {
+    throw "Building lifecycle retry exhaustion must not amplify into one repair row per building."
 }
 
 $collectorContent = Get-Content -LiteralPath $collectorSource -Raw
