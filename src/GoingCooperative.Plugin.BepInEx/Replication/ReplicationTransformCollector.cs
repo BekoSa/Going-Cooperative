@@ -271,9 +271,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationTransformViewCacheFollowupRefreshRealtime;
         private static long replicationTransformViewCacheScans;
         private static long replicationTransformViewCacheInvalidations;
+        private const float ReplicationTransformViewCacheFallbackRefreshSeconds = 30f;
         // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
-        // perf logs. CreatureManager membership hooks invalidate this cache on actual
-        // AddCreature/RemoveCreature events; the configurable timer is only a safety net.
+        // perf logs. Prefer AnimatedAgentView lifecycle invalidation; if this game build
+        // exposes no patchable lifecycle method, keep correctness with a rare 30 s scan
+        // rather than the old mandatory scan every 3 seconds.
         private static readonly Dictionary<int, ReplicationSnapshotIdentityCacheEntry> ReplicationSnapshotIdentityByViewId =
             new Dictionary<int, ReplicationSnapshotIdentityCacheEntry>();
 
@@ -288,7 +290,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var now = Time.realtimeSinceStartup;
             var safetyRefreshSeconds = replicationTransformViewCacheInvalidationReady
                 ? replicationConfigSnapshotViewCacheSafetyRefreshSeconds
-                : 3f;
+                : ReplicationTransformViewCacheFallbackRefreshSeconds;
             var safetyRefreshDue = safetyRefreshSeconds > 0f
                 && now - replicationSemanticAnimatedAgentViewCacheRealtime >= safetyRefreshSeconds;
             var lifecycleFollowupDue = replicationTransformViewCacheFollowupRefreshRealtime > 0f
@@ -328,65 +330,104 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void TryInstallReplicationTransformViewCacheInvalidation(Harmony harmonyInstance)
         {
-            var creatureManagerType = AccessTools.TypeByName("NSMedieval.Manager.CreatureManager");
-            if (creatureManagerType == null)
+            var animatedAgentViewType = AccessTools.TypeByName("NSMedieval.View.AnimatedAgentView");
+            if (animatedAgentViewType == null)
             {
-                AppendPluginLog("Going Cooperative transform-view cache invalidation hooks unavailable: CreatureManager missing");
+                AppendPluginLog("Going Cooperative transform-view cache invalidation hooks unavailable: AnimatedAgentView missing");
                 return;
             }
 
             var postfix = new HarmonyMethod(
                 typeof(GoingCooperativePlugin),
-                nameof(ReplicationCreatureMembershipChangedPostfix));
+                nameof(ReplicationAnimatedAgentViewLifecyclePostfix));
+            var patchedMethods = new HashSet<MethodBase>();
+            var creationPatched = false;
+            var removalPatched = false;
             var patched = 0;
-            var addCreaturePatched = false;
-            var removeCreaturePatched = false;
-            var methods = creatureManagerType.GetMethods(
-                BindingFlags.Instance
-                | BindingFlags.Static
-                | BindingFlags.Public
-                | BindingFlags.NonPublic);
-            for (var i = 0; i < methods.Length; i++)
+            var lifecycleNames = new[]
             {
-                var method = methods[i];
-                if (!string.Equals(method.Name, "AddCreature", StringComparison.Ordinal)
-                    && !string.Equals(method.Name, "RemoveCreature", StringComparison.Ordinal))
+                "Awake",
+                "OnEnable",
+                "Start",
+                "OnDisable",
+                "OnDestroy"
+            };
+
+            for (var currentType = animatedAgentViewType;
+                 currentType != null && currentType != typeof(MonoBehaviour);
+                 currentType = currentType.BaseType)
+            {
+                MethodInfo[] methods;
+                try
+                {
+                    methods = currentType.GetMethods(
+                        BindingFlags.Instance
+                        | BindingFlags.Public
+                        | BindingFlags.NonPublic
+                        | BindingFlags.DeclaredOnly);
+                }
+                catch
                 {
                     continue;
                 }
 
-                try
+                for (var i = 0; i < methods.Length; i++)
                 {
-                    harmonyInstance.Patch(method, postfix: postfix);
-                    patched++;
-                    addCreaturePatched |= string.Equals(method.Name, "AddCreature", StringComparison.Ordinal);
-                    removeCreaturePatched |= string.Equals(method.Name, "RemoveCreature", StringComparison.Ordinal);
-                }
-                catch (Exception ex)
-                {
-                    AppendPluginLog("Going Cooperative transform-view cache invalidation patch failed method="
-                        + method.Name
-                        + " error="
-                        + ex.GetType().Name
-                        + ":"
-                        + ex.Message);
+                    var method = methods[i];
+                    if (method.IsAbstract
+                        || method.IsGenericMethod
+                        || method.GetParameters().Length != 0
+                        || Array.IndexOf(lifecycleNames, method.Name) < 0
+                        || !patchedMethods.Add(method))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        harmonyInstance.Patch(method, postfix: postfix);
+                        patched++;
+                        creationPatched |= string.Equals(method.Name, "Awake", StringComparison.Ordinal)
+                            || string.Equals(method.Name, "OnEnable", StringComparison.Ordinal)
+                            || string.Equals(method.Name, "Start", StringComparison.Ordinal);
+                        removalPatched |= string.Equals(method.Name, "OnDisable", StringComparison.Ordinal)
+                            || string.Equals(method.Name, "OnDestroy", StringComparison.Ordinal);
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendPluginLog("Going Cooperative transform-view cache invalidation patch failed method="
+                            + (method.DeclaringType?.FullName ?? "<unknown>")
+                            + "."
+                            + method.Name
+                            + " error="
+                            + ex.GetType().Name
+                            + ":"
+                            + ex.Message);
+                    }
                 }
             }
 
-            replicationTransformViewCacheInvalidationReady =
-                addCreaturePatched && removeCreaturePatched;
+            // A creation hook is the correctness-critical half: new views become visible
+            // immediately. Removal-only misses are harmless because Unity destroyed-object
+            // null semantics already keep dead cached views from being applied.
+            replicationTransformViewCacheInvalidationReady = creationPatched;
             replicationSemanticAnimatedAgentViewCacheDirty = true;
             AppendPluginLog("Going Cooperative transform-view cache invalidation hooks="
                 + patched.ToString(CultureInfo.InvariantCulture)
-                + " add="
-                + addCreaturePatched
+                + " create="
+                + creationPatched
                 + " remove="
-                + removeCreaturePatched
+                + removalPatched
                 + " eventDriven="
-                + replicationTransformViewCacheInvalidationReady);
+                + replicationTransformViewCacheInvalidationReady
+                + " fallbackSeconds="
+                + (replicationTransformViewCacheInvalidationReady
+                    ? replicationConfigSnapshotViewCacheSafetyRefreshSeconds
+                    : ReplicationTransformViewCacheFallbackRefreshSeconds)
+                    .ToString("0.###", CultureInfo.InvariantCulture));
         }
 
-        private static void ReplicationCreatureMembershipChangedPostfix()
+        private static void ReplicationAnimatedAgentViewLifecyclePostfix()
         {
             replicationSemanticAnimatedAgentViewCacheDirty = true;
             replicationTransformViewCacheFollowupRefreshRealtime = Mathf.Max(
