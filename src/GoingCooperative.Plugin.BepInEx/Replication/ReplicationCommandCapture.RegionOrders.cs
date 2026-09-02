@@ -284,7 +284,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 // Suppress passive resource callbacks generated as a side-effect of
                 // this same vanilla area action. Without this, Cancel emitted an
                 // additional full-region Harvesting command in the same frame.
-                replicationRegionSelectionActionFrame = Time.frameCount;
+                if (replicationRegionSelectionActionFrame != Time.frameCount)
+                {
+                    replicationRegionSelectionActionDepth = 0;
+                    replicationRegionSelectionActionFrame = Time.frameCount;
+                }
+
                 replicationRegionSelectionActionDepth++;
             }
             if (!TryResolveReplicationSelectionRegion(
