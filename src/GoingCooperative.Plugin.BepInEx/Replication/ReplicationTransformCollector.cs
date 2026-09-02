@@ -267,6 +267,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
         private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
         private static bool replicationTransformViewCacheInvalidationReady;
+        private static long replicationTransformViewCacheScans;
+        private static long replicationTransformViewCacheInvalidations;
         // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
         // perf logs. CreatureManager membership hooks invalidate this cache on actual
         // AddCreature/RemoveCreature events; the configurable timer is only a safety net.
@@ -304,6 +306,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             replicationSemanticAnimatedAgentViewCache = UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
+            replicationTransformViewCacheScans++;
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
             replicationSemanticAnimatedAgentViewCacheDirty = false;
             if (ReplicationSnapshotIdentityByViewId.Count > 1024)
@@ -376,6 +379,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationCreatureMembershipChangedPostfix()
         {
             replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheInvalidations++;
         }
 
         private static bool TryClassifyReplicationView(object view, out string kind)
@@ -820,6 +824,8 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
             replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheScans = 0L;
+            replicationTransformViewCacheInvalidations = 0L;
             ReplicationSnapshotIdentityByViewId.Clear();
         }
 
