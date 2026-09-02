@@ -1076,8 +1076,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            if (IsReplicationBuildingDurableBackpressured(out var durablePending))
+            IsReplicationBuildingDurableBackpressured(out var durablePending);
+            if (durablePending > 0)
             {
+                // ACK-paced host replay: do not admit a second placement result
+                // while any placement/result transaction is still waiting for the
+                // peer. This prevents several 4-object chunks from reaching Unity
+                // in one receive burst after a host drag.
                 return;
             }
 
