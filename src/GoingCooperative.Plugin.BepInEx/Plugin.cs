@@ -46,6 +46,7 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 TryInstallReplicationCommandCapture(harmony);
                 TryInstallReplicationHostRuntimePump(harmony);
+                TryInstallReplicationTransformViewCacheInvalidation(harmony);
                 TryInstallReplicationClientSimulationSuppression(harmony);
                 TryInstallReplicationHostMovementAuthority(harmony);
                 TryInstallReplicationGoapActionProbe(harmony);
