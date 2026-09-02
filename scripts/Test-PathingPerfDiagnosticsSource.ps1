@@ -107,6 +107,11 @@ Require-Text $smoothingSource 'replicationConfigPresentationApplyMaxEntitiesPerF
 Require-Text $smoothingSource 'ReplicationPresentationTrackOrder' "round-robin presentation ordering"
 Require-Text $presenceSource 'ReplicationSelectionPollIntervalSeconds = 0\.1f' "bounded local selection discovery rate"
 Require-Text $presenceSource 'now < replicationNextSelectionPollRealtime' "selection discovery early-out"
+Require-Text $presenceSource 'ReplicationSelectionResolveMaxInspected = 24' "hard cap on local selection identity probes"
+Require-Text $presenceSource 'ReplicationSelectionResolveBudgetMs = 0\.75f' "time budget on local selection identity probes"
+Require-Text $presenceSource 'replicationLastLocalSelectionInspected\s*>=\s*ReplicationSelectionResolveMaxInspected' "selection inspected-count early stop"
+Require-Text $presenceSource 'Stopwatch\.GetTimestamp\(\) - started >= budgetTicks' "selection identity time-budget stop"
+Require-Text $presenceSource 'IsReplicationPresenceAgentSelectionCandidate\(selected\)' "deep identity fallback restricted to agent selections"
 Require-Text $presenceSource 'ReplicationRemotePresenceScratch' "reused remote presence list"
 Require-Text $presenceSource 'ReplicationRemoteSelectionWantedScratch' "reused remote selection ID set"
 Require-Text $presenceSource 'ReplicationRemoteSelectionResolvedScratch' "reused remote selection transform map"
@@ -150,6 +155,11 @@ if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod
 $deltaContent = Get-Content -LiteralPath $deltaSource -Raw
 if ($deltaContent -match 'TrySendReplicationBuildingRepairV2\(delta, "lifecycle-retry-exhausted"\)') {
     throw "Building lifecycle retry exhaustion must not amplify into one repair row per building."
+}
+
+$presenceContent = Get-Content -LiteralPath $presenceSource -Raw
+if ($presenceContent -match 'GetComponentInChildren\(type\)') {
+    throw "Local selection presence must not descend through arbitrary selected-object hierarchies."
 }
 
 $collectorContent = Get-Content -LiteralPath $collectorSource -Raw
