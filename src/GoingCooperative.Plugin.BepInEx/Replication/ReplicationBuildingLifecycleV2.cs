@@ -25,6 +25,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static readonly Dictionary<long, ReplicationTrackedBuildingV2> ReplicationTrackedHostBuildingsV2 =
             new Dictionary<long, ReplicationTrackedBuildingV2>();
+        private static readonly Dictionary<object, ReplicationTrackedBuildingV2> ReplicationTrackedHostBuildingsByInstanceV2 =
+            new Dictionary<object, ReplicationTrackedBuildingV2>(ReferenceObjectComparer.Instance);
+        private static Type? replicationDestroyBuildingManagerTypeV2;
+        private static MethodInfo? replicationDestroyBuildingMethodV2;
         private static readonly Dictionary<long, bool> ReplicationClientBuildingProgressingV2 =
             new Dictionary<long, bool>();
         private static readonly Queue<ReplicationPendingBuildingTerminalV2> ReplicationPendingBuildingTerminalsV2 =
@@ -509,6 +513,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 existing.View.Target = placement.View;
                 existing.BuildingInstance.Target = placement.BuildingInstance;
                 existing.CanonicalRecord = placement.Record;
+                if (placement.BuildingInstance != null)
+                {
+                    ReplicationTrackedHostBuildingsByInstanceV2[placement.BuildingInstance] = existing;
+                }
                 // Placement itself is already represented by the authoritative
                 // BuildBatch. Avoid a reflection-heavy absolute-state read for every
                 // tile in a large drag; the first real lifecycle mutation will capture
@@ -526,6 +534,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 placement.BuildingInstance,
                 placement.Record);
             ReplicationTrackedHostBuildingsV2[placement.UniqueId] = tracked;
+            if (placement.BuildingInstance != null)
+            {
+                ReplicationTrackedHostBuildingsByInstanceV2[placement.BuildingInstance] = tracked;
+            }
         }
 
         private static bool TryEnsureReplicationHostBuildingTrackerV2(
@@ -534,6 +546,15 @@ namespace GoingCooperative.Plugin.BepInEx
             out string detail)
         {
             tracked = null;
+            if (candidate != null
+                && ReplicationTrackedHostBuildingsByInstanceV2.TryGetValue(
+                    candidate,
+                    out tracked))
+            {
+                detail = "building-lifecycle-v2-instance-cache";
+                return true;
+            }
+
             if (!TryResolveReplicationBuildingInstanceV2(candidate, out var buildingInstance, out detail)
                 || buildingInstance == null
                 || !TryReadReplicationWorldObjectLongMember(
@@ -549,6 +570,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (ReplicationTrackedHostBuildingsV2.TryGetValue(hostId, out tracked))
             {
+                ReplicationTrackedHostBuildingsByInstanceV2[buildingInstance] = tracked;
                 return true;
             }
 
@@ -589,6 +611,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             ReplicationTrackedHostBuildingsV2[hostId] = tracked;
+            ReplicationTrackedHostBuildingsByInstanceV2[buildingInstance] = tracked;
             RegisterReplicationHostIdentity(hostId, buildingInstance, "building-lifecycle-v2-host-native-event");
             detail = "ok hostId=" + hostId.ToString(CultureInfo.InvariantCulture);
             return true;
@@ -1564,37 +1587,59 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            var methods = manager.GetType().GetMethods(
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-            for (var i = 0; i < methods.Length; i++)
+            var managerType = manager.GetType();
+            var destroyMethod = replicationDestroyBuildingMethodV2;
+            if (destroyMethod == null
+                || replicationDestroyBuildingManagerTypeV2 != managerType
+                || !destroyMethod.GetParameters()[0].ParameterType.IsInstanceOfType(buildingInstance))
             {
-                var parameters = methods[i].GetParameters();
-                if (!string.Equals(methods[i].Name, "DestroyBuilding", StringComparison.Ordinal)
-                    || parameters.Length != 3
-                    || !parameters[0].ParameterType.IsInstanceOfType(buildingInstance)
-                    || parameters[1].ParameterType != typeof(bool)
-                    || parameters[2].ParameterType != typeof(bool))
+                destroyMethod = null;
+                var methods = managerType.GetMethods(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                for (var i = 0; i < methods.Length; i++)
                 {
-                    continue;
+                    var parameters = methods[i].GetParameters();
+                    if (!string.Equals(methods[i].Name, "DestroyBuilding", StringComparison.Ordinal)
+                        || parameters.Length != 3
+                        || !parameters[0].ParameterType.IsInstanceOfType(buildingInstance)
+                        || parameters[1].ParameterType != typeof(bool)
+                        || parameters[2].ParameterType != typeof(bool))
+                    {
+                        continue;
+                    }
+
+                    destroyMethod = methods[i];
+                    break;
                 }
 
-                try
-                {
-                    // The host emits one terminal delta for every stability-cascade
-                    // dependent. Never let the client author a second local cascade.
-                    methods[i].Invoke(manager, new[] { buildingInstance, (object)false, (object)true });
-                    detail = "BuildingsManagerMain.DestroyBuilding(skipStabilityCheck=true)";
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    detail = FormatReflectionExceptionDetail(ex);
-                    return false;
-                }
+                replicationDestroyBuildingManagerTypeV2 = managerType;
+                replicationDestroyBuildingMethodV2 = destroyMethod;
             }
 
-            detail = "DestroyBuilding-method-missing";
-            return false;
+            if (destroyMethod == null)
+            {
+                detail = "DestroyBuilding-method-missing";
+                return false;
+            }
+
+            try
+            {
+                // The host emits one terminal delta for every stability-cascade
+                // dependent. Never let the client author a second local cascade.
+                // Cache MethodInfo: a mass removal can apply hundreds of terminal
+                // rows, and re-enumerating every manager method per row is pure
+                // main-thread allocation/reflection overhead.
+                destroyMethod.Invoke(
+                    manager,
+                    new[] { buildingInstance, (object)false, (object)true });
+                detail = "BuildingsManagerMain.DestroyBuilding(skipStabilityCheck=true,cachedMethod=true)";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                detail = FormatReflectionExceptionDetail(ex);
+                return false;
+            }
         }
 
         private static bool TryApplyReplicationBuildingProgressV2(
@@ -2242,6 +2287,16 @@ namespace GoingCooperative.Plugin.BepInEx
 
             // Retain terminal topology until the exact terminal row/repair is known
             // applied. Afterwards it is dead state and would otherwise grow forever.
+            if (ReplicationTrackedHostBuildingsV2.TryGetValue(
+                    acknowledgedDelta.UniqueId,
+                    out var terminalTracked))
+            {
+                var terminalInstance = terminalTracked.BuildingInstance.Target;
+                if (terminalInstance != null)
+                {
+                    ReplicationTrackedHostBuildingsByInstanceV2.Remove(terminalInstance);
+                }
+            }
             ReplicationTrackedHostBuildingsV2.Remove(acknowledgedDelta.UniqueId);
             RetireReplicationBuildingConstructionMaterialsV2(acknowledgedDelta.UniqueId);
             ReplicationBuildingRepairLastSentRealtimeV2.Remove(acknowledgedDelta.UniqueId);
@@ -2731,7 +2786,10 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             ResetReplicationBuildingConstructionMaterialsV2();
             ReplicationTrackedHostBuildingsV2.Clear();
+            ReplicationTrackedHostBuildingsByInstanceV2.Clear();
             ReplicationPendingBuildingTerminalsV2.Clear();
+            replicationDestroyBuildingManagerTypeV2 = null;
+            replicationDestroyBuildingMethodV2 = null;
             ReplicationClientBuildingProgressingV2.Clear();
             ReplicationClientBuildingTerminalRevisionV2.Clear();
             ReplicationClientBuildingPresentationByHostIdV2.Clear();
