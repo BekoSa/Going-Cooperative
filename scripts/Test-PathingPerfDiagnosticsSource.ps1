@@ -50,7 +50,7 @@ Require-Text $collectorSource 'TryInstallReplicationTransformViewCacheInvalidati
 Require-Text $collectorSource '"OnEnable"' "AnimatedAgentView creation lifecycle invalidation"
 Require-Text $collectorSource '"OnDestroy"' "AnimatedAgentView removal lifecycle invalidation"
 Require-Text $collectorSource 'ReplicationAnimatedAgentViewLifecyclePostfix' "AnimatedAgentView lifecycle invalidation callback"
-Require-Text $collectorSource 'ReplicationTransformViewCacheFallbackRefreshSeconds = 30f' "rare fallback transform-view refresh"
+Require-Text $collectorSource 'ReplicationTransformViewCacheFallbackRefreshSeconds = 10f' "rare fallback transform-view refresh"
 Require-Text $collectorSource 'replicationSemanticAnimatedAgentViewCacheDirty' "dirty transform-view cache"
 Require-Text $runtimeSource 'BeginReplicationMainThreadFrameBudget\(\);' "shared replication main-thread frame budget"
 Require-Text $runtimeSource 'ShouldYieldReplicationMainThreadWork\(\)' "main-thread budget yield"
