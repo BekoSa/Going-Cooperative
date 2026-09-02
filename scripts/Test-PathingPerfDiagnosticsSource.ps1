@@ -33,7 +33,7 @@ Require-Text $diagnosticsSource 'Going Cooperative pathing perf window side=' "s
 Require-Text $diagnosticsSource 'if \(!replicationConfigPathingPerfDiagnostics\)' "disabled fast path"
 Require-Text $runtimeSource 'UpdateReplicationPathingPerfDiagnostics\(\);' "frame-window updater"
 Require-Text $runtimeSource 'RecordReplicationPathingPump\(perfStarted, messageCount\);' "transport pump timing"
-Require-Text $runtimeSource 'RecordReplicationPathingSnapshotCollection\(collectStarted, snapshot.Entities.Count\);' "snapshot collection timing"
+Require-Text $runtimeSource 'RecordReplicationPathingSnapshotCollection\(collectStarted, collectedSnapshot.Entities.Count\);' "snapshot collection timing"
 Require-Text $runtimeSource 'RecordReplicationPathingSnapshotEncodeSend\(encodeSendStarted, wireCharacters\);' "snapshot encode/send timing"
 Require-Text $collectorSource 'RecordReplicationPathingIdentity\(identityStarted, hasStableEntityId\);' "identity timing"
 Require-Text $collectorSource 'RecordReplicationPathingSemantic\(' "semantic metadata timing"
