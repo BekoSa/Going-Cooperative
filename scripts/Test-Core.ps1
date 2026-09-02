@@ -140,7 +140,7 @@ $requiredPerfSettings = @{
     "runtimemainthreadbudgetmsperframe" = "4"
     "presentationapplybudgetmsperframe" = "1.25"
     "presentationapplymaxentitiesperframe" = "48"
-    "snapshotviewcachesafetyrefreshseconds" = "60"
+    "snapshotviewcachesafetyrefreshseconds" = "0"
 }
 foreach ($key in $requiredPerfSettings.Keys) {
     if ($settings[$key] -ne $requiredPerfSettings[$key]) {
