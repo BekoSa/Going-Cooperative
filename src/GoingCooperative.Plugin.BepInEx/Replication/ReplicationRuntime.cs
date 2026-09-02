@@ -51,6 +51,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationNextRegionOrderMarkerSnapshotRealtime;
         private static float replicationNextGameTimeSnapshotRealtime;
         private static int replicationLastRuntimeUpdateFrame = -1;
+        private static int replicationMainThreadBudgetFrame = -1;
+        private static int replicationMainThreadBudgetLastStopFrame = -1;
+        private static long replicationMainThreadBudgetStartedTimestamp;
+        private static long replicationMainThreadBudgetStops;
         private static long replicationSnapshotSequence;
         private static long replicationIntentSequence;
         private static long replicationResourcePileStateSnapshotSequence;
@@ -204,6 +208,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            BeginReplicationMainThreadFrameBudget();
+
             // Commit synchronous shelf/stockpile UI edits before inbound state can
             // be applied in this frame. This preserves the optimistic overlay until
             // the host returns a complete authoritative proof row.
@@ -222,6 +228,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 if (replicationRemoteHelloReceived)
                 {
                     SendHostTransformSnapshotIfDue();
+                    if (ShouldYieldReplicationMainThreadWork())
+                    {
+                        return;
+                    }
+
                     // Production V2 replaces only workstation ticket containers.
                     // Pawn haul/food/medicine inventories still belong to the shared
                     // resource-container sender; filtering happens inside collection.
@@ -231,6 +242,11 @@ namespace GoingCooperative.Plugin.BepInEx
                     SendHostReplicationAgentCarryStateSnapshotIfDue();
                     SendHostReplicationAgentActionHeartbeatIfDue();
                     SendHostReplicationAgentCharacterStateSnapshotIfDue();
+                    if (ShouldYieldReplicationMainThreadWork())
+                    {
+                        return;
+                    }
+
                     SendHostReplicationPlantLifecycleIfDue();
                     UpdateReplicationBuildingLifecycleV2();
                     if (!replicationConfigProductionStateV2)
@@ -239,6 +255,11 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
                     SendHostReplicationBuildingStateSnapshotIfDue();
                     SendHostReplicationGameTimeSnapshotIfDue();
+                    if (ShouldYieldReplicationMainThreadWork())
+                    {
+                        return;
+                    }
+
                     UpdateReplicationAnimalState();
                     UpdateReplicationCropfieldPolicyV1Host();
                     UpdateReplicationPrioritisedObjectWorkV1();
@@ -252,6 +273,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 SendPendingReplicationCommandIntentsIfDue();
                 ProcessReplicationResourcePileLocationIndex();
                 ProcessPendingReplicationWorldObjectDeltaApplies();
+                if (ShouldYieldReplicationMainThreadWork())
+                {
+                    return;
+                }
+
                 ProcessPendingReplicationResourceContainerApplies();
                 ProcessPendingReplicationResourcePileStateSnapshotApplies();
                 TickReplicationHostDrivenGoapPlaybackAgents();
@@ -262,6 +288,11 @@ namespace GoingCooperative.Plugin.BepInEx
 
             UpdateReplicationProductionStateV2();
             UpdateReplicationMedicalV1();
+            if (ShouldYieldReplicationMainThreadWork())
+            {
+                return;
+            }
+
             ProcessReplicationSemanticAgentMotionPresentation();
             ProcessReplicationSemanticAgentWorkPresentation();
             ProcessReplicationCombatPresentationExpiry();
@@ -274,6 +305,44 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             LogReplicationStatusIfDue();
+        }
+
+        private static void BeginReplicationMainThreadFrameBudget()
+        {
+            var frame = Time.frameCount;
+            if (replicationMainThreadBudgetFrame == frame)
+            {
+                return;
+            }
+
+            replicationMainThreadBudgetFrame = frame;
+            replicationMainThreadBudgetStartedTimestamp = Stopwatch.GetTimestamp();
+        }
+
+        private static bool ShouldYieldReplicationMainThreadWork()
+        {
+            var budgetMs = replicationConfigRuntimeMainThreadBudgetMsPerFrame;
+            if (budgetMs <= 0f
+                || replicationMainThreadBudgetFrame != Time.frameCount
+                || replicationMainThreadBudgetStartedTimestamp == 0L)
+            {
+                return false;
+            }
+
+            var elapsedTicks = Stopwatch.GetTimestamp() - replicationMainThreadBudgetStartedTimestamp;
+            var budgetTicks = (long)Math.Ceiling(budgetMs * Stopwatch.Frequency / 1000.0);
+            if (elapsedTicks < budgetTicks)
+            {
+                return false;
+            }
+
+            if (replicationMainThreadBudgetLastStopFrame != Time.frameCount)
+            {
+                replicationMainThreadBudgetLastStopFrame = Time.frameCount;
+                replicationMainThreadBudgetStops++;
+            }
+
+            return true;
         }
 
         private static void StopReplicationRuntime(ReplicationTraderPartyResetContext traderPartyResetContext)
@@ -319,6 +388,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextRegionOrderMarkerSnapshotRealtime = 0f;
             replicationNextGameTimeSnapshotRealtime = 0f;
             replicationLastRuntimeUpdateFrame = -1;
+            replicationMainThreadBudgetFrame = -1;
+            replicationMainThreadBudgetLastStopFrame = -1;
+            replicationMainThreadBudgetStartedTimestamp = 0L;
+            replicationMainThreadBudgetStops = 0L;
             replicationHellosReceived = 0;
             replicationSnapshotsSent = 0;
             replicationSnapshotsReceived = 0;
