@@ -269,6 +269,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
         private static bool replicationTransformViewCacheInvalidationReady;
         private static float replicationTransformViewCacheFollowupRefreshRealtime;
+        private static Type? replicationTransformAnimatedAgentViewType;
         private static long replicationTransformViewCacheScans;
         private static long replicationTransformViewCacheInvalidations;
         private const float ReplicationTransformViewCacheFallbackRefreshSeconds = 10f;
@@ -341,6 +342,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private void TryInstallReplicationTransformViewCacheInvalidation(Harmony harmonyInstance)
         {
             var animatedAgentViewType = AccessTools.TypeByName("NSMedieval.View.AnimatedAgentView");
+            replicationTransformAnimatedAgentViewType = animatedAgentViewType;
             if (animatedAgentViewType == null)
             {
                 AppendPluginLog("Going Cooperative transform-view cache invalidation hooks unavailable: AnimatedAgentView missing");
@@ -441,8 +443,21 @@ namespace GoingCooperative.Plugin.BepInEx
                     .ToString("0.###", CultureInfo.InvariantCulture));
         }
 
-        private static void ReplicationAnimatedAgentViewLifecyclePostfix()
+        private static void ReplicationAnimatedAgentViewLifecyclePostfix(object __instance)
         {
+            // Some AnimatedAgentView lifecycle methods are inherited from a shared
+            // BaseView component. Harmony patches the declaring base method, so the
+            // postfix also runs for buildings and other views unless we filter the
+            // actual runtime instance. A 120-tile floor previously produced exactly
+            // 120 false actor-cache invalidations and reintroduced global scene scans.
+            var animatedAgentViewType = replicationTransformAnimatedAgentViewType;
+            if (__instance == null
+                || animatedAgentViewType == null
+                || !animatedAgentViewType.IsInstanceOfType(__instance))
+            {
+                return;
+            }
+
             replicationSemanticAnimatedAgentViewCacheDirty = true;
             replicationTransformViewCacheFollowupRefreshRealtime = Mathf.Max(
                 replicationTransformViewCacheFollowupRefreshRealtime,
