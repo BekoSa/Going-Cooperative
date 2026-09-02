@@ -2763,6 +2763,10 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             return "buildingV2="
                 + replicationConfigBuildingReplicationV2
+                + " buildingEpoch="
+                + GetReplicationBuildBatchEpoch().ToString(CultureInfo.InvariantCulture)
+                + " hostBuildReplayQueue="
+                + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture)
                 + " tracked="
                 + ReplicationTrackedHostBuildingsV2.Count.ToString(CultureInfo.InvariantCulture)
                 + " lifecycleEvents="
