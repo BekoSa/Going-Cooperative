@@ -223,7 +223,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationConfigRuntimeMainThreadBudgetMsPerFrame = 4f;
         private static float replicationConfigPresentationApplyBudgetMsPerFrame = 1.25f;
         private static int replicationConfigPresentationApplyMaxEntitiesPerFrame = 48;
-        private static float replicationConfigSnapshotViewCacheSafetyRefreshSeconds = 60f;
+        private static float replicationConfigSnapshotViewCacheSafetyRefreshSeconds = 0f;
 
         private static void TryLoadReplicationConfig(GoingCooperativePlugin current)
         {
