@@ -326,6 +326,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 typeof(GoingCooperativePlugin),
                 nameof(ReplicationCreatureMembershipChangedPostfix));
             var patched = 0;
+            var addCreaturePatched = false;
+            var removeCreaturePatched = false;
             var methods = creatureManagerType.GetMethods(
                 BindingFlags.Instance
                 | BindingFlags.Static
@@ -344,6 +346,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     harmonyInstance.Patch(method, postfix: postfix);
                     patched++;
+                    addCreaturePatched |= string.Equals(method.Name, "AddCreature", StringComparison.Ordinal);
+                    removeCreaturePatched |= string.Equals(method.Name, "RemoveCreature", StringComparison.Ordinal);
                 }
                 catch (Exception ex)
                 {
@@ -356,10 +360,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            replicationTransformViewCacheInvalidationReady = patched > 0;
+            replicationTransformViewCacheInvalidationReady =
+                addCreaturePatched && removeCreaturePatched;
             replicationSemanticAnimatedAgentViewCacheDirty = true;
             AppendPluginLog("Going Cooperative transform-view cache invalidation hooks="
                 + patched.ToString(CultureInfo.InvariantCulture)
+                + " add="
+                + addCreaturePatched
+                + " remove="
+                + removeCreaturePatched
                 + " eventDriven="
                 + replicationTransformViewCacheInvalidationReady);
         }
