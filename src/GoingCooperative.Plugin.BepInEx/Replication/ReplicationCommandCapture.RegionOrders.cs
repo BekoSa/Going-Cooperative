@@ -32,6 +32,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationLastAreaOrderSubType = string.Empty;
         private static float replicationLastAreaOrderRealtime;
         private static float replicationNextRegionSelectionLogRealtime;
+        private static int replicationRegionSelectionActionFrame = -1;
+        private static int replicationRegionSelectionActionDepth;
         private static string replicationZoneModifyOperation = string.Empty;
         private static string replicationZoneModifyId = string.Empty;
         private static float replicationZoneModifyRealtime;
@@ -207,6 +209,43 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationRegionSelectionEventPostfix(MethodBase __originalMethod)
         {
+            var methodName = __originalMethod?.Name ?? string.Empty;
+            var hostSemanticRemoval = replicationConfigHostMode
+                && IsReplicationMassBuildingRegionOrder(
+                    ResolveReplicationSelectionOrderType(null, methodName))
+                && replicationLastRegionSelectionValid;
+
+            // This postfix runs after the native SelectionManager operation. For a
+            // host-local Cancel/Deconstruct, publish the one authoritative region
+            // operation now (not from the prefix) so the client can use the game's
+            // own batched area path instead of waiting for hundreds of per-cell
+            // BuildingLifecycleV2 terminal rows.
+            if (hostSemanticRemoval
+                && replicationConfigEnabled
+                && replicationRuntimeStarted
+                && replicationRemoteHelloReceived)
+            {
+                var orderType = ResolveReplicationSelectionOrderType(null, methodName);
+                instance?.SendReplicationRegionOrderState(
+                    orderType,
+                    replicationLastRegionStartX,
+                    replicationLastRegionStartY,
+                    replicationLastRegionStartZ,
+                    replicationLastRegionEndX,
+                    replicationLastRegionEndY,
+                    replicationLastRegionEndZ,
+                    ResolveReplicationRegionAllowType(null, orderType),
+                    "None",
+                    "None",
+                    "host-local source=selection:" + methodName);
+            }
+
+            if (replicationRegionSelectionActionDepth > 0
+                && replicationRegionSelectionActionFrame == Time.frameCount)
+            {
+                replicationRegionSelectionActionDepth--;
+            }
+
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return;
@@ -215,7 +254,7 @@ namespace GoingCooperative.Plugin.BepInEx
             instance?.LogReplicationInfo("Going Cooperative replication region selection event mode="
                 + replicationConfigRegionCommandMode
                 + " method="
-                + __originalMethod.Name
+                + methodName
                 + " orderType="
                 + (string.IsNullOrEmpty(replicationLastRegionOrderType) ? "<unknown>" : replicationLastRegionOrderType)
                 + FormatReplicationLastRegionSelection());
@@ -231,6 +270,14 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var methodName = __originalMethod?.Name ?? string.Empty;
             var orderType = ResolveReplicationSelectionOrderType(__instance, methodName);
+            if (IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                // Suppress passive resource callbacks generated as a side-effect of
+                // this same vanilla area action. Without this, Cancel emitted an
+                // additional full-region Harvesting command in the same frame.
+                replicationRegionSelectionActionFrame = Time.frameCount;
+                replicationRegionSelectionActionDepth++;
+            }
             if (!TryResolveReplicationSelectionRegion(
                     __instance,
                     out var startX,
@@ -333,6 +380,17 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var orderType = ResolveReplicationAreaOrderCommandType(methodName, areaType);
+            if (string.Equals(methodName, "ZoneSelectionFinished", StringComparison.Ordinal)
+                && (string.Equals(orderType, "None", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(areaType, "None", StringComparison.OrdinalIgnoreCase))
+                && (string.Equals(replicationLastRegionOrderType, "Cancel", StringComparison.Ordinal)
+                    || string.Equals(replicationLastRegionOrderType, "Deconstruct", StringComparison.Ordinal)))
+            {
+                // SelectionManager raises ZoneSelectionFinished after ordinary
+                // Cancel/Deconstruct drags too. It is not an area-zone mutation and
+                // must not become a second RegionOrder with orderType=None.
+                return true;
+            }
             if (string.Equals(orderType, "Crops", StringComparison.Ordinal)
                 && !string.Equals(methodName, "OnAssignCropsArea", StringComparison.Ordinal))
             {
@@ -1222,6 +1280,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (replicationRegionSelectionActionDepth > 0
+                && replicationRegionSelectionActionFrame == Time.frameCount)
+            {
+                return;
+            }
+
             if (IsReplicationZoneModifyActive())
             {
                 return;
@@ -1552,6 +1616,12 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool IsReplicationRegionOrderAuthoritativeSupported(string orderType)
         {
             return IsReplicationRegionOrderStateSupported(orderType);
+        }
+
+        private static bool IsReplicationMassBuildingRegionOrder(string orderType)
+        {
+            return string.Equals(orderType, "Cancel", StringComparison.Ordinal)
+                || string.Equals(orderType, "Deconstruct", StringComparison.Ordinal);
         }
 
         private static string ResolveReplicationSelectionOrderType(object instance, string methodName)
