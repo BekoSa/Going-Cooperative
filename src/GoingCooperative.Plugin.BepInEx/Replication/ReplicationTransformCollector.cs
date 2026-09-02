@@ -271,7 +271,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationTransformViewCacheFollowupRefreshRealtime;
         private static long replicationTransformViewCacheScans;
         private static long replicationTransformViewCacheInvalidations;
-        private const float ReplicationTransformViewCacheFallbackRefreshSeconds = 30f;
+        private const float ReplicationTransformViewCacheFallbackRefreshSeconds = 10f;
         // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
         // perf logs. Prefer AnimatedAgentView lifecycle invalidation; if this game build
         // exposes no patchable lifecycle method, keep correctness with a rare 30 s scan
@@ -344,13 +344,27 @@ namespace GoingCooperative.Plugin.BepInEx
             var creationPatched = false;
             var removalPatched = false;
             var patched = 0;
-            var lifecycleNames = new[]
+            var creationLifecycleNames = new[]
             {
                 "Awake",
                 "OnEnable",
                 "Start",
+                "Initialize",
+                "Init",
+                "Setup",
+                "SetupView",
+                "Spawn",
+                "OnSpawned"
+            };
+            var removalLifecycleNames = new[]
+            {
                 "OnDisable",
-                "OnDestroy"
+                "OnDestroy",
+                "Dispose",
+                "Deinitialize",
+                "Deinit",
+                "Despawn",
+                "OnDespawned"
             };
 
             for (var currentType = animatedAgentViewType;
@@ -374,10 +388,13 @@ namespace GoingCooperative.Plugin.BepInEx
                 for (var i = 0; i < methods.Length; i++)
                 {
                     var method = methods[i];
+                    var isCreationLifecycle =
+                        Array.IndexOf(creationLifecycleNames, method.Name) >= 0;
+                    var isRemovalLifecycle =
+                        Array.IndexOf(removalLifecycleNames, method.Name) >= 0;
                     if (method.IsAbstract
                         || method.IsGenericMethod
-                        || method.GetParameters().Length != 0
-                        || Array.IndexOf(lifecycleNames, method.Name) < 0
+                        || (!isCreationLifecycle && !isRemovalLifecycle)
                         || !patchedMethods.Add(method))
                     {
                         continue;
@@ -387,11 +404,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     {
                         harmonyInstance.Patch(method, postfix: postfix);
                         patched++;
-                        creationPatched |= string.Equals(method.Name, "Awake", StringComparison.Ordinal)
-                            || string.Equals(method.Name, "OnEnable", StringComparison.Ordinal)
-                            || string.Equals(method.Name, "Start", StringComparison.Ordinal);
-                        removalPatched |= string.Equals(method.Name, "OnDisable", StringComparison.Ordinal)
-                            || string.Equals(method.Name, "OnDestroy", StringComparison.Ordinal);
+                        creationPatched |= isCreationLifecycle;
+                        removalPatched |= isRemovalLifecycle;
                     }
                     catch (Exception ex)
                     {
