@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -825,6 +826,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 var previousStart = startField.GetValue(selectionManager);
                 var previousEnd = endField.GetValue(selectionManager);
+                var actionStarted = Stopwatch.GetTimestamp();
                 try
                 {
                     startField.SetValue(selectionManager, start);
@@ -859,7 +861,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     + endY.ToString(CultureInfo.InvariantCulture)
                     + ","
                     + endZ.ToString(CultureInfo.InvariantCulture)
-                    + ")";
+                    + ") actionMs="
+                    + ((Stopwatch.GetTimestamp() - actionStarted)
+                        * 1000.0 / Stopwatch.Frequency)
+                        .ToString("0.###", CultureInfo.InvariantCulture);
                 return true;
             }
             catch (Exception ex)
