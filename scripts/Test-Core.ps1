@@ -162,3 +162,6 @@ foreach ($disabledGate in @(
 }
 if ($settings.ContainsKey("mode") -or $settings.ContainsKey("host")) { throw "Release config must not hard-code a session role or host address." }
 Write-Host "PASS TestedConfigPolicy"
+
+& (Join-Path $PSScriptRoot "Test-PathingPerfDiagnosticsSource.ps1") -RepositoryRoot $repositoryRoot
+if ($LASTEXITCODE -ne 0) { throw "Replication perf source contract tests failed." }
