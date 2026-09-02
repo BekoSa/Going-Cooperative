@@ -116,7 +116,7 @@ function Assert-ReleaseConfig([string]$Path) {
         "runtimeMainThreadBudgetMsPerFrame" = "4"
         "presentationApplyBudgetMsPerFrame" = "1.25"
         "presentationApplyMaxEntitiesPerFrame" = "48"
-        "snapshotViewCacheSafetyRefreshSeconds" = "60"
+        "snapshotViewCacheSafetyRefreshSeconds" = "0"
     }
     foreach ($key in $requiredPerfSettings.Keys) {
         if (-not $values.ContainsKey($key)) {
