@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using GoingCooperative.Core;
 using GoingCooperative.Core.Replication;
@@ -20,6 +21,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationPingLifetimeSeconds = 4f;
         private const int ReplicationMaxVisiblePings = 24;
         private const int ReplicationMaxSelectedEntities = 16;
+        private const int ReplicationSelectionResolveMaxInspected = 24;
+        private const float ReplicationSelectionResolveBudgetMs = 0.75f;
 
         private static float replicationNextPresenceSendRealtime;
         private static float replicationNextSelectionPollRealtime;
@@ -37,6 +40,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationPresenceCursorSource = "none";
         private static string replicationLastLocalSelectionSignature = string.Empty;
         private static int replicationLastLocalSelectionUnresolved;
+        private static int replicationLastLocalSelectionInspected;
+        private static long replicationLocalSelectionResolveBudgetStops;
+        private static long replicationLocalSelectionResolveInspectionStops;
         private static readonly Dictionary<string, ReplicationRemotePresenceState>
             ReplicationRemotePresenceByPeerId =
                 new Dictionary<string, ReplicationRemotePresenceState>(
@@ -377,7 +383,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static List<string> CollectReplicationLocalSelectedEntityIds(out int unresolved)
         {
             unresolved = 0;
-            var result = new List<string>();
+            replicationLastLocalSelectionInspected = 0;
+            var result = new List<string>(ReplicationMaxSelectedEntities);
             if (!TryGetReplicationSelectableObjectManager(out var manager)
                 || !TryReadInstanceMemberValue(manager, "SelectedObjects", out var selectedObjects)
                 || selectedObjects is not IEnumerable enumerable)
@@ -385,9 +392,33 @@ namespace GoingCooperative.Plugin.BepInEx
                 return result;
             }
 
+            // Presence selection is cosmetic. Never let it turn a large vanilla
+            // box-selection into hundreds of reflection/component hierarchy probes.
+            // The previous loop stopped only after 16 *resolved* IDs, so selecting
+            // 100+ buildings/resources (which intentionally have no agent ID) walked
+            // every object at 10 Hz and could stall the Unity thread for seconds.
+            var budgetTicks = Math.Max(
+                1L,
+                (long)(Stopwatch.Frequency
+                    * (ReplicationSelectionResolveBudgetMs / 1000d)));
+            var started = Stopwatch.GetTimestamp();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var selected in enumerable)
             {
+                if (replicationLastLocalSelectionInspected
+                    >= ReplicationSelectionResolveMaxInspected)
+                {
+                    replicationLocalSelectionResolveInspectionStops++;
+                    break;
+                }
+
+                if (Stopwatch.GetTimestamp() - started >= budgetTicks)
+                {
+                    replicationLocalSelectionResolveBudgetStops++;
+                    break;
+                }
+
+                replicationLastLocalSelectionInspected++;
                 if (selected == null)
                 {
                     continue;
@@ -502,9 +533,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            // Last-resort fallback for versions where SelectedObjects exposes
-            // an owner/data object rather than the actual AnimatedAgentView.
-            return TryGetReplicationStableEntityId(selected, out entityId);
+            // Last-resort reflection identity discovery is useful for actual agent
+            // owner/data objects, but is catastrophically expensive when a vanilla
+            // area selection contains hundreds of building/resource Selectables.
+            // Non-agent selection still works locally; it simply is not mirrored as
+            // the optional remote-selection presence overlay.
+            return IsReplicationPresenceAgentSelectionCandidate(selected)
+                && TryGetReplicationStableEntityId(selected, out entityId);
+        }
+
+        private static bool IsReplicationPresenceAgentSelectionCandidate(
+            object selected)
+        {
+            var typeName = selected.GetType().FullName
+                ?? selected.GetType().Name
+                ?? string.Empty;
+            return typeName.IndexOf("Agent", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Creature", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Humanoid", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Worker", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Animal", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Settler", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool TryGetReplicationAnimatedAgentViewFromComponent(
@@ -520,9 +569,11 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
+                // Never descend through the selected object's hierarchy here.
+                // Buildings can own very large child trees and multi-selection used
+                // to repeat GetComponentInChildren for every selected cell.
                 view = component.GetComponent(type)
-                    ?? component.GetComponentInParent(type)
-                    ?? component.GetComponentInChildren(type);
+                    ?? component.GetComponentInParent(type);
                 return view != null;
             }
             catch
@@ -544,9 +595,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
+                // See component overload: remote selection presence is not allowed
+                // to recursively scan arbitrary building/resource hierarchies.
                 view = gameObject.GetComponent(type)
-                    ?? gameObject.GetComponentInParent(type)
-                    ?? gameObject.GetComponentInChildren(type);
+                    ?? gameObject.GetComponentInParent(type);
                 return view != null;
             }
             catch
@@ -1175,6 +1227,12 @@ namespace GoingCooperative.Plugin.BepInEx
                         .Length.ToString())
                 + " localSelectionUnresolved="
                 + replicationLastLocalSelectionUnresolved.ToString()
+                + " localSelectionInspected="
+                + replicationLastLocalSelectionInspected.ToString()
+                + " localSelectionBudgetStops="
+                + replicationLocalSelectionResolveBudgetStops.ToString()
+                + " localSelectionInspectionStops="
+                + replicationLocalSelectionResolveInspectionStops.ToString()
                 + " remoteSelected="
                 + remoteSelected.ToString()
                 + " remoteResolved="
@@ -1199,6 +1257,9 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationPresenceCursorSource = "none";
             replicationLastLocalSelectionSignature = string.Empty;
             replicationLastLocalSelectionUnresolved = 0;
+            replicationLastLocalSelectionInspected = 0;
+            replicationLocalSelectionResolveBudgetStops = 0L;
+            replicationLocalSelectionResolveInspectionStops = 0L;
             ReplicationRemotePresenceByPeerId.Clear();
             ReplicationPresencePings.Clear();
             ReplicationRemotePresenceScratch.Clear();
