@@ -265,9 +265,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static Type? replicationAnimatedAgentViewType;
         private static UnityEngine.Object[] replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
-        // FindObjectsOfType is a global Unity scene walk and shows up as ~28 ms spikes
-        // in live perf logs. Agent membership changes far less often than transforms.
-        private const float ReplicationSemanticAnimatedAgentViewCacheSeconds = 3f;
+        private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
+        private static bool replicationTransformViewCacheInvalidationReady;
+        // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
+        // perf logs. CreatureManager membership hooks invalidate this cache on actual
+        // AddCreature/RemoveCreature events; the configurable timer is only a safety net.
         private static readonly Dictionary<int, ReplicationSnapshotIdentityCacheEntry> ReplicationSnapshotIdentityByViewId =
             new Dictionary<int, ReplicationSnapshotIdentityCacheEntry>();
 
@@ -279,13 +281,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 return Array.Empty<UnityEngine.Object>();
             }
 
-            if (!replicationConfigSemanticAgentPresentation)
-            {
-                return UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
-            }
-
             var now = Time.realtimeSinceStartup;
-            if (now - replicationSemanticAnimatedAgentViewCacheRealtime < ReplicationSemanticAnimatedAgentViewCacheSeconds)
+            var safetyRefreshSeconds = replicationTransformViewCacheInvalidationReady
+                ? replicationConfigSnapshotViewCacheSafetyRefreshSeconds
+                : 3f;
+            var safetyRefreshDue = safetyRefreshSeconds > 0f
+                && now - replicationSemanticAnimatedAgentViewCacheRealtime >= safetyRefreshSeconds;
+            if (replicationSemanticAnimatedAgentViewCache.Length > 0
+                && !replicationSemanticAnimatedAgentViewCacheDirty
+                && !safetyRefreshDue)
             {
                 return replicationSemanticAnimatedAgentViewCache;
             }
@@ -301,11 +305,68 @@ namespace GoingCooperative.Plugin.BepInEx
 
             replicationSemanticAnimatedAgentViewCache = UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
+            replicationSemanticAnimatedAgentViewCacheDirty = false;
             if (ReplicationSnapshotIdentityByViewId.Count > 1024)
             {
                 ReplicationSnapshotIdentityByViewId.Clear();
             }
             return replicationSemanticAnimatedAgentViewCache;
+        }
+
+        private void TryInstallReplicationTransformViewCacheInvalidation(Harmony harmonyInstance)
+        {
+            var creatureManagerType = AccessTools.TypeByName("NSMedieval.Manager.CreatureManager");
+            if (creatureManagerType == null)
+            {
+                AppendPluginLog("Going Cooperative transform-view cache invalidation hooks unavailable: CreatureManager missing");
+                return;
+            }
+
+            var postfix = new HarmonyMethod(
+                typeof(GoingCooperativePlugin),
+                nameof(ReplicationCreatureMembershipChangedPostfix));
+            var patched = 0;
+            var methods = creatureManagerType.GetMethods(
+                BindingFlags.Instance
+                | BindingFlags.Static
+                | BindingFlags.Public
+                | BindingFlags.NonPublic);
+            for (var i = 0; i < methods.Length; i++)
+            {
+                var method = methods[i];
+                if (!string.Equals(method.Name, "AddCreature", StringComparison.Ordinal)
+                    && !string.Equals(method.Name, "RemoveCreature", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    harmonyInstance.Patch(method, postfix: postfix);
+                    patched++;
+                }
+                catch (Exception ex)
+                {
+                    AppendPluginLog("Going Cooperative transform-view cache invalidation patch failed method="
+                        + method.Name
+                        + " error="
+                        + ex.GetType().Name
+                        + ":"
+                        + ex.Message);
+                }
+            }
+
+            replicationTransformViewCacheInvalidationReady = patched > 0;
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
+            AppendPluginLog("Going Cooperative transform-view cache invalidation hooks="
+                + patched.ToString(CultureInfo.InvariantCulture)
+                + " eventDriven="
+                + replicationTransformViewCacheInvalidationReady);
+        }
+
+        private static void ReplicationCreatureMembershipChangedPostfix()
+        {
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
         }
 
         private static bool TryClassifyReplicationView(object view, out string kind)
@@ -749,6 +810,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
             ReplicationSnapshotIdentityByViewId.Clear();
         }
 
