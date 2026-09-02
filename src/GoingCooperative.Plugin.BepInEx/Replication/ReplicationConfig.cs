@@ -263,6 +263,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     ApplyReplicationConfigValue(current, key, value, i + 1);
                 }
 
+                ApplyReplicationPerformanceSafetyLimits(current);
+
                 current.Logger.LogInfo("Going Cooperative replication config loaded enabled="
                     + replicationConfigEnabled
                     + " mode="
@@ -651,6 +653,61 @@ namespace GoingCooperative.Plugin.BepInEx
                 && (!replicationConfigMedicalReplicationV1 || !replicationConfigMedicalWoundStateV1))
             {
                 current.Logger.LogWarning("Going Cooperative medical client wound tick suppression is dependency-gated off: medicalReplicationV1=true and medicalWoundStateV1=true are required.");
+            }
+        }
+
+        private static void ApplyReplicationPerformanceSafetyLimits(GoingCooperativePlugin current)
+        {
+            var originalSnapshotHz = replicationConfigSnapshotHz;
+            var originalWorldBudgetPerFrame = replicationConfigWorldObjectDeltaApplyBudgetPerFrame;
+            var originalWorldBudgetMs = replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame;
+            var originalRuntimeBudgetMs = replicationConfigRuntimeMainThreadBudgetMsPerFrame;
+            var originalPresentationBudgetMs = replicationConfigPresentationApplyBudgetMsPerFrame;
+            var originalPresentationMaxEntities = replicationConfigPresentationApplyMaxEntitiesPerFrame;
+
+            // Treat zero/negative time budgets as "unsafe unlimited", not as an
+            // escape hatch. These limits protect old hand-edited configs too, so
+            // installing a new DLL is enough to get the current frame safeguards.
+            replicationConfigSnapshotHz = Math.Max(1, Math.Min(replicationConfigSnapshotHz, 10));
+            replicationConfigWorldObjectDeltaApplyBudgetPerFrame =
+                replicationConfigWorldObjectDeltaApplyBudgetPerFrame <= 0
+                    ? 8
+                    : Math.Min(replicationConfigWorldObjectDeltaApplyBudgetPerFrame, 8);
+            replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame =
+                replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame <= 0f
+                    ? 2f
+                    : Math.Min(replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame, 2f);
+            replicationConfigRuntimeMainThreadBudgetMsPerFrame =
+                replicationConfigRuntimeMainThreadBudgetMsPerFrame <= 0f
+                    ? 4f
+                    : Math.Min(replicationConfigRuntimeMainThreadBudgetMsPerFrame, 4f);
+            replicationConfigPresentationApplyBudgetMsPerFrame =
+                replicationConfigPresentationApplyBudgetMsPerFrame <= 0f
+                    ? 1.25f
+                    : Math.Min(replicationConfigPresentationApplyBudgetMsPerFrame, 1.25f);
+            replicationConfigPresentationApplyMaxEntitiesPerFrame =
+                Math.Max(1, Math.Min(replicationConfigPresentationApplyMaxEntitiesPerFrame, 48));
+
+            if (originalSnapshotHz != replicationConfigSnapshotHz
+                || originalWorldBudgetPerFrame != replicationConfigWorldObjectDeltaApplyBudgetPerFrame
+                || Math.Abs(originalWorldBudgetMs - replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame) > 0.0001f
+                || Math.Abs(originalRuntimeBudgetMs - replicationConfigRuntimeMainThreadBudgetMsPerFrame) > 0.0001f
+                || Math.Abs(originalPresentationBudgetMs - replicationConfigPresentationApplyBudgetMsPerFrame) > 0.0001f
+                || originalPresentationMaxEntities != replicationConfigPresentationApplyMaxEntitiesPerFrame)
+            {
+                current.Logger.LogWarning("Going Cooperative replication performance safety limits applied"
+                    + " snapshotHz=" + originalSnapshotHz.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigSnapshotHz.ToString(CultureInfo.InvariantCulture)
+                    + " worldCount=" + originalWorldBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigWorldObjectDeltaApplyBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + " worldMs=" + originalWorldBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " runtimeMs=" + originalRuntimeBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigRuntimeMainThreadBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationMs=" + originalPresentationBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigPresentationApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationMax=" + originalPresentationMaxEntities.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigPresentationApplyMaxEntitiesPerFrame.ToString(CultureInfo.InvariantCulture));
             }
         }
 
