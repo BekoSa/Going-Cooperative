@@ -267,6 +267,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
         private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
         private static bool replicationTransformViewCacheInvalidationReady;
+        private static float replicationTransformViewCacheFollowupRefreshRealtime;
         private static long replicationTransformViewCacheScans;
         private static long replicationTransformViewCacheInvalidations;
         // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
@@ -289,9 +290,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 : 3f;
             var safetyRefreshDue = safetyRefreshSeconds > 0f
                 && now - replicationSemanticAnimatedAgentViewCacheRealtime >= safetyRefreshSeconds;
+            var lifecycleFollowupDue = replicationTransformViewCacheFollowupRefreshRealtime > 0f
+                && now >= replicationTransformViewCacheFollowupRefreshRealtime;
             if (replicationSemanticAnimatedAgentViewCache.Length > 0
                 && !replicationSemanticAnimatedAgentViewCacheDirty
-                && !safetyRefreshDue)
+                && !safetyRefreshDue
+                && !lifecycleFollowupDue)
             {
                 return replicationSemanticAnimatedAgentViewCache;
             }
@@ -309,6 +313,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationTransformViewCacheScans++;
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
             replicationSemanticAnimatedAgentViewCacheDirty = false;
+            if (lifecycleFollowupDue)
+            {
+                replicationTransformViewCacheFollowupRefreshRealtime = 0f;
+            }
             if (ReplicationSnapshotIdentityByViewId.Count > 1024)
             {
                 ReplicationSnapshotIdentityByViewId.Clear();
@@ -379,6 +387,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationCreatureMembershipChangedPostfix()
         {
             replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheFollowupRefreshRealtime = Mathf.Max(
+                replicationTransformViewCacheFollowupRefreshRealtime,
+                Time.realtimeSinceStartup + 0.5f);
             replicationTransformViewCacheInvalidations++;
         }
 
@@ -824,6 +835,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
             replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheFollowupRefreshRealtime = 0f;
             replicationTransformViewCacheScans = 0L;
             replicationTransformViewCacheInvalidations = 0L;
             ReplicationSnapshotIdentityByViewId.Clear();
