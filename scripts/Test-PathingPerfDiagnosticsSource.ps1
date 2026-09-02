@@ -38,8 +38,10 @@ Require-Text $runtimeSource 'RecordReplicationPathingSnapshotEncodeSend\(encodeS
 Require-Text $collectorSource 'RecordReplicationPathingIdentity\(identityStarted, hasStableEntityId\);' "identity timing"
 Require-Text $collectorSource 'RecordReplicationPathingSemantic\(' "semantic metadata timing"
 Require-Text $collectorSource 'TryInstallReplicationTransformViewCacheInvalidation' "event-driven transform-view invalidation installer"
-Require-Text $collectorSource '"AddCreature"' "CreatureManager AddCreature invalidation"
-Require-Text $collectorSource '"RemoveCreature"' "CreatureManager RemoveCreature invalidation"
+Require-Text $collectorSource '"OnEnable"' "AnimatedAgentView creation lifecycle invalidation"
+Require-Text $collectorSource '"OnDestroy"' "AnimatedAgentView removal lifecycle invalidation"
+Require-Text $collectorSource 'ReplicationAnimatedAgentViewLifecyclePostfix' "AnimatedAgentView lifecycle invalidation callback"
+Require-Text $collectorSource 'ReplicationTransformViewCacheFallbackRefreshSeconds = 30f' "rare fallback transform-view refresh"
 Require-Text $collectorSource 'replicationSemanticAnimatedAgentViewCacheDirty' "dirty transform-view cache"
 Require-Text $runtimeSource 'BeginReplicationMainThreadFrameBudget\(\);' "shared replication main-thread frame budget"
 Require-Text $runtimeSource 'ShouldYieldReplicationMainThreadWork\(\)' "main-thread budget yield"
@@ -63,7 +65,8 @@ if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod
 }
 
 $collectorContent = Get-Content -LiteralPath $collectorSource -Raw
-if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f') {
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
     throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
 }
 
