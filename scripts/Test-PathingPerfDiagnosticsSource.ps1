@@ -21,6 +21,7 @@ $configSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\R
 $diagnosticsSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationPathingPerfDiagnostics.cs"
 $runtimeSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntime.cs"
 $collectorSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationTransformCollector.cs"
+$smoothingSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationSnapshotSmoothing.cs"
 $motionSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationAgentMotionPresentation.cs"
 $deltaSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
 $trackedConfig = Join-Path $RepositoryRoot "config\replication.cfg"
@@ -36,10 +37,79 @@ Require-Text $runtimeSource 'RecordReplicationPathingSnapshotCollection\(collect
 Require-Text $runtimeSource 'RecordReplicationPathingSnapshotEncodeSend\(encodeSendStarted, wireCharacters\);' "snapshot encode/send timing"
 Require-Text $collectorSource 'RecordReplicationPathingIdentity\(identityStarted, hasStableEntityId\);' "identity timing"
 Require-Text $collectorSource 'RecordReplicationPathingSemantic\(' "semantic metadata timing"
+Require-Text $collectorSource 'TryInstallReplicationTransformViewCacheInvalidation' "event-driven transform-view invalidation installer"
+Require-Text $collectorSource '"AddCreature"' "CreatureManager AddCreature invalidation"
+Require-Text $collectorSource '"RemoveCreature"' "CreatureManager RemoveCreature invalidation"
+Require-Text $collectorSource 'replicationSemanticAnimatedAgentViewCacheDirty' "dirty transform-view cache"
+Require-Text $runtimeSource 'BeginReplicationMainThreadFrameBudget\(\);' "shared replication main-thread frame budget"
+Require-Text $runtimeSource 'ShouldYieldReplicationMainThreadWork\(\)' "main-thread budget yield"
+Require-Text $smoothingSource 'replicationConfigPresentationApplyBudgetMsPerFrame' "presentation time budget"
+Require-Text $smoothingSource 'replicationConfigPresentationApplyMaxEntitiesPerFrame' "presentation entity budget"
+Require-Text $smoothingSource 'ReplicationPresentationTrackOrder' "round-robin presentation ordering"
 Require-Text $motionSource 'RecordReplicationPathingCornerExtraction\(' "corner extraction timing"
 Require-Text $motionSource 'RecordReplicationPathingMotionEvent\(' "semantic event counters"
 Require-Text $deltaSource 'RecordReplicationPathingRetryScan\(' "reliable retry work timing"
-Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false$' "safe tracked default"
+Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=60
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
+ "event-driven view cache safety refresh"
 
 $diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
 if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
