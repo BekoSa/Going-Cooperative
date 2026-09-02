@@ -203,8 +203,12 @@ if ($sources.Lifecycle.Contains('TryApplyReplicationBuildingState(delta')) {
 
 # Host-local area Cancel/Deconstruct must lead with one semantic region replay.
 # Reliable terminal rows remain as a delayed fallback if that transient state is lost.
-Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionEventPostfix\(.*?hostSemanticRemoval.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(' `
-    "Host-local Cancel/Deconstruct does not publish a semantic region replay after native completion."
+Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionActionPrefix\(.*?replicationHostLocalSemanticRegionArmed\s*=\s*false.*?TryResolveReplicationSelectionRegion\(.*?replicationHostLocalSemanticRegionArmed\s*=\s*true.*?replicationHostLocalSemanticRegionStartX\s*=\s*startX.*?replicationHostLocalSemanticRegionEndZ\s*=\s*endZ' `
+    "Host-local Cancel/Deconstruct does not bind semantic replay to the exact successfully resolved drag."
+Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionEventPostfix\(.*?applyingRuntimeCommandDepth\s*<=\s*0.*?replicationHostLocalSemanticRegionArmed.*?replicationHostLocalSemanticRegionFrame\s*==\s*Time\.frameCount.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(.*?replicationHostLocalSemanticRegionStartX.*?replicationHostLocalSemanticRegionEndZ' `
+    "Host-local Cancel/Deconstruct does not publish its exact semantic region replay after native completion."
+Require-SourcePattern $sources.Runtime 'SendReplicationRegionOrderStateIfSupported\(.*?IsReplicationMassBuildingRegionOrder\(orderType\).*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(' `
+    "Client-originated Cancel/Deconstruct does not pace durable terminals behind the canonical region state."
 Require-SourcePattern $sources.RegionOrders 'replicationRegionSelectionActionDepth.*?ReplicationRegionResourceSurfacePostfix\(.*?replicationRegionSelectionActionFrame\s*==\s*Time\.frameCount.*?return\s*;' `
     "Cancel/Deconstruct side-effect resource callbacks can still emit a duplicate region command."
 Require-SourcePattern $sources.RegionOrders 'ZoneSelectionFinished.*?orderType.*?None.*?replicationLastRegionOrderType.*?Cancel.*?Deconstruct.*?return\s+true\s*;' `
