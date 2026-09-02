@@ -49,7 +49,14 @@ Require-Text $smoothingSource 'ReplicationPresentationTrackOrder' "round-robin p
 Require-Text $motionSource 'RecordReplicationPathingCornerExtraction\(' "corner extraction timing"
 Require-Text $motionSource 'RecordReplicationPathingMotionEvent\(' "semantic event counters"
 Require-Text $deltaSource 'RecordReplicationPathingRetryScan\(' "reliable retry work timing"
-Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false
+Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false$' "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
 $diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
 if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
     throw "Diagnostic implementation must not introduce scene scans or reflection"
@@ -61,59 +68,3 @@ if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s
 }
 
 Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
- "safe tracked default"
-Require-Text $trackedConfig '(?m)^snapshotHz=10
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "bounded snapshot rate"
-Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "bounded world-delta apply time"
-Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "bounded aggregate runtime time"
-Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "bounded presentation time"
-Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "bounded presentation entity count"
-Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=60
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
- "event-driven view cache safety refresh"
-
-$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
-if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
-    throw "Diagnostic implementation must not introduce scene scans or reflection"
-}
-
-Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/aggregate/no-scan contracts"
