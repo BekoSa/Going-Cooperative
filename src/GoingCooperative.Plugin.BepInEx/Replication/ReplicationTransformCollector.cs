@@ -107,7 +107,25 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var identityStarted = BeginReplicationPathingPerfSample();
-            var hasStableEntityId = TryGetReplicationViewEntityId(view, seenEntityIds, out var entityId);
+            var viewInstanceId = view.GetInstanceID();
+            var hasStableEntityId = false;
+            string entityId;
+            if (ReplicationSnapshotIdentityByViewId.TryGetValue(viewInstanceId, out var cachedIdentity)
+                && ReferenceEquals(cachedIdentity.View, view)
+                && seenEntityIds.Add(cachedIdentity.EntityId))
+            {
+                entityId = cachedIdentity.EntityId;
+                hasStableEntityId = true;
+            }
+            else
+            {
+                hasStableEntityId = TryGetReplicationViewEntityId(view, seenEntityIds, out entityId);
+                if (hasStableEntityId)
+                {
+                    ReplicationSnapshotIdentityByViewId[viewInstanceId] =
+                        new ReplicationSnapshotIdentityCacheEntry(view, entityId);
+                }
+            }
             RecordReplicationPathingIdentity(identityStarted, hasStableEntityId);
             if (hasStableEntityId)
             {
@@ -247,7 +265,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static Type? replicationAnimatedAgentViewType;
         private static UnityEngine.Object[] replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
-        private const float ReplicationSemanticAnimatedAgentViewCacheSeconds = 0.75f;
+        // FindObjectsOfType is a global Unity scene walk and shows up as ~28 ms spikes
+        // in live perf logs. Agent membership changes far less often than transforms.
+        private const float ReplicationSemanticAnimatedAgentViewCacheSeconds = 3f;
+        private static readonly Dictionary<int, ReplicationSnapshotIdentityCacheEntry> ReplicationSnapshotIdentityByViewId =
+            new Dictionary<int, ReplicationSnapshotIdentityCacheEntry>();
 
         private static UnityEngine.Object[] FindReplicationAnimatedAgentViews()
         {
@@ -268,8 +290,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 return replicationSemanticAnimatedAgentViewCache;
             }
 
+            // Never trigger the expensive global scene scan while the player is
+            // dragging/selecting/committing a placement. A slightly stale actor list
+            // is harmless for presentation and refreshes immediately after interaction.
+            if (IsReplicationInteractiveQoSActive()
+                && replicationSemanticAnimatedAgentViewCache.Length > 0)
+            {
+                return replicationSemanticAnimatedAgentViewCache;
+            }
+
             replicationSemanticAnimatedAgentViewCache = UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
+            if (ReplicationSnapshotIdentityByViewId.Count > 1024)
+            {
+                ReplicationSnapshotIdentityByViewId.Clear();
+            }
             return replicationSemanticAnimatedAgentViewCache;
         }
 
@@ -709,6 +744,25 @@ namespace GoingCooperative.Plugin.BepInEx
             "Data",
             "data"
         };
+
+        private static void ResetReplicationTransformCollectorCaches()
+        {
+            replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
+            replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
+            ReplicationSnapshotIdentityByViewId.Clear();
+        }
+
+        private sealed class ReplicationSnapshotIdentityCacheEntry
+        {
+            public ReplicationSnapshotIdentityCacheEntry(UnityEngine.Object view, string entityId)
+            {
+                View = view;
+                EntityId = entityId;
+            }
+
+            public UnityEngine.Object View { get; }
+            public string EntityId { get; }
+        }
 
         private static bool TryReadSimpleReplicationIdentity(object owner, out string entityId)
         {

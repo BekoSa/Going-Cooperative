@@ -26,6 +26,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
+        private static Type? replicationRoofViewComponentType;
+        private static Type? replicationBeamViewComponentType;
 
         private static readonly string[] ReplicationBuildBlueprintIdMemberNames =
         {
@@ -249,6 +251,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationBuildOnLeftMouseUpPrefix(out ReplicationBuildCaptureTransaction? __state)
         {
+            MarkReplicationInteractiveQoS(0.65f);
             __state = null;
             if (!ShouldCaptureReplicationBuildTransaction())
             {
@@ -263,6 +266,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationBuildObjectPlacedOnMapPrefix(object __0)
         {
+            MarkReplicationInteractiveQoS(0.35f);
             if (__0 == null)
             {
                 return;
@@ -535,7 +539,8 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             record = null!;
             detail = "beam-topology-unreadable";
-            var beamViewType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BeamViewComponent");
+            var beamViewType = replicationBeamViewComponentType ??=
+                AccessTools.TypeByName("NSMedieval.BuildingComponents.BeamViewComponent");
             if (beamViewType == null || !(view is Component component))
             {
                 return false;
@@ -601,7 +606,8 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             roofRecord = null;
             detail = "not-roof";
-            var roofViewType = AccessTools.TypeByName("NSMedieval.BuildingComponents.RoofViewComponent");
+            var roofViewType = replicationRoofViewComponentType ??=
+                AccessTools.TypeByName("NSMedieval.BuildingComponents.RoofViewComponent");
             if (roofViewType == null || !(view is Component component))
             {
                 return false;

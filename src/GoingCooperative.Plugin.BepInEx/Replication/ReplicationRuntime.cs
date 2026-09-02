@@ -36,6 +36,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private static long replicationLastTransportChunkFailures;
         private static long replicationLastTransportAuthenticationFailures;
         private static float replicationNextSnapshotRealtime;
+        // UI placement/area-selection is latency sensitive. During a short interactive
+        // window, background presentation work yields to the native input/placement path.
+        private static float replicationInteractiveQoSUntilRealtime;
+        private const float ReplicationInteractiveSnapshotHz = 5f;
         private static float replicationNextStatusLogRealtime;
         private static float replicationNextSnapshotValidationRealtime;
         private static float replicationNextResourcePileStateSnapshotRealtime;
@@ -148,6 +152,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationNextHelloRealtime = 0f;
                 replicationNextHelloLogRealtime = 0f;
                 replicationNextSnapshotRealtime = 0f;
+                replicationInteractiveQoSUntilRealtime = 0f;
+                ResetReplicationTransformCollectorCaches();
                 replicationNextStatusLogRealtime = 0f;
                 replicationNextSnapshotValidationRealtime = 0f;
                 replicationEarliestProofIntentRealtime = Time.realtimeSinceStartup + Math.Max(0, replicationConfigProofIntentDelaySeconds);
@@ -302,6 +308,8 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationLastTransportAuthenticationFailures = 0;
             replicationNextTransportDropWarnRealtime = 0f;
             replicationNextSnapshotValidationRealtime = 0f;
+            replicationInteractiveQoSUntilRealtime = 0f;
+            ResetReplicationTransformCollectorCaches();
             replicationNextResourcePileStateSnapshotRealtime = 0f;
             replicationNextAgentCarryStateSnapshotRealtime = 0f;
             replicationNextAgentActionHeartbeatRealtime = 0f;
@@ -577,6 +585,25 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             RecordReplicationPathingPump(perfStarted, messageCount);
+        }
+
+        private static void MarkReplicationInteractiveQoS(float seconds)
+        {
+            if (seconds <= 0f)
+            {
+                return;
+            }
+
+            var until = Time.realtimeSinceStartup + seconds;
+            if (until > replicationInteractiveQoSUntilRealtime)
+            {
+                replicationInteractiveQoSUntilRealtime = until;
+            }
+        }
+
+        private static bool IsReplicationInteractiveQoSActive()
+        {
+            return Time.realtimeSinceStartup < replicationInteractiveQoSUntilRealtime;
         }
 
         private static double GetReplicationPumpElapsedMilliseconds(long started)
@@ -1716,7 +1743,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            var interval = 1f / Math.Max(1, replicationConfigSnapshotHz);
+            var snapshotHz = Math.Max(1, replicationConfigSnapshotHz);
+            if (IsReplicationInteractiveQoSActive())
+            {
+                snapshotHz = Math.Min(snapshotHz, (int)ReplicationInteractiveSnapshotHz);
+            }
+            var interval = 1f / snapshotHz;
             replicationNextSnapshotRealtime = Time.realtimeSinceStartup + interval;
             var collectStarted = BeginReplicationPathingPerfSample();
             var collectedSnapshot = CollectReplicationTransformSnapshot(++replicationSnapshotSequence, replicationConfigMaxSnapshotEntities);
@@ -2763,6 +2795,14 @@ namespace GoingCooperative.Plugin.BepInEx
         private void PreCullReplicationRuntime()
         {
             if (!replicationRuntimeStarted || !replicationConfigApplySnapshots || replicationPendingApplySnapshot == null)
+            {
+                return;
+            }
+
+            // The latest snapshot remains buffered and is applied as soon as the drag
+            // completes. Avoid competing with native selection/build mesh work in the
+            // same render frame.
+            if (IsReplicationInteractiveQoSActive())
             {
                 return;
             }

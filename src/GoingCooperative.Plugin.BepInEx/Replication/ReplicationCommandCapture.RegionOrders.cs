@@ -178,6 +178,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationRegionSelectionPostfix(MethodBase __originalMethod, object __0, object __1)
         {
+            MarkReplicationInteractiveQoS(0.45f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return;
@@ -222,6 +223,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ReplicationRegionSelectionActionPrefix(MethodBase __originalMethod, object __instance)
         {
+            MarkReplicationInteractiveQoS(0.45f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return true;
@@ -294,6 +296,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ReplicationRegionAreaOrderPrefix(MethodBase __originalMethod, object __instance, object[] __args)
         {
+            MarkReplicationInteractiveQoS(0.55f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return true;
