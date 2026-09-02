@@ -2001,7 +2001,8 @@ namespace GoingCooperative.Plugin.BepInEx
         }
 
         private static bool TryHandleReplicationBuildingLifecycleRepairAckV2(
-            ReplicationWorldObjectDeltaAck ack)
+            ReplicationWorldObjectDeltaAck ack,
+            ReplicationWorldObjectDelta? acknowledgedDelta = null)
         {
             if (ack.Applied
                 || ack.Detail.IndexOf(
@@ -2011,20 +2012,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            ReplicationWorldObjectDelta? lifecycleDelta = null;
-            lock (ReplicationWorldObjectDeltaLock)
+            var lifecycleDelta = acknowledgedDelta;
+            if (lifecycleDelta == null)
             {
-                if (replicationPendingWorldObjectDeltas.TryGetValue(ack.Sequence, out var pending)
-                    && string.Equals(
-                        pending.Delta.DeltaKind,
-                        ReplicationBuildingLifecycleV2DeltaKind,
-                        StringComparison.Ordinal))
+                lock (ReplicationWorldObjectDeltaLock)
                 {
-                    lifecycleDelta = pending.Delta;
+                    if (replicationPendingWorldObjectDeltas.TryGetValue(ack.Sequence, out var pending)
+                        && string.Equals(
+                            pending.Delta.DeltaKind,
+                            ReplicationBuildingLifecycleV2DeltaKind,
+                            StringComparison.Ordinal))
+                    {
+                        lifecycleDelta = pending.Delta;
+                    }
                 }
             }
 
             return lifecycleDelta != null
+                && string.Equals(
+                    lifecycleDelta.DeltaKind,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    StringComparison.Ordinal)
                 && TrySendReplicationBuildingRepairV2(lifecycleDelta, "negative-ack");
         }
 
