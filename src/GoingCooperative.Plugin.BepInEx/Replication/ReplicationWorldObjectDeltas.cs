@@ -3630,7 +3630,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
-                TrySendReplicationWorldObjectDelta(due[i], isRetry: true);
+                var isRetry = true;
+                lock (ReplicationWorldObjectDeltaLock)
+                {
+                    if (replicationPendingWorldObjectDeltas.TryGetValue(
+                            due[i].Sequence,
+                            out var pendingForSend))
+                    {
+                        isRetry = pendingForSend.SendCount > 0;
+                    }
+                }
+
+                TrySendReplicationWorldObjectDelta(due[i], isRetry);
             }
 
             RecordReplicationPathingRetryScan(perfStarted, inspected, due.Count, pendingCount);
@@ -4754,7 +4765,9 @@ namespace GoingCooperative.Plugin.BepInEx
             if (finalizedDelta != null)
             {
                 HandleReplicationTraderPartyWorldDeltaAck(ack);
-                TryHandleReplicationBuildingLifecycleRepairAckV2(ack);
+                TryHandleReplicationBuildingLifecycleRepairAckV2(
+                    ack,
+                    acknowledgedBuildingLifecycleV2Delta);
                 CompleteReplicationBuildingLifecycleAcknowledgementV2(
                     ack,
                     acknowledgedBuildingLifecycleV2Delta);
@@ -4856,6 +4869,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 || detail.IndexOf("unsupported-delta-kind", StringComparison.OrdinalIgnoreCase) >= 0
                 || detail.IndexOf("already-applied-or-no-ground", StringComparison.OrdinalIgnoreCase) >= 0
                 || detail.IndexOf("duplicate-sequence-skipped", StringComparison.OrdinalIgnoreCase) >= 0
+                || detail.IndexOf("building-lifecycle-v2-repair-required", StringComparison.OrdinalIgnoreCase) >= 0
                 || detail.IndexOf("building-state-snapshot-not-converged", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
