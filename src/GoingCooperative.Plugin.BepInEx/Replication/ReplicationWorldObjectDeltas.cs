@@ -3570,10 +3570,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            // Reliable deltas retry no faster than 0.75s. Scanning the entire
-            // pending set every rendered frame only burns CPU during congestion
-            // and made building/recovery storms self-amplifying.
-            replicationNextWorldObjectDeltaRetryScanRealtime = now + 0.1f;
+            // Reliable deltas retry no faster than 0.75s. Five scheduler passes
+            // per second are sufficient, and each pass has a hard send cap so a
+            // mass build/deconstruct cannot monopolize a render frame.
+            replicationNextWorldObjectDeltaRetryScanRealtime = now + 0.2f;
             var perfStarted = BeginReplicationPathingPerfSample();
             var inspected = 0;
             var pendingCount = 0;
@@ -3590,9 +3590,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 foreach (var pending in replicationPendingWorldObjectDeltas.Values)
                 {
                     inspected++;
-                    if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta))
+                    if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta)
+                        && (due == null || due.Count < ReplicationWorldObjectDeltaRetrySendMaxPerScan))
                     {
-                        due ??= new List<ReplicationWorldObjectDelta>();
+                        due ??= new List<ReplicationWorldObjectDelta>(
+                            ReplicationWorldObjectDeltaRetrySendMaxPerScan);
                         due.Add(pending.Delta);
                     }
                 }
@@ -3820,13 +3822,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 return ReplicationBuildingStateSnapshotRetrySeconds;
             }
 
-            if ((string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchPlacedDeltaKind, StringComparison.Ordinal)
-                    || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
-                    || string.Equals(delta.DeltaKind, ReplicationBuildingRecoveryRequiredV2DeltaKind, StringComparison.Ordinal))
-                && replicationPendingWorldObjectDeltas.TryGetValue(delta.Sequence, out var durablePending)
-                && durablePending.SendCount >= ReplicationBuildBatchWorldObjectDeltaMaxSends)
+            if (replicationPendingWorldObjectDeltas.TryGetValue(delta.Sequence, out var durablePending))
             {
-                return ReplicationBuildingDurableRetrySeconds;
+                var durableThreshold =
+                    string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
+                        ? ReplicationWorldObjectDeltaMaxSends
+                        : ReplicationBuildBatchWorldObjectDeltaMaxSends;
+                if ((string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchPlacedDeltaKind, StringComparison.Ordinal)
+                        || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
+                        || string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
+                        || string.Equals(delta.DeltaKind, ReplicationBuildingRecoveryRequiredV2DeltaKind, StringComparison.Ordinal))
+                    && durablePending.SendCount >= durableThreshold)
+                {
+                    // Lifecycle rows are revisioned absolute state and supersede older
+                    // rows for the same building. After a few quick attempts, retain
+                    // the latest row with a slow retry rather than spawning a repair
+                    // row per building during client backpressure.
+                    return ReplicationBuildingDurableRetrySeconds;
+                }
             }
 
             if (IsReplicationStoragePolicyStateDelta(delta)
@@ -3999,6 +4012,10 @@ namespace GoingCooperative.Plugin.BepInEx
                         StringComparison.Ordinal)
                     || string.Equals(
                         delta.DeltaKind,
+                        ReplicationBuildingLifecycleV2DeltaKind,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        delta.DeltaKind,
                         ReplicationBuildingRecoveryRequiredV2DeltaKind,
                         StringComparison.Ordinal)
                     || IsReplicationStoragePolicyStateDelta(delta);
@@ -4007,11 +4024,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     // Placement/result is transaction state, not telemetry. Retain it
                     // with a slow retry until ACK or session reset and separately tell
                     // the client to recover instead of silently forgetting it.
-                    if (!IsReplicationStoragePolicyStateDelta(delta)
-                        && !string.Equals(
-                        delta.DeltaKind,
-                        ReplicationBuildingRecoveryRequiredV2DeltaKind,
-                        StringComparison.Ordinal))
+                    if (string.Equals(
+                            delta.DeltaKind,
+                            ReplicationBuildingBlueprintBatchPlacedDeltaKind,
+                            StringComparison.Ordinal)
+                        || string.Equals(
+                            delta.DeltaKind,
+                            ReplicationBuildingBlueprintBatchResultDeltaKind,
+                            StringComparison.Ordinal))
                     {
                         TrySendReplicationBuildingRecoveryRequiredV2(
                             delta,
@@ -16690,6 +16710,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationStoragePolicyStateDurableRetrySeconds = 5.0f;
         private const int ReplicationWorldObjectDeltaMaxSends = 5;
         private const int ReplicationBuildBatchWorldObjectDeltaMaxSends = 20;
+        private const int ReplicationWorldObjectDeltaRetrySendMaxPerScan = 32;
         private const int ReplicationClientAppliedWorldObjectDeltaSequenceRetention = 65536;
         private const float ReplicationWorldObjectDeltaRecentSpawnLocationSeconds = 4f;
         private const float ReplicationResourcePileStateSnapshotSeconds = 15f;
