@@ -2485,6 +2485,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                // Client-originated Cancel/Deconstruct queues durable per-building
+                // terminals while the host applies the native area action. Give the
+                // canonical semantic region state a head start before those fallback
+                // rows are pumped.
+                MarkReplicationBuildingSemanticRegionReplayV2();
+            }
+
             SendReplicationRegionOrderState(
                 orderType,
                 startX,
