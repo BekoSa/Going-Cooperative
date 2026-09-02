@@ -235,6 +235,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRuntimeStarted
                 && replicationRemoteHelloReceived)
             {
+                MarkReplicationBuildingSemanticRegionReplayV2();
                 instance?.SendReplicationRegionOrderState(
                     semanticOrderType,
                     replicationLastRegionStartX,
