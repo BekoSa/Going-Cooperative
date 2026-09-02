@@ -2752,6 +2752,23 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
+            if (string.Equals(
+                    delta.DeltaKind,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    StringComparison.Ordinal)
+                && requiredPeers.Length > 0)
+            {
+                // Building lifecycle can arrive in bursts of hundreds/thousands
+                // during cancel/deconstruct. The reliable retry scheduler already
+                // owns this pending row; let its bounded queue perform the initial
+                // send as well instead of synchronously sending every object from
+                // the native Unity mutation callback.
+                replicationNextWorldObjectDeltaRetryScanRealtime = Math.Min(
+                    replicationNextWorldObjectDeltaRetryScanRealtime,
+                    Time.realtimeSinceStartup);
+                return true;
+            }
+
             TrySendReplicationWorldObjectDelta(
                 delta,
                 isRetry: false);
