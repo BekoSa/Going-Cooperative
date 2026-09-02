@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using GoingCooperative.Core;
@@ -44,6 +45,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static int replicationHostLocalSemanticRegionEndX;
         private static int replicationHostLocalSemanticRegionEndY;
         private static int replicationHostLocalSemanticRegionEndZ;
+        private static long replicationLocalRegionNativeActionStartedTimestamp;
+        private static int replicationLocalRegionNativeActionFrame = -1;
+        private static string replicationLocalRegionNativeActionType = string.Empty;
         private static string replicationZoneModifyOperation = string.Empty;
         private static string replicationZoneModifyId = string.Empty;
         private static float replicationZoneModifyRealtime;
@@ -273,6 +277,29 @@ namespace GoingCooperative.Plugin.BepInEx
                 replicationHostLocalSemanticRegionArmed = false;
             }
 
+            if (replicationLocalRegionNativeActionStartedTimestamp > 0L
+                && replicationLocalRegionNativeActionFrame == Time.frameCount
+                && string.Equals(
+                    replicationLocalRegionNativeActionType,
+                    semanticOrderType,
+                    StringComparison.Ordinal))
+            {
+                var nativeActionMs =
+                    (Stopwatch.GetTimestamp()
+                        - replicationLocalRegionNativeActionStartedTimestamp)
+                    * 1000.0 / Stopwatch.Frequency;
+                instance?.LogReplicationInfo(
+                    "[MP/REGION] local native area action orderType="
+                    + semanticOrderType
+                    + " actionMs="
+                    + nativeActionMs.ToString(
+                        "0.###",
+                        CultureInfo.InvariantCulture));
+                replicationLocalRegionNativeActionStartedTimestamp = 0L;
+                replicationLocalRegionNativeActionFrame = -1;
+                replicationLocalRegionNativeActionType = string.Empty;
+            }
+
             if (replicationRegionSelectionActionDepth > 0
                 && replicationRegionSelectionActionFrame == Time.frameCount)
             {
@@ -372,7 +399,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " "
                 + selectionDetail);
 
-            return !CaptureReplicationRegionOrderIntent(
+            var suppressNative = CaptureReplicationRegionOrderIntent(
                 orderType,
                 startX,
                 startY,
@@ -384,6 +411,20 @@ namespace GoingCooperative.Plugin.BepInEx
                 "None",
                 "None",
                 "selection:" + methodName);
+            if (!suppressNative
+                && IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                // Starts immediately before vanilla SelectionManager receives the
+                // area action. The postfix reports the native wall-clock cost, which
+                // lets perf logs distinguish a Going Medieval mass-delete stall from
+                // replication capture/presentation overhead.
+                replicationLocalRegionNativeActionStartedTimestamp =
+                    Stopwatch.GetTimestamp();
+                replicationLocalRegionNativeActionFrame = Time.frameCount;
+                replicationLocalRegionNativeActionType = orderType;
+            }
+
+            return !suppressNative;
         }
 
         private static void ReplicationRegionAreaOrderSetterPrefix(MethodBase __originalMethod, object __0)
