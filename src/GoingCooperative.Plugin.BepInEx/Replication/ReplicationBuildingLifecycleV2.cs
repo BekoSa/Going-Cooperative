@@ -745,13 +745,9 @@ namespace GoingCooperative.Plugin.BepInEx
                     pending.Lifecycle,
                     force: true);
 
-                if (tracked.TerminalSent)
-                {
-                    // The reliable delta owns all information required for later
-                    // retries. Do not retain destroyed Unity targets indefinitely.
-                    ReplicationTrackedHostBuildingsV2.Remove(tracked.HostId);
-                }
-
+                // Keep the lightweight tracker until the terminal row is ACKed:
+                // an explicit negative ACK can request a targeted repair whose replay
+                // metadata still comes from this tracker. Completion removes it.
                 processed++;
             }
         }
