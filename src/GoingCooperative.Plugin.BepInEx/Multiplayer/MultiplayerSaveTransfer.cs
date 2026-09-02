@@ -1400,13 +1400,21 @@ namespace GoingCooperative.Plugin.BepInEx
             WaitForSaveBundleReady(
                 save.FilePath,
                 TimeSpan.FromSeconds(10));
-            if (isResync)
+            int bundleEpoch;
+            lock (stateLock)
             {
-                peer.Epoch++;
-                peer.ReadyForReplication = false;
-            }
+                if (isResync)
+                {
+                    peer.Epoch++;
+                    peer.ReadyForReplication = false;
+                }
 
-            var bundleEpoch = peer.Epoch;
+                // ReplicationEpoch reads HostPeerConnection.Epoch under the same lock.
+                // Publish the checkpoint fence before the bundle is visible to the
+                // client so host/client building transactions cannot observe different
+                // epochs after targeted resync.
+                bundleEpoch = peer.Epoch;
+            }
             var files = GetSaveBundle(save.FilePath);
             lock (peer.WriteLock)
             {
