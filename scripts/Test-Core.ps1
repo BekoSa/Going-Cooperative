@@ -165,3 +165,6 @@ Write-Host "PASS TestedConfigPolicy"
 
 & (Join-Path $PSScriptRoot "Test-PathingPerfDiagnosticsSource.ps1") -RepositoryRoot $repositoryRoot
 if ($LASTEXITCODE -ne 0) { throw "Replication perf source contract tests failed." }
+
+& (Join-Path $PSScriptRoot "Test-BuildingReplicationV2.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Building V2 source contract tests failed." }
