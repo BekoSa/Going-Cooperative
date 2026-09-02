@@ -3616,12 +3616,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 foreach (var pending in replicationPendingWorldObjectDeltas.Values)
                 {
                     inspected++;
-                    if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta)
-                        && (due == null || due.Count < ReplicationWorldObjectDeltaRetrySendMaxPerScan))
+                    if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta))
                     {
                         due ??= new List<ReplicationWorldObjectDelta>(
                             ReplicationWorldObjectDeltaRetrySendMaxPerScan);
                         due.Add(pending.Delta);
+                        if (due.Count >= ReplicationWorldObjectDeltaRetrySendMaxPerScan)
+                        {
+                            // Stop scanning as soon as this scheduler slice is full.
+                            // The next 200 ms pass continues from states whose
+                            // LastSentRealtime is still due, without O(N) tail walks.
+                            break;
+                        }
                     }
                 }
             }
@@ -4895,6 +4901,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(delta.DeltaKind, CombatProjectileDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, WeatherEnvironmentStateDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "GameTimeSnapshot", StringComparison.Ordinal)
+                // Semantic motion/work packets are presentation hints. Transform
+                // snapshots and authoritative gameplay state repair packet loss, so
+                // retrying Start/Anchor/End up to five times only turns a temporary
+                // client stall into a later reliable backlog storm.
+                || string.Equals(delta.DeltaKind, ReplicationAgentMotionPresentationDeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationAgentWorkPresentationDeltaKind, StringComparison.Ordinal)
                 || (string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingLifecycleV2DeltaKind,
