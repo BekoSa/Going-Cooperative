@@ -27,7 +27,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var current = instance;
             return ReferenceEquals(current, null)
                 ? 0L
-                : Math.Max(0, current.multiplayerSaveTransfer.Epoch);
+                : Math.Max(0, current.multiplayerSaveTransfer.ReplicationEpoch);
         }
 
         private static void ResetReplicationBuildTransactionLedger()
