@@ -68,7 +68,2427 @@ Require-Text $presenceGuiSource 'multiplayerPresenceVisiblePeerIdsScratch' "reus
 Require-Text $motionSource 'RecordReplicationPathingCornerExtraction\(' "corner extraction timing"
 Require-Text $motionSource 'RecordReplicationPathingMotionEvent\(' "semantic event counters"
 Require-Text $deltaSource 'RecordReplicationPathingRetryScan\(' "reliable retry work timing"
-Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false$' "safe tracked default"
+Require-Text $trackedConfig '(?m)^pathingPerfDiagnostics=false\r? "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10\r? "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2\r? "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4\r? "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25\r? "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48\r? "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0\r? "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
+Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "bounded snapshot rate"
+Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
+Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
+Require-Text $trackedConfig '(?m)^presentationApplyBudgetMsPerFrame=1\.25$' "bounded presentation time"
+Require-Text $trackedConfig '(?m)^presentationApplyMaxEntitiesPerFrame=48$' "bounded presentation entity count"
+Require-Text $trackedConfig '(?m)^snapshotViewCacheSafetyRefreshSeconds=0$' "timer-free event-driven view cache"
+
+$diagnosticsContent = Get-Content -LiteralPath $diagnosticsSource -Raw
+if ($diagnosticsContent -match 'FindObjectsOfType|FindObjectsOfTypeAll|GetMethod\(|GetProperty\(|GetField\(') {
+    throw "Diagnostic implementation must not introduce scene scans or reflection"
+}
+
+$collectorContent = Get-Content -LiteralPath $collectorSource -Raw
+if ($collectorContent -match 'ReplicationSemanticAnimatedAgentViewCacheSeconds\s*=\s*3f' -or
+    $collectorContent -match ':\s*3f\s*;\s*\r?\n\s*var safetyRefreshDue') {
+    throw "Transform-view cache must not return to a mandatory 3-second global scene scan."
+}
+
+Write-Host "PASS PathingPerfDiagnosticsSource gate/timing/budgets/event-driven-cache contracts"
+ "safe tracked default"
 Require-Text $trackedConfig '(?m)^snapshotHz=10$' "bounded snapshot rate"
 Require-Text $trackedConfig '(?m)^worldObjectDeltaApplyBudgetMsPerFrame=2$' "bounded world-delta apply time"
 Require-Text $trackedConfig '(?m)^runtimeMainThreadBudgetMsPerFrame=4$' "bounded aggregate runtime time"
