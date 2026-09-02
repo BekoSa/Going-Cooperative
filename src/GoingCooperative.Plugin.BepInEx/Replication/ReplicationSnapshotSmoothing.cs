@@ -106,6 +106,9 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static readonly Dictionary<string, ReplicationPresentationTrack> ReplicationPresentationTracks =
             new Dictionary<string, ReplicationPresentationTrack>(StringComparer.Ordinal);
+        private static readonly List<string> ReplicationPresentationTrackOrder = new List<string>();
+        private static int replicationPresentationApplyCursor;
+        private static long replicationPresentationApplyBudgetStops;
         private static readonly Dictionary<int, ReplicationSmoothAnimatorSupport> ReplicationSmoothAnimatorSupportByInstanceId =
             new Dictionary<int, ReplicationSmoothAnimatorSupport>();
         private static readonly Dictionary<string, ReplicationSemanticAnimalPresentationState> ReplicationSemanticAnimalPresentationByEntityId =
@@ -148,6 +151,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 {
                     track = new ReplicationPresentationTrack { Kind = entity.Kind };
                     ReplicationPresentationTracks[entity.EntityId] = track;
+                    ReplicationPresentationTrackOrder.Add(entity.EntityId);
                 }
 
                 if (replicationConfigSemanticAgentPresentation
@@ -244,11 +248,46 @@ namespace GoingCooperative.Plugin.BepInEx
             var viewsByEntityId = GetReplicationViewLookupCached(latestSnapshot);
             var applied = 0;
             var moving = 0;
-
-            foreach (var pair in ReplicationPresentationTracks)
+            var trackCount = ReplicationPresentationTrackOrder.Count;
+            if (trackCount == 0)
             {
-                var track = pair.Value;
-                if (track.Samples.Count == 0)
+                replicationLastApplyVisualMoving = 0;
+                PruneReplicationPresentationTracksIfDue(now);
+                return 0;
+            }
+
+            if (replicationPresentationApplyCursor < 0
+                || replicationPresentationApplyCursor >= trackCount)
+            {
+                replicationPresentationApplyCursor = 0;
+            }
+
+            var startedTimestamp = Stopwatch.GetTimestamp();
+            var budgetTicks = replicationConfigPresentationApplyBudgetMsPerFrame <= 0f
+                ? 0L
+                : (long)Math.Ceiling(
+                    replicationConfigPresentationApplyBudgetMsPerFrame
+                    * Stopwatch.Frequency
+                    / 1000.0);
+            var maxEntities = Math.Max(1, replicationConfigPresentationApplyMaxEntitiesPerFrame);
+            var startCursor = replicationPresentationApplyCursor;
+            var visited = 0;
+            while (visited < trackCount && applied < maxEntities)
+            {
+                if (visited > 0
+                    && (visited & 3) == 0
+                    && budgetTicks > 0L
+                    && Stopwatch.GetTimestamp() - startedTimestamp >= budgetTicks)
+                {
+                    replicationPresentationApplyBudgetStops++;
+                    break;
+                }
+
+                var orderIndex = (startCursor + visited) % trackCount;
+                var entityId = ReplicationPresentationTrackOrder[orderIndex];
+                visited++;
+                if (!ReplicationPresentationTracks.TryGetValue(entityId, out var track)
+                    || track.Samples.Count == 0)
                 {
                     continue;
                 }
@@ -259,7 +298,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
-                if (!viewsByEntityId.TryGetValue(pair.Key, out var view)
+                if (!viewsByEntityId.TryGetValue(entityId, out var view)
                     || view == null
                     || view.Transform == null)
                 {
@@ -267,7 +306,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 EvaluateReplicationPresentationTrack(
-                    pair.Key,
+                    entityId,
                     track,
                     renderHostRealtime,
                     now,
@@ -276,7 +315,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     out var speed,
                     out var motion);
                 if (TryStabilizeReplicationNeedsSleepPresentationPose(
-                        pair.Key,
+                        entityId,
                         now,
                         ref position,
                         ref rotation))
@@ -286,7 +325,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 view.Transform.position = position;
                 view.Transform.rotation = rotation;
                 ApplyReplicationAuthoritativeAnimalTargetRotation(view, track.Kind, rotation);
-                if (UpdateReplicationSmoothLocomotion(pair.Key, view.Animator, track.Kind, speed, motion))
+                if (UpdateReplicationSmoothLocomotion(entityId, view.Animator, track.Kind, speed, motion))
                 {
                     moving++;
                     track.ActiveUntilRealtime = Mathf.Max(
@@ -298,6 +337,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 applied++;
             }
 
+            replicationPresentationApplyCursor = trackCount == 0
+                ? 0
+                : (startCursor + Math.Max(1, visited)) % trackCount;
             replicationLastApplyVisualMoving = moving;
             PruneReplicationPresentationTracksIfDue(now);
             return applied;
@@ -706,7 +748,13 @@ namespace GoingCooperative.Plugin.BepInEx
             for (var i = 0; i < expired.Count; i++)
             {
                 ReplicationPresentationTracks.Remove(expired[i]);
+                ReplicationPresentationTrackOrder.Remove(expired[i]);
                 ReplicationSemanticAnimalPresentationByEntityId.Remove(expired[i]);
+            }
+
+            if (replicationPresentationApplyCursor >= ReplicationPresentationTrackOrder.Count)
+            {
+                replicationPresentationApplyCursor = 0;
             }
         }
 
@@ -1320,6 +1368,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ClearReplicationPresentationSmoothing()
         {
             ReplicationPresentationTracks.Clear();
+            ReplicationPresentationTrackOrder.Clear();
+            replicationPresentationApplyCursor = 0;
+            replicationPresentationApplyBudgetStops = 0L;
             ReplicationSmoothAnimatorSupportByInstanceId.Clear();
             ReplicationSemanticAnimalPresentationByEntityId.Clear();
             replicationNextPresentationPruneRealtime = 0f;
@@ -1358,6 +1409,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " animalV2IdleWritesAvoided=" + replicationPresentationAnimalV2IdleWritesAvoided
                 + " animalV2LowSpeedTangentsBypassed=" + replicationPresentationAnimalV2LowSpeedTangentsBypassed
                 + " idleTracksSkipped=" + replicationPresentationIdleTracksSkipped
+                + " presentationBudgetStops=" + replicationPresentationApplyBudgetStops
+                + " presentationCursor=" + replicationPresentationApplyCursor
                 + " " + FormatReplicationSemanticMotionStatus();
         }
     }
