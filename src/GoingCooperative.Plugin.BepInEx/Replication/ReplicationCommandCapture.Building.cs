@@ -25,6 +25,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationBuildBatchRecoveryAttempted;
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
+        private const int ReplicationClientBuildCommandChunkPlacements = 4;
         private const int ReplicationHostBuildReplayChunkPlacements = 4;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
@@ -872,53 +873,83 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            var first = placements[0];
-            var records = new string[placements.Count];
-            for (var i = 0; i < placements.Count; i++)
+            // The client has already created provisional views locally. Send the
+            // authoritative request in small sequential chunks: the durable command
+            // queue deliberately holds every later BuildBatch until the previous
+            // sequence receives its host ACK. This bounds the host Unity apply cost
+            // without producing a simultaneous command burst.
+            var chunkIndex = 0;
+            for (var offset = 0;
+                 offset < placements.Count;
+                 offset += ReplicationClientBuildCommandChunkPlacements)
             {
-                records[i] = FormatReplicationBuildPlacementRecord(placements[i].Record);
-            }
+                var count = Math.Min(
+                    ReplicationClientBuildCommandChunkPlacements,
+                    placements.Count - offset);
+                var first = placements[offset];
+                var records = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    records[i] = FormatReplicationBuildPlacementRecord(
+                        placements[offset + i].Record);
+                }
 
-            var command = new LockstepCommand(
-                GetReplicationLocalPeerId(),
-                ++replicationIntentSequence,
-                0L,
-                CommandKind.Build,
-                LockstepCommandPayloads.CreateBuildBatchPayload(
-                    first.BlueprintId,
-                    first.BuildingType,
-                    first.Faction,
-                    afterLoading: false,
-                    records,
-                    GetReplicationBuildBatchEpoch()),
-                null,
-                first.Record.X,
-                first.Record.Y,
-                first.Record.Z);
+                var command = new LockstepCommand(
+                    GetReplicationLocalPeerId(),
+                    ++replicationIntentSequence,
+                    0L,
+                    CommandKind.Build,
+                    LockstepCommandPayloads.CreateBuildBatchPayload(
+                        first.BlueprintId,
+                        first.BuildingType,
+                        first.Faction,
+                        afterLoading: false,
+                        records,
+                        GetReplicationBuildBatchEpoch()),
+                    null,
+                    first.Record.X,
+                    first.Record.Y,
+                    first.Record.Z);
 
-            if (IsReplicationCaptureModeShadow(replicationConfigCommandCaptureMode))
-            {
-                LogReplicationLocalCommandShadow(command, "build-transaction:" + transactionId.ToString(CultureInfo.InvariantCulture));
-                return;
-            }
-
-            if (!IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode))
-            {
-                return;
-            }
-
-            for (var i = 0; i < placements.Count; i++)
-            {
-                ReplicationProvisionalBuildViews[BuildReplicationProvisionalBuildKey(command.Sequence, i)] =
-                    new ReplicationProvisionalBuildView(placements[i].View, Time.realtimeSinceStartup);
-            }
-
-            SendReplicationLocalCommandIntent(
-                command,
-                "build-transaction:"
+                var source = "build-transaction:"
                     + transactionId.ToString(CultureInfo.InvariantCulture)
+                    + " chunk="
+                    + chunkIndex.ToString(CultureInfo.InvariantCulture)
+                    + " offset="
+                    + offset.ToString(CultureInfo.InvariantCulture)
                     + " count="
-                    + placements.Count.ToString(CultureInfo.InvariantCulture));
+                    + count.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + placements.Count.ToString(CultureInfo.InvariantCulture);
+
+                if (IsReplicationCaptureModeShadow(replicationConfigCommandCaptureMode))
+                {
+                    LogReplicationLocalCommandShadow(command, source);
+                    chunkIndex++;
+                    continue;
+                }
+
+                if (!IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode))
+                {
+                    return;
+                }
+
+                for (var i = 0; i < count; i++)
+                {
+                    ReplicationProvisionalBuildViews[
+                        BuildReplicationProvisionalBuildKey(
+                            command.Sequence,
+                            i)] =
+                        new ReplicationProvisionalBuildView(
+                            placements[offset + i].View,
+                            Time.realtimeSinceStartup);
+                }
+
+                SendReplicationLocalCommandIntent(
+                    command,
+                    source);
+                chunkIndex++;
+            }
         }
 
         private static bool EmitHostLocalReplicationBuildPlacements(
