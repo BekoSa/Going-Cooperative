@@ -265,6 +265,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static Type? replicationAnimatedAgentViewType;
         private static UnityEngine.Object[] replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
+        private static bool replicationSemanticAnimatedAgentViewCacheInitialized;
         private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
         private static bool replicationTransformViewCacheInvalidationReady;
         private static float replicationTransformViewCacheFollowupRefreshRealtime;
@@ -292,7 +293,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 && now - replicationSemanticAnimatedAgentViewCacheRealtime >= safetyRefreshSeconds;
             var lifecycleFollowupDue = replicationTransformViewCacheFollowupRefreshRealtime > 0f
                 && now >= replicationTransformViewCacheFollowupRefreshRealtime;
-            if (replicationSemanticAnimatedAgentViewCache.Length > 0
+            if (replicationSemanticAnimatedAgentViewCacheInitialized
                 && !replicationSemanticAnimatedAgentViewCacheDirty
                 && !safetyRefreshDue
                 && !lifecycleFollowupDue)
@@ -304,7 +305,7 @@ namespace GoingCooperative.Plugin.BepInEx
             // dragging/selecting/committing a placement. A slightly stale actor list
             // is harmless for presentation and refreshes immediately after interaction.
             if (IsReplicationInteractiveQoSActive()
-                && replicationSemanticAnimatedAgentViewCache.Length > 0)
+                && replicationSemanticAnimatedAgentViewCacheInitialized)
             {
                 return replicationSemanticAnimatedAgentViewCache;
             }
@@ -312,6 +313,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationSemanticAnimatedAgentViewCache = UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
             replicationTransformViewCacheScans++;
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
+            replicationSemanticAnimatedAgentViewCacheInitialized = true;
             replicationSemanticAnimatedAgentViewCacheDirty = false;
             if (lifecycleFollowupDue)
             {
@@ -834,6 +836,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
             replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
+            replicationSemanticAnimatedAgentViewCacheInitialized = false;
             replicationSemanticAnimatedAgentViewCacheDirty = true;
             replicationTransformViewCacheFollowupRefreshRealtime = 0f;
             replicationTransformViewCacheScans = 0L;
