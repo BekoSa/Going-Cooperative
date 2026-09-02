@@ -166,6 +166,9 @@ if (-not $batchSource.Contains('SpawnBeamAxisX') -or -not $batchSource.Contains(
 if (-not $batchSource.Contains('BEAM_REPLICATION_DIAGNOSTIC') -or -not $batchSource.Contains('preinvoke-endpoint') -or -not $batchSource.Contains('native-null')) { throw "Gated beam replay diagnostics no longer distinguish endpoint resolution from native rejection." }
 if (-not $batchSource.Contains('ResolveReplicationBuildingsManagerMain(managerType, out managerDetail)')) { throw "Beam endpoint replay bypasses the active-village-aware BuildingsManagerMain resolver." }
 if (-not $captureSource.Contains('Enum.GetName(value.GetType(), value)')) { throw "Beam/socket fail-closed classification regressed to unstable numeric enum values." }
+if (-not [regex]::IsMatch($captureSource, 'if\s*\(\s*!IsUnsupportedReplicationBuildBlueprint\(blueprint,\s*out\s+unsupportedCategory\)\s*\)\s*\{\s*unsupportedCategory\s*=\s*string\.Empty\s*;', [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    throw "Normal ConstructableBaseCategory values can leak into unsupportedCategory and roll back ordinary buildings."
+}
 if (-not $captureSource.Contains('StartSocketGridPosition') -or -not $captureSource.Contains('EndSocketGridPosition') -or -not $captureSource.Contains('beam-topology-native')) { throw "Beam capture is not sourced from committed native socket-grid endpoints." }
 if (-not $worldDeltaSource.Contains("same-grid mismatch is not a negative result")) { throw "Layered same-grid lookup regression guard is missing." }
 if (-not $worldDeltaSource.Contains("ReplicationBuildingBlueprintBatchPlacedDeltaKind")) { throw "Host-origin drag placements are not sent as one batch." }
