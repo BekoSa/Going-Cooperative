@@ -210,9 +210,19 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationRegionSelectionEventPostfix(MethodBase __originalMethod)
         {
             var methodName = __originalMethod?.Name ?? string.Empty;
+            var semanticOrderType = string.Equals(
+                    methodName,
+                    "OnOrderCancel",
+                    StringComparison.Ordinal)
+                ? "Cancel"
+                : string.Equals(
+                    methodName,
+                    "OnOrderDeconstruction",
+                    StringComparison.Ordinal)
+                    ? "Deconstruct"
+                    : string.Empty;
             var hostSemanticRemoval = replicationConfigHostMode
-                && IsReplicationMassBuildingRegionOrder(
-                    ResolveReplicationSelectionOrderType(null, methodName))
+                && IsReplicationMassBuildingRegionOrder(semanticOrderType)
                 && replicationLastRegionSelectionValid;
 
             // This postfix runs after the native SelectionManager operation. For a
@@ -225,16 +235,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRuntimeStarted
                 && replicationRemoteHelloReceived)
             {
-                var orderType = ResolveReplicationSelectionOrderType(null, methodName);
                 instance?.SendReplicationRegionOrderState(
-                    orderType,
+                    semanticOrderType,
                     replicationLastRegionStartX,
                     replicationLastRegionStartY,
                     replicationLastRegionStartZ,
                     replicationLastRegionEndX,
                     replicationLastRegionEndY,
                     replicationLastRegionEndZ,
-                    ResolveReplicationRegionAllowType(null, orderType),
+                    "All",
                     "None",
                     "None",
                     "host-local source=selection:" + methodName);
