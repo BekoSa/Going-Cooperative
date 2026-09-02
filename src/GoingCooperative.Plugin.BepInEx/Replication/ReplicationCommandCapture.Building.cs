@@ -25,6 +25,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationBuildBatchRecoveryAttempted;
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
+        private const int ReplicationHostBuildReplayChunkPlacements = 8;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
         private static Type? replicationBeamViewComponentType;
@@ -947,7 +948,6 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            var first = placements[0];
             for (var i = 0; i < placements.Count; i++)
             {
                 TrackReplicationBuildingLifecycleV2(
@@ -955,60 +955,85 @@ namespace GoingCooperative.Plugin.BepInEx
                     "host-local-building-v2");
             }
 
-            // Host-local placement used to have a separate
-            // BuildingBlueprintBatchPlaced replay implementation. Client-authored
-            // placement already uses BuildingBlueprintBatchResult, whose client path
-            // handles both provisional views and the no-provisional case by invoking
-            // the authoritative native placement surface. Reuse that mature path for
-            // host-local placement so both directions converge through one replay
-            // implementation.
-            var payload = CreateReplicationBuildBatchWirePayload(
-                first.BlueprintId,
-                first.BuildingType,
-                first.Faction,
-                placements);
-            var commandSequence =
-                4000000000000000000L
-                + transactionId * 1024L
-                + groupIndex;
-            var manifest = new ReplicationBuildBatchCommitManifest(
-                ReplicationHostPeerId,
-                commandSequence,
-                payload,
-                first.BlueprintId,
-                first.BuildingType,
-                first.Faction,
-                afterLoading: false,
-                first.Record.X,
-                first.Record.Y,
-                first.Record.Z,
-                FormatReplicationBuildBatchIds(placements),
-                new string('1', placements.Count),
-                placements.Count,
-                "host-local-batch transaction="
+            // Host-local placement is already committed in the authoritative game
+            // world. Replay it to clients in small reliable chunks so one incoming
+            // world-delta handler never has to create a 30/60/100-object drag in one
+            // Unity frame. Chunks retain the same capture transaction identity but
+            // use independent reliable command sequences.
+            var allSent = true;
+            var chunkIndex = 0;
+            for (var offset = 0; offset < placements.Count; offset += ReplicationHostBuildReplayChunkPlacements)
+            {
+                var count = Math.Min(
+                    ReplicationHostBuildReplayChunkPlacements,
+                    placements.Count - offset);
+                var chunk = new List<ReplicationCapturedBuildPlacement>(count);
+                for (var i = 0; i < count; i++)
+                {
+                    chunk.Add(placements[offset + i]);
+                }
+
+                var first = chunk[0];
+                var payload = CreateReplicationBuildBatchWirePayload(
+                    first.BlueprintId,
+                    first.BuildingType,
+                    first.Faction,
+                    chunk);
+                var wireGroup = (long)groupIndex * 1024L + chunkIndex;
+                var commandSequence =
+                    4000000000000000000L
+                    + transactionId * 1048576L
+                    + wireGroup;
+                var manifest = new ReplicationBuildBatchCommitManifest(
+                    ReplicationHostPeerId,
+                    commandSequence,
+                    payload,
+                    first.BlueprintId,
+                    first.BuildingType,
+                    first.Faction,
+                    afterLoading: false,
+                    first.Record.X,
+                    first.Record.Y,
+                    first.Record.Z,
+                    FormatReplicationBuildBatchIds(chunk),
+                    new string('1', chunk.Count),
+                    chunk.Count,
+                    "host-local-batch transaction="
+                        + transactionId.ToString(CultureInfo.InvariantCulture)
+                        + " group="
+                        + groupIndex.ToString(CultureInfo.InvariantCulture)
+                        + " chunk="
+                        + chunkIndex.ToString(CultureInfo.InvariantCulture));
+
+                var deltaSequence = ++replicationWorldObjectDeltaSequence;
+                var sent = current.SendReplicationWorldObjectDelta(
+                    manifest.CreateDelta(
+                        deltaSequence,
+                        Time.realtimeSinceStartup));
+                allSent &= sent;
+                current.LogReplicationInfo(
+                    "[MP/BUILD] host-local batch "
+                    + (sent ? "sent" : "not-sent")
+                    + " transaction="
                     + transactionId.ToString(CultureInfo.InvariantCulture)
                     + " group="
-                    + groupIndex.ToString(CultureInfo.InvariantCulture));
+                    + groupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " chunk="
+                    + chunkIndex.ToString(CultureInfo.InvariantCulture)
+                    + " offset="
+                    + offset.ToString(CultureInfo.InvariantCulture)
+                    + " count="
+                    + chunk.Count.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + placements.Count.ToString(CultureInfo.InvariantCulture)
+                    + " deltaSequence="
+                    + deltaSequence.ToString(CultureInfo.InvariantCulture)
+                    + " commandSequence="
+                    + commandSequence.ToString(CultureInfo.InvariantCulture));
+                chunkIndex++;
+            }
 
-            var deltaSequence = ++replicationWorldObjectDeltaSequence;
-            var sent = current.SendReplicationWorldObjectDelta(
-                manifest.CreateDelta(
-                    deltaSequence,
-                    Time.realtimeSinceStartup));
-            current.LogReplicationInfo(
-                "[MP/BUILD] host-local batch "
-                + (sent ? "sent" : "not-sent")
-                + " transaction="
-                + transactionId.ToString(CultureInfo.InvariantCulture)
-                + " group="
-                + groupIndex.ToString(CultureInfo.InvariantCulture)
-                + " count="
-                + placements.Count.ToString(CultureInfo.InvariantCulture)
-                + " deltaSequence="
-                + deltaSequence.ToString(CultureInfo.InvariantCulture)
-                + " commandSequence="
-                + commandSequence.ToString(CultureInfo.InvariantCulture));
-            return sent;
+            return allSent;
         }
 
         private static bool TryGetReplicationProvisionalBuildView(long commandSequence, int itemIndex, out object? view)
