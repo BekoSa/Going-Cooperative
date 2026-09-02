@@ -14,16 +14,29 @@ namespace GoingCooperative.Plugin.BepInEx
         private readonly Dictionary<string, TextMeshProUGUI>
             multiplayerPresenceCursorTexts =
                 new Dictionary<string, TextMeshProUGUI>(StringComparer.Ordinal);
+        private readonly Dictionary<string, RectTransform>
+            multiplayerPresenceCursorRects =
+                new Dictionary<string, RectTransform>(StringComparer.Ordinal);
         private readonly Dictionary<string, List<GameObject>>
             multiplayerPresenceSelectionRoots =
                 new Dictionary<string, List<GameObject>>(StringComparer.Ordinal);
         private readonly Dictionary<string, List<TextMeshProUGUI>>
             multiplayerPresenceSelectionTexts =
                 new Dictionary<string, List<TextMeshProUGUI>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<RectTransform>>
+            multiplayerPresenceSelectionRects =
+                new Dictionary<string, List<RectTransform>>(StringComparer.Ordinal);
         private readonly List<GameObject> multiplayerPresencePingRoots =
             new List<GameObject>();
         private readonly List<TextMeshProUGUI> multiplayerPresencePingTexts =
             new List<TextMeshProUGUI>();
+        private readonly List<RectTransform> multiplayerPresencePingRects =
+            new List<RectTransform>();
+        private readonly HashSet<string> multiplayerPresenceVisiblePeerIdsScratch =
+            new HashSet<string>(StringComparer.Ordinal);
+        private RectTransform? multiplayerPresenceCanvasRect;
+        private float multiplayerNextSelectionGuiRefreshRealtime;
+        private const float MultiplayerSelectionGuiRefreshSeconds = 1f / 15f;
 
         private void UpdateMultiplayerPresenceGui()
         {
@@ -44,14 +57,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var now = Time.realtimeSinceStartup;
+            var refreshSelection =
+                now >= multiplayerNextSelectionGuiRefreshRealtime;
+            if (refreshSelection)
+            {
+                multiplayerNextSelectionGuiRefreshRealtime =
+                    now + MultiplayerSelectionGuiRefreshSeconds;
+            }
+
             var remoteStates = GetReplicationRemotePresenceStates();
-            var visiblePeerIds = new HashSet<string>(StringComparer.Ordinal);
+            var visiblePeerIds = multiplayerPresenceVisiblePeerIdsScratch;
+            visiblePeerIds.Clear();
             for (var i = 0; i < remoteStates.Count; i++)
             {
                 var state = remoteStates[i];
                 visiblePeerIds.Add(state.PeerId);
                 UpdateMultiplayerRemoteCursorGui(state);
-                UpdateMultiplayerRemoteSelectionGui(state);
+                if (refreshSelection)
+                {
+                    UpdateMultiplayerRemoteSelectionGui(state);
+                }
             }
 
             HideInactiveMultiplayerRemotePeerVisuals(visiblePeerIds);
@@ -76,10 +102,19 @@ namespace GoingCooperative.Plugin.BepInEx
                     cursorWorld,
                     out var cursorPosition))
             {
-                root.SetActive(true);
-                root.transform.SetAsLastSibling();
-                root.GetComponent<RectTransform>().anchoredPosition =
-                    cursorPosition + new Vector2(0f, 18f);
+                if (!root.activeSelf)
+                {
+                    root.SetActive(true);
+                    root.transform.SetAsLastSibling();
+                }
+
+                if (multiplayerPresenceCursorRects.TryGetValue(
+                        state.PeerId,
+                        out var cursorRect))
+                {
+                    cursorRect.anchoredPosition =
+                        cursorPosition + new Vector2(0f, 18f);
+                }
                 if (multiplayerPresenceCursorTexts.TryGetValue(
                         state.PeerId,
                         out var text))
@@ -109,9 +144,9 @@ namespace GoingCooperative.Plugin.BepInEx
             if (!multiplayerPresenceSelectionRoots.TryGetValue(
                     state.PeerId,
                     out var roots)
-                || !multiplayerPresenceSelectionTexts.TryGetValue(
+                || !multiplayerPresenceSelectionRects.TryGetValue(
                     state.PeerId,
-                    out var texts))
+                    out var rects))
             {
                 return;
             }
@@ -137,14 +172,13 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
-                root.SetActive(true);
-                root.transform.SetAsLastSibling();
-                root.GetComponent<RectTransform>().anchoredPosition =
-                    position;
-                texts[i].text =
-                    "[" + GetReplicationRemoteDisplayName(state.PeerId) + "]";
-                texts[i].color =
-                    GetMultiplayerPeerPresenceColor(state.PeerId);
+                if (!root.activeSelf)
+                {
+                    root.SetActive(true);
+                    root.transform.SetAsLastSibling();
+                }
+
+                rects[i].anchoredPosition = position;
             }
         }
 
@@ -174,7 +208,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 root.SetActive(true);
                 root.transform.SetAsLastSibling();
-                var rect = root.GetComponent<RectTransform>();
+                var rect = multiplayerPresencePingRects[i];
                 rect.anchoredPosition = position;
                 var age = Mathf.Max(
                     0f,
@@ -244,6 +278,7 @@ namespace GoingCooperative.Plugin.BepInEx
             root.SetActive(false);
             multiplayerPresenceCursorRoots.Add(peerId, root);
             multiplayerPresenceCursorTexts.Add(peerId, text);
+            multiplayerPresenceCursorRects.Add(peerId, rect);
         }
 
         private void EnsureMultiplayerPresenceSelectionVisualCount(
@@ -269,6 +304,14 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 texts = new List<TextMeshProUGUI>();
                 multiplayerPresenceSelectionTexts.Add(peerId, texts);
+            }
+
+            if (!multiplayerPresenceSelectionRects.TryGetValue(
+                    peerId,
+                    out var rects))
+            {
+                rects = new List<RectTransform>();
+                multiplayerPresenceSelectionRects.Add(peerId, rects);
             }
 
             while (roots.Count < count)
@@ -305,6 +348,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     Vector2.zero);
                 roots.Add(root);
                 texts.Add(text);
+                rects.Add(rect);
             }
         }
 
@@ -346,6 +390,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     Vector2.zero);
                 multiplayerPresencePingRoots.Add(root);
                 multiplayerPresencePingTexts.Add(text);
+                multiplayerPresencePingRects.Add(rect);
             }
         }
 
@@ -405,11 +450,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            return RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                multiplayerCanvasRoot.GetComponent<RectTransform>(),
-                new Vector2(screen.x, screen.y),
-                null,
-                out canvasPosition);
+            multiplayerPresenceCanvasRect ??=
+                multiplayerCanvasRoot.GetComponent<RectTransform>();
+            return multiplayerPresenceCanvasRect != null
+                && RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    multiplayerPresenceCanvasRect,
+                    new Vector2(screen.x, screen.y),
+                    null,
+                    out canvasPosition);
         }
 
         private void HideInactiveMultiplayerRemotePeerVisuals(
@@ -489,10 +537,16 @@ namespace GoingCooperative.Plugin.BepInEx
 
             multiplayerPresenceCursorRoots.Clear();
             multiplayerPresenceCursorTexts.Clear();
+            multiplayerPresenceCursorRects.Clear();
             multiplayerPresenceSelectionRoots.Clear();
             multiplayerPresenceSelectionTexts.Clear();
+            multiplayerPresenceSelectionRects.Clear();
             multiplayerPresencePingRoots.Clear();
             multiplayerPresencePingTexts.Clear();
+            multiplayerPresencePingRects.Clear();
+            multiplayerPresenceVisiblePeerIdsScratch.Clear();
+            multiplayerPresenceCanvasRect = null;
+            multiplayerNextSelectionGuiRefreshRealtime = 0f;
         }
     }
 }
