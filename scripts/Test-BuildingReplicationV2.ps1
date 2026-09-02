@@ -225,6 +225,8 @@ Require-SourcePattern $sources.Lifecycle 'replicationDestroyBuildingMethodV2.*?D
     "Client terminal replay re-enumerates BuildingsManagerMain methods per removed cell."
 Require-SourcePattern $sources.RuntimeActions 'TryInvokeSelectionManagerRegionAction\(.*?actionMs=' `
     "Native region-action duration is not observable in the next performance logs."
+Require-SourcePattern $sources.RegionOrders '\[MP/REGION\]\s+local native area action.*?actionMs=' `
+    "Local host/client native Cancel/Deconstruct duration is not observable in the next performance logs."
 
 # Rapid lifecycle changes must bypass the generic 500 ms duplicate filter. Reliable
 # lifecycle rows get the extended bounded retry budget; selected progress is visual,
