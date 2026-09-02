@@ -72,6 +72,50 @@ namespace GoingCooperative.Plugin.BepInEx
         public int LoadGeneration { get { return loadGeneration; } }
         public int ResumeGeneration { get { return resumeGeneration; } }
         public int Epoch { get { return epoch; } }
+
+        // Building replication uses the checkpoint epoch as an exact-once fence.
+        // On the client, 'epoch' is updated from the received BUNDLE. On the host,
+        // the authoritative epoch lives on HostPeerConnection because targeted
+        // resync increments only that peer. Returning the host peer epoch here keeps
+        // both sides on the same fence after a full resync.
+        public int ReplicationEpoch
+        {
+            get
+            {
+                if (!hostMode)
+                {
+                    return Math.Max(0, epoch);
+                }
+
+                lock (stateLock)
+                {
+                    var resolved = 0;
+                    var found = false;
+                    foreach (var peer in hostPeers.Values)
+                    {
+                        if (peer.Closed)
+                        {
+                            continue;
+                        }
+
+                        if (!found)
+                        {
+                            resolved = Math.Max(0, peer.Epoch);
+                            found = true;
+                            continue;
+                        }
+
+                        // Stable multiplayer currently targets one remote client.
+                        // If more peers are enabled later and their targeted-resync
+                        // epochs diverge, fail to the newest checkpoint boundary
+                        // rather than silently returning the host-global zero epoch.
+                        resolved = Math.Max(resolved, Math.Max(0, peer.Epoch));
+                    }
+
+                    return found ? resolved : Math.Max(0, epoch);
+                }
+            }
+        }
         public long SessionId { get { return Interlocked.Read(ref sessionId); } }
         public bool ResyncCaptureRequested { get { return resyncCaptureRequested; } }
         public string ReceivedSavePath { get { lock (stateLock) return receivedSavePath; } }
