@@ -135,6 +135,8 @@ Require-SourcePattern $sources.Capture 'ProcessPendingReplicationHostBuildReplay
     "Host-local build replay is not ACK-paced before reliable admission."
 Require-SourcePattern $sources.Runtime 'UpdateReplicationBuildingLifecycleV2\(\);.*?ProcessPendingReplicationHostBuildReplayChunks\(\);.*?ShouldYieldReplicationMainThreadWork\(\)' `
     "The host runtime does not pump staged build replay inside the shared frame budget."
+Require-SourcePattern $sources.Capture 'ShouldCaptureReplicationBuildTransaction\(\).*?replicationConfigHostMode.*?multiplayerLoadingInProgress.*?!replicationRuntimeStarted.*?!replicationRemoteHelloReceived.*?multiplayerHostSyncPauseApplied' `
+    "Host build capture is not suppressed during native loading or peer catch-up."
 Require-SourcePattern $sources.Runtime 'ResetReplicationPeerRuntimeState\(.*?ReleaseReplicationPeerWorldDeltaObligations\(.*?ClearPendingReplicationHostBuildReplayChunks\(\)' `
     "A resync can retain pre-checkpoint host build replay chunks with stale epoch manifests."
 
