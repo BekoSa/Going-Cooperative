@@ -16817,7 +16817,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 string ids,
                 string accepted,
                 int count,
-                string resultDetail)
+                string resultDetail,
+                long semanticTransactionId = -1L,
+                int semanticGroup = -1)
             {
                 CommandSequence = commandSequence;
                 BlueprintId = blueprintId;
@@ -16834,6 +16836,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     + " buildingType=" + FormatReplicationWorldObjectDetailToken(buildingType)
                     + " faction=" + FormatReplicationWorldObjectDetailToken(factionOwnership)
                     + " afterLoading=" + (afterLoading ? "true" : "false")
+                    + (semanticTransactionId > 0L
+                        ? " transactionId="
+                            + semanticTransactionId.ToString(CultureInfo.InvariantCulture)
+                        : string.Empty)
+                    + (semanticGroup >= 0
+                        ? " group="
+                            + semanticGroup.ToString(CultureInfo.InvariantCulture)
+                        : string.Empty)
                     + " resultB64=" + EncodeReplicationDetailBase64(resultDetail);
             }
 
