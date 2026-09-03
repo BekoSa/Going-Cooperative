@@ -1013,11 +1013,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     first.BuildingType,
                     first.Faction,
                     chunk);
-                var wireGroup = (long)groupIndex * 1024L + chunkIndex;
+                // Each replay chunk needs its own semantic ledger key.
+                // Using only groupIndex would make chunk 1+ look already applied after
+                // chunk 0 committed on the client.
+                var semanticGroup = checked(groupIndex * 1024 + chunkIndex);
                 var commandSequence =
                     4000000000000000000L
                     + transactionId * 1048576L
-                    + wireGroup;
+                    + semanticGroup;
                 var manifest = new ReplicationBuildBatchCommitManifest(
                     ReplicationHostPeerId,
                     commandSequence,
@@ -1037,7 +1040,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         + " group="
                         + groupIndex.ToString(CultureInfo.InvariantCulture)
                         + " chunk="
-                        + chunkIndex.ToString(CultureInfo.InvariantCulture));
+                        + chunkIndex.ToString(CultureInfo.InvariantCulture),
+                    semanticTransactionId: transactionId,
+                    semanticGroup: semanticGroup);
 
                 ReplicationPendingHostBuildReplayChunks.Enqueue(
                     new ReplicationPendingHostBuildReplayChunk(
