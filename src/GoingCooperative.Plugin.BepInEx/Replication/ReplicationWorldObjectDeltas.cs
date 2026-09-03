@@ -20,6 +20,8 @@ namespace GoingCooperative.Plugin.BepInEx
         private static readonly HashSet<object> ReplicationClientGenericSpawnedResourcePiles =
             new HashSet<object>(ReferenceObjectComparer.Instance);
         private static readonly Dictionary<long, PendingReplicationWorldObjectDelta> replicationPendingWorldObjectDeltas = new Dictionary<long, PendingReplicationWorldObjectDelta>();
+        private static readonly List<long> ReplicationWorldObjectDeltaRetryScanOrder = new List<long>();
+        private static int replicationWorldObjectDeltaRetryScanCursor;
         private static float replicationNextWorldObjectDeltaRetryScanRealtime;
         private static readonly Dictionary<string, long> ReplicationPendingSupersedableWorldDeltaSequenceByKey =
             new Dictionary<string, long>(StringComparer.Ordinal);
@@ -3607,27 +3609,60 @@ namespace GoingCooperative.Plugin.BepInEx
             lock (ReplicationWorldObjectDeltaLock)
             {
                 pendingCount = replicationPendingWorldObjectDeltas.Count;
-                if (replicationPendingWorldObjectDeltas.Count == 0)
+                if (pendingCount == 0)
                 {
+                    ReplicationWorldObjectDeltaRetryScanOrder.Clear();
+                    replicationWorldObjectDeltaRetryScanCursor = 0;
                     RecordReplicationPathingRetryScan(perfStarted, 0, 0, 0);
                     return;
                 }
 
-                foreach (var pending in replicationPendingWorldObjectDeltas.Values)
+                // Keep a stable round-robin key snapshot instead of restarting a
+                // Dictionary walk from the first element every 200 ms. On large
+                // joins the old loop inspected hundreds of thousands of rows per
+                // diagnostics window and repeatedly favored the same early keys.
+                // A bounded cursor makes scheduler CPU deterministic and gives
+                // later reliable rows a chance to retry.
+                if (replicationWorldObjectDeltaRetryScanCursor
+                    >= ReplicationWorldObjectDeltaRetryScanOrder.Count)
                 {
+                    ReplicationWorldObjectDeltaRetryScanOrder.Clear();
+                    ReplicationWorldObjectDeltaRetryScanOrder.AddRange(
+                        replicationPendingWorldObjectDeltas.Keys);
+                    replicationWorldObjectDeltaRetryScanCursor = 0;
+                }
+
+                var remaining = ReplicationWorldObjectDeltaRetryScanOrder.Count
+                    - replicationWorldObjectDeltaRetryScanCursor;
+                var inspectBudget = Math.Min(
+                    ReplicationWorldObjectDeltaRetryInspectMaxPerScan,
+                    Math.Max(0, remaining));
+                while (inspected < inspectBudget
+                    && replicationWorldObjectDeltaRetryScanCursor
+                        < ReplicationWorldObjectDeltaRetryScanOrder.Count)
+                {
+                    var sequence = ReplicationWorldObjectDeltaRetryScanOrder[
+                        replicationWorldObjectDeltaRetryScanCursor++];
                     inspected++;
-                    if (now - pending.LastSentRealtime >= GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta))
+                    if (!replicationPendingWorldObjectDeltas.TryGetValue(
+                            sequence,
+                            out var pending))
                     {
-                        due ??= new List<ReplicationWorldObjectDelta>(
-                            ReplicationWorldObjectDeltaRetrySendMaxPerScan);
-                        due.Add(pending.Delta);
-                        if (due.Count >= ReplicationWorldObjectDeltaRetrySendMaxPerScan)
-                        {
-                            // Stop scanning as soon as this scheduler slice is full.
-                            // The next 200 ms pass continues from states whose
-                            // LastSentRealtime is still due, without O(N) tail walks.
-                            break;
-                        }
+                        continue;
+                    }
+
+                    if (now - pending.LastSentRealtime
+                        < GetReplicationWorldObjectDeltaRetrySeconds(pending.Delta))
+                    {
+                        continue;
+                    }
+
+                    due ??= new List<ReplicationWorldObjectDelta>(
+                        ReplicationWorldObjectDeltaRetrySendMaxPerScan);
+                    due.Add(pending.Delta);
+                    if (due.Count >= ReplicationWorldObjectDeltaRetrySendMaxPerScan)
+                    {
+                        break;
                     }
                 }
             }
@@ -16763,6 +16798,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const int ReplicationWorldObjectDeltaMaxSends = 5;
         private const int ReplicationBuildBatchWorldObjectDeltaMaxSends = 20;
         private const int ReplicationWorldObjectDeltaRetrySendMaxPerScan = 32;
+        private const int ReplicationWorldObjectDeltaRetryInspectMaxPerScan = 512;
         private const int ReplicationClientAppliedWorldObjectDeltaSequenceRetention = 65536;
         private const float ReplicationWorldObjectDeltaRecentSpawnLocationSeconds = 4f;
         private const float ReplicationResourcePileStateSnapshotSeconds = 15f;
@@ -16792,8 +16828,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private const int ReplicationBuildingStateSnapshotMaxBuildings = 256;
         private const int ReplicationBuildingStateSnapshotContextMaxCount = 4;
         private const int ReplicationResourcePileRecentLookupMaxCandidates = 12;
-        private const int ReplicationResourcePileLocationIndexBudgetPerFrame = 12;
-        private const float ReplicationResourcePileLocationIndexIntervalSeconds = 0.02f;
+        // This is a background discovery pass over reflection-heavy native pile
+        // objects. Keep it deliberately small so an otherwise idle client does not
+        // spend the whole replication frame budget indexing checkpoint state.
+        private const int ReplicationResourcePileLocationIndexBudgetPerFrame = 2;
+        private const float ReplicationResourcePileLocationIndexIntervalSeconds = 0.05f;
         private const int ReplicationCarryProbeMaxCandidates = 3;
         private const float ReplicationCarryProbeMaxDistanceSq = 144f;
         private const float ReplicationCarryPendingInferenceSeconds = 2f;
