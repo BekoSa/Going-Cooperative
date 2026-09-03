@@ -1361,9 +1361,29 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ShouldCaptureReplicationBuildTransaction()
         {
-            return !IsReplicationCaptureModeOff(replicationConfigCommandCaptureMode)
-                && replicationConfigEnabled
-                && applyingRuntimeCommandDepth <= 0;
+            if (IsReplicationCaptureModeOff(replicationConfigCommandCaptureMode)
+                || !replicationConfigEnabled
+                || applyingRuntimeCommandDepth > 0)
+            {
+                return false;
+            }
+
+            // Host-side native save/checkpoint reconstruction can invoke the same
+            // placement surfaces as real player input. Capturing those callbacks
+            // turns hundreds of already-saved buildings into new durable replay
+            // chunks during first join/resync. Existing host state is transferred
+            // by the synchronized checkpoint; only capture host-local placement
+            // after the replication runtime and peer handshake are fully ready.
+            if (replicationConfigHostMode
+                && (multiplayerLoadingInProgress
+                    || !replicationRuntimeStarted
+                    || !replicationRemoteHelloReceived
+                    || replicationTransport == null))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryGetReplicationBuildBlueprintMetadata(
