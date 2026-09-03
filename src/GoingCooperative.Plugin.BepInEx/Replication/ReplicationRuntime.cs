@@ -277,8 +277,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 UpdateReplicationBuildingLifecycleV2();
                 SendClientProofIntentIfDue();
                 SendPendingReplicationCommandIntentsIfDue();
-                ProcessReplicationResourcePileLocationIndex();
+
+                // Apply authoritative traffic before spending frame time on the
+                // checkpoint's background resource-pile index. The index uses
+                // reflection-heavy native access and previously ran first, which
+                // could consume the 4 ms runtime budget on an otherwise idle client.
                 ProcessPendingReplicationWorldObjectDeltaApplies();
+                if (ShouldYieldReplicationMainThreadWork())
+                {
+                    return;
+                }
+
+                ProcessReplicationResourcePileLocationIndex();
                 if (ShouldYieldReplicationMainThreadWork())
                 {
                     return;
@@ -491,6 +501,8 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationHostProtectedBuildBatchManifestCount = 0;
             ReplicationPendingCommandIntents.Clear();
             replicationPendingWorldObjectDeltas.Clear();
+            ReplicationWorldObjectDeltaRetryScanOrder.Clear();
+            replicationWorldObjectDeltaRetryScanCursor = 0;
             ReplicationPendingSupersedableWorldDeltaSequenceByKey.Clear();
             replicationClientAppliedWorldObjectDeltaSequences.Clear();
             ReplicationClientAppliedWorldObjectDeltaSequenceOrder.Clear();
