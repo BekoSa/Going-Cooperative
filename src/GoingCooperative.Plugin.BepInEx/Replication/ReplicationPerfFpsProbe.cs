@@ -191,6 +191,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 + worldDeltaQueue.ToString(CultureInfo.InvariantCulture)
                 + " worldDeltaCoalescableQueue="
                 + worldDeltaCoalescableQueue.ToString(CultureInfo.InvariantCulture)
+                + " pileIndexNext="
+                + replicationResourcePileLocationIndexNextIndex.ToString(CultureInfo.InvariantCulture)
+                + " pileIndexComplete="
+                + replicationResourcePileLocationIndexComplete
                 + " worldDeltaApplyBudgetPerFrame="
                 + replicationConfigWorldObjectDeltaApplyBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
                 + " worldDeltaApplyBudgetMsPerFrame="
