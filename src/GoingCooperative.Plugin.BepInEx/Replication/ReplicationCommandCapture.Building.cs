@@ -1378,7 +1378,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 && (multiplayerLoadingInProgress
                     || !replicationRuntimeStarted
                     || !replicationRemoteHelloReceived
-                    || replicationTransport == null))
+                    || replicationTransport == null
+                    || (!ReferenceEquals(instance, null)
+                        && instance!.multiplayerHostSyncPauseApplied)))
             {
                 return false;
             }
