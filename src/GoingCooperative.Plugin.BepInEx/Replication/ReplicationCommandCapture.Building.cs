@@ -27,8 +27,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool replicationBuildBatchRecoveryAttempted;
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
-        private const int ReplicationClientBuildCommandChunkPlacements = 4;
-        private const int ReplicationHostBuildReplayChunkPlacements = 4;
+        // Native BuildingPlacementManager finalization is not interruptible by
+        // the replication frame budget. Keep remote bursts to two placements so a
+        // large drag produces shorter frames while ACK pacing preserves ordering.
+        private const int ReplicationClientBuildCommandChunkPlacements = 2;
+        private const int ReplicationHostBuildReplayChunkPlacements = 2;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
         private static Type? replicationBeamViewComponentType;
