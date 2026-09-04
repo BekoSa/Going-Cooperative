@@ -32,6 +32,11 @@ namespace GoingCooperative.Plugin.BepInEx
         // large drag produces shorter frames while ACK pacing preserves ordering.
         private const int ReplicationClientBuildCommandChunkPlacements = 2;
         private const int ReplicationHostBuildReplayChunkPlacements = 2;
+        // Keep a small sliding window of host-authored replay chunks in flight.
+        // Client native apply is still frame/time-budgeted and this pump admits at
+        // most one new chunk per host frame; the window only removes RTT bubbles
+        // between two-object chunks.
+        private const int ReplicationHostBuildReplayMaxInFlightChunks = 4;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
         private static Type? replicationRoofViewComponentType;
         private static Type? replicationBeamViewComponentType;
@@ -1085,12 +1090,12 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             IsReplicationBuildingDurableBackpressured(out var durablePending);
-            if (durablePending > 0)
+            if (durablePending >= ReplicationHostBuildReplayMaxInFlightChunks)
             {
-                // ACK-paced host replay: do not admit a second placement result
-                // while any placement/result transaction is still waiting for the
-                // peer. This prevents several 4-object chunks from reaching Unity
-                // in one receive burst after a host drag.
+                // Bounded sliding window: preserve reliable ordering and the
+                // client's native apply budget without paying one full RTT for
+                // every two-object chunk. This method is called once per host frame,
+                // so the window cannot be filled in a single same-frame burst.
                 return;
             }
 
