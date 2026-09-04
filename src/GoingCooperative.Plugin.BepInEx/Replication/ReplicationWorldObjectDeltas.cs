@@ -4240,6 +4240,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2(
+                    delta,
+                    out _))
+            {
+                // The semantic area operation has already removed this exact native
+                // building. Do not make its durable safety-net ACK wait behind the
+                // normal client apply budget; the standard lifecycle apply below is
+                // now a cheap ledger/cleanup operation and immediately stops retries.
+                replicationBuildingLifecycleFastTerminalAcksV2++;
+                ApplyReplicationWorldObjectDeltaAndAck(delta);
+                return;
+            }
+
             if (replicationConfigWorldObjectDeltaApplyBudgetPerFrame <= 0)
             {
                 ApplyReplicationWorldObjectDeltaAndAck(delta);
