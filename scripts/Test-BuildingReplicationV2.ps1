@@ -223,6 +223,10 @@ Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTermi
     "Building terminals do not give semantic area replay a bounded head start."
 Require-SourcePattern $sources.Lifecycle 'ProcessPendingReplicationBuildingTerminalsV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2.*?return\s*;' `
     "Reliable terminal replay can race the semantic area operation in the same frame."
+Require-SourcePattern $sources.Lifecycle 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?state.*?removed.*?TryMapReplicationLocalBuildingByNativeUniqueIdV2.*?native-id-not-found.*?RemoveReplicationHostIdentity' `
+    "Already-removed semantic region terminals do not have a native-ID fast path."
+Require-SourcePattern $sources.WorldDeltas 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?replicationBuildingLifecycleFastTerminalAcksV2\+\+.*?ApplyReplicationWorldObjectDeltaAndAck\(delta\)' `
+    "Already-removed building terminals are still forced through the normal client apply queue."
 Require-SourcePattern $sources.Lifecycle 'ReplicationTrackedHostBuildingsByInstanceV2.*?ReferenceObjectComparer\.Instance' `
     "Host lifecycle hooks do not maintain an O(1) building-instance tracker cache."
 Require-SourcePattern $sources.Lifecycle 'TryEnsureReplicationHostBuildingTrackerV2\(.*?ReplicationTrackedHostBuildingsByInstanceV2\.TryGetValue' `
