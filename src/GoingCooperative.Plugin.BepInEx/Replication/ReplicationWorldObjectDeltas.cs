@@ -3882,6 +3882,20 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        private static bool IsReplicationBuildingRemovedLifecycleDelta(
+            ReplicationWorldObjectDelta delta)
+        {
+            return string.Equals(
+                    delta.DeltaKind,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    StringComparison.Ordinal)
+                && TryReadReplicationWorldObjectDetailToken(
+                    delta.Detail,
+                    "state",
+                    out var state)
+                && string.Equals(state, "removed", StringComparison.Ordinal);
+        }
+
         private static float GetReplicationWorldObjectDeltaRetrySeconds(
             ReplicationWorldObjectDelta delta)
         {
@@ -3898,6 +3912,16 @@ namespace GoingCooperative.Plugin.BepInEx
                 // apply queue longer than the generic retry window. Avoid duplicating
                 // the entire checkpoint while keeping command/result retries fast.
                 return ReplicationBuildingStateSnapshotRetrySeconds;
+            }
+
+            if (IsReplicationBuildingRemovedLifecycleDelta(delta))
+            {
+                // Removed rows are a durable safety net behind the semantic
+                // Cancel/Deconstruct operation. Their first send is immediate, but
+                // an eager 750 ms retry wave can overtake the client's ACKs and flood
+                // the transport receive queue. Keep the safety net reliable while
+                // giving the first copy enough time to be consumed.
+                return ReplicationBuildingRemovedTerminalRetrySeconds;
             }
 
             if (replicationPendingWorldObjectDeltas.TryGetValue(delta.Sequence, out var durablePending))
@@ -16806,6 +16830,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private const float ReplicationWorldObjectDeltaRetrySeconds = 0.75f;
         private const float ReplicationBuildingStateSnapshotRetrySeconds = 3.0f;
+        private const float ReplicationBuildingRemovedTerminalRetrySeconds = 5.0f;
         private const float ReplicationBuildingDurableRetrySeconds = 5.0f;
         private const float ReplicationStoragePolicyStateDurableRetrySeconds = 5.0f;
         private const int ReplicationWorldObjectDeltaMaxSends = 5;
