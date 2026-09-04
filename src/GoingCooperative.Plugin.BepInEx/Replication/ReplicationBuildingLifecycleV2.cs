@@ -973,6 +973,72 @@ namespace GoingCooperative.Plugin.BepInEx
             return true;
         }
 
+        private static bool TryApplyReplicationBuildingAbsentTerminalV2(
+            ReplicationWorldObjectDelta delta,
+            out string detail)
+        {
+            if (!TryReadReplicationBuildingLifecycleEnvelopeV2(
+                    delta,
+                    out var epoch,
+                    out var revision,
+                    out var state,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out detail)
+                || !string.Equals(state, "removed", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var buildingKey = delta.UniqueId.ToString(CultureInfo.InvariantCulture);
+            var disposition = replicationClientBuildingRevisionLedgerV2.EvaluateLiveDelta(
+                epoch,
+                buildingKey,
+                revision);
+            if (disposition != BuildingRevisionDisposition.Apply)
+            {
+                if (disposition == BuildingRevisionDisposition.Duplicate
+                    || disposition == BuildingRevisionDisposition.StaleRevision
+                    || disposition == BuildingRevisionDisposition.StaleEpoch
+                    || disposition == BuildingRevisionDisposition.SupersededByNewerLiveDelta)
+                {
+                    detail = "ok building-lifecycle-v2-fast-terminal-stale disposition="
+                        + disposition.ToString();
+                    return true;
+                }
+
+                detail = "building-lifecycle-v2-fast-terminal-ledger-rejected disposition="
+                    + disposition.ToString();
+                return false;
+            }
+
+            // Native absence was proven by the O(1) unique-id lookup before this
+            // helper is called. Do not resolve/destroy the same building again: the
+            // broad identity fallback can walk Unity state and turned each safety-net
+            // terminal into a 100+ ms pump handler during mass Cancel.
+            var commit = replicationClientBuildingRevisionLedgerV2.CommitLiveDelta(
+                epoch,
+                buildingKey,
+                revision,
+                delta.Sequence);
+            if (commit != BuildingRevisionDisposition.Apply)
+            {
+                detail = "building-lifecycle-v2-fast-terminal-ledger-commit-failed disposition="
+                    + commit.ToString();
+                return false;
+            }
+
+            ReplicationClientBuildingTerminalRevisionV2[delta.UniqueId] = revision;
+            ReplicationClientBuildingProgressingV2.Remove(delta.UniqueId);
+            RemoveReplicationClientBuildingPresentationV2(delta.UniqueId);
+            replicationBuildingLifecycleDeltasAppliedV2++;
+            detail = "ok building-lifecycle-v2-fast-terminal-absent";
+            return true;
+        }
+
         private static bool TryApplyReplicationBuildingLifecycleV2(
             ReplicationWorldObjectDelta delta,
             out string detail)
