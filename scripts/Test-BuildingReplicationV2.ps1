@@ -96,6 +96,10 @@ Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprint
     "Authoritative client-command batch results are not rejected on client epoch mismatch."
 Require-SourcePattern $sources.BuildBatch 'BuildingTransactionApplyLedger.*?TryBeginReplicationBuildTransaction\(.*?\.Begin\(.*?GetReplicationBuildBatchEpoch\(.*?CommitReplicationBuildTransaction\(.*?\.Commit\(.*?AbortReplicationBuildTransaction\(.*?\.Abort\(' `
     "The BuildBatch apply path is not wired to the epoch-scoped exact-once ledger."
+Require-SourcePattern $sources.BuildBatch 'TryResolveReplicationBuildBatchNativeApi\(.*?replicationBuildBatchNativeApi.*?detail\s*=\s*"cached".*?AccessTools\.TypeByName.*?AccessTools\.Method' `
+    "BuildBatch native reflection metadata is not cached across remote chunks."
+Require-SourcePattern $sources.BuildBatch 'TryApplyReplicationBuildBatchAuthoritative\(.*?TryResolveReplicationBuildBatchNativeApi\(.*?nativeApi\.SpawnFromPool.*?nativeApi\.MouseUpSpawn' `
+    "BuildBatch apply still resolves native placement methods on every remote chunk."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchPlaced\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchPlacedCore\(.*?CommitReplicationBuildTransaction\(' `
     "Host-placement batch replay is not begin/apply/commit transactional."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchResult\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchResultCore\(.*?CommitReplicationBuildTransaction\(' `
