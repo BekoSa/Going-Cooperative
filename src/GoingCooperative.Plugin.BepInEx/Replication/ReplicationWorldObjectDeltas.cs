@@ -4300,7 +4300,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     delta,
                     applied,
                     duplicate: false,
-                    fastTerminalDetail);
+                    detail: fastTerminalDetail);
                 replicationLastWorldObjectDeltaSummary =
                     "fast-terminal applied="
                     + (applied ? "yes" : "no")
