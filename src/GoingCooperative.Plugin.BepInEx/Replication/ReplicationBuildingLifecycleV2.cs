@@ -22,6 +22,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildingPresentationStepSecondsV2 = 0.25f;
         private const int ReplicationBuildingPresentationApplyBudgetV2 = 16;
         private const int ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4;
+        private const int ReplicationBuildingTerminalMaxInFlightV2 = 16;
         private const float ReplicationBuildingSemanticRegionTerminalGraceSecondsV2 = 0.4f;
         private static float replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2;
 
@@ -754,6 +755,29 @@ namespace GoingCooperative.Plugin.BepInEx
                         + ReplicationBuildingSemanticRegionTerminalGraceSecondsV2);
         }
 
+        private static int CountReplicationBuildingTerminalInFlightV2()
+        {
+            var count = 0;
+            lock (ReplicationWorldObjectDeltaLock)
+            {
+                foreach (var pending in replicationPendingWorldObjectDeltas.Values)
+                {
+                    if (!IsReplicationBuildingRemovedLifecycleDelta(pending.Delta))
+                    {
+                        continue;
+                    }
+
+                    count++;
+                    if (count >= ReplicationBuildingTerminalMaxInFlightV2)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            return count;
+        }
+
         private static void ProcessPendingReplicationBuildingTerminalsV2()
         {
             if (!replicationConfigHostMode
@@ -772,8 +796,17 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            var inFlight = CountReplicationBuildingTerminalInFlightV2();
+            if (inFlight >= ReplicationBuildingTerminalMaxInFlightV2)
+            {
+                return;
+            }
+
+            var emitBudget = Math.Min(
+                ReplicationBuildingTerminalEmitBudgetPerFrameV2,
+                ReplicationBuildingTerminalMaxInFlightV2 - inFlight);
             var processed = 0;
-            while (processed < ReplicationBuildingTerminalEmitBudgetPerFrameV2
+            while (processed < emitBudget
                 && ReplicationPendingBuildingTerminalsV2.Count > 0)
             {
                 if (!ShouldCaptureReplicationBuildingLifecycleV2())
