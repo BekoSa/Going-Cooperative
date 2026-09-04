@@ -4269,11 +4269,45 @@ namespace GoingCooperative.Plugin.BepInEx
                     out _))
             {
                 // The semantic area operation has already removed this exact native
-                // building. Do not make its durable safety-net ACK wait behind the
-                // normal client apply budget; the standard lifecycle apply below is
-                // now a cheap ledger/cleanup operation and immediately stops retries.
-                replicationBuildingLifecycleFastTerminalAcksV2++;
-                ApplyReplicationWorldObjectDeltaAndAck(delta);
+                // building. Commit only the revision ledger/presentation bookkeeping
+                // and ACK it here. Calling the general lifecycle apply would resolve
+                // the same missing native object again and can cost 100+ ms per row.
+                var applied = TryApplyReplicationBuildingAbsentTerminalV2(
+                    delta,
+                    out var fastTerminalDetail);
+                if (applied)
+                {
+                    replicationBuildingLifecycleFastTerminalAcksV2++;
+                    replicationWorldObjectDeltasApplied++;
+                    lock (ReplicationWorldObjectDeltaLock)
+                    {
+                        RecordReplicationClientAppliedWorldObjectDeltaSequence(delta.Sequence);
+                        if (!string.IsNullOrEmpty(absoluteStateKey))
+                        {
+                            ReplicationClientAppliedAbsoluteStateSequenceHighWater[absoluteStateKey] =
+                                ReplicationOrderingPolicy.AdvanceAppliedAbsoluteState(
+                                    ReplicationClientAppliedAbsoluteStateSequenceHighWater.TryGetValue(
+                                        absoluteStateKey,
+                                        out var currentHighWater)
+                                            ? currentHighWater
+                                            : -1L,
+                                    delta.Sequence);
+                        }
+                    }
+                }
+
+                SendReplicationWorldObjectDeltaAck(
+                    delta,
+                    applied,
+                    duplicate: false,
+                    fastTerminalDetail);
+                replicationLastWorldObjectDeltaSummary =
+                    "fast-terminal applied="
+                    + (applied ? "yes" : "no")
+                    + " detail="
+                    + fastTerminalDetail
+                    + " "
+                    + FormatReplicationWorldObjectDelta(delta);
                 return;
             }
 
