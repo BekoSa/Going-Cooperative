@@ -146,6 +146,8 @@ Require-Text $buildingCaptureSource 'ReplicationPendingHostBuildReplayChunks' "p
 Require-Text $buildingCaptureSource 'if \(durablePending >= ReplicationHostBuildReplayMaxInFlightChunks\)' "sliding-window host build replay admission"
 Require-Text $runtimeSource 'ProcessPendingReplicationHostBuildReplayChunks\(\);' "runtime host build replay pump"
 Require-Text $buildingLifecycleSource 'ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4' "bounded terminal lifecycle emission"
+Require-Text $buildingLifecycleSource 'ReplicationBuildingTerminalMaxInFlightV2 = 16' "bounded terminal lifecycle in-flight window"
+Require-Text $buildingLifecycleSource '(?s)CountReplicationBuildingTerminalInFlightV2\(\).*?IsReplicationBuildingRemovedLifecycleDelta.*?inFlight >= ReplicationBuildingTerminalMaxInFlightV2' "terminal lifecycle ACK window"
 Require-Text $buildingLifecycleSource 'ReplicationPendingBuildingTerminalsV2' "deferred terminal lifecycle queue"
 Require-Text $deltaSource 'deferBuildingInitialSend' "queued initial building replay/lifecycle send"
 Require-ConfigValue $trackedConfig "pathingPerfDiagnostics" "false" "safe tracked default"
