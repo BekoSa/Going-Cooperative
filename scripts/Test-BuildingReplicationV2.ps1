@@ -232,8 +232,10 @@ Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingTerminalMaxInFlight
     "Mass building terminal safety-net is not bounded by ACK progress."
 Require-SourcePattern $sources.Lifecycle 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?state.*?removed.*?TryMapReplicationLocalBuildingByNativeUniqueIdV2.*?native-id-not-found.*?RemoveReplicationHostIdentity' `
     "Already-removed semantic region terminals do not have a native-ID fast path."
-Require-SourcePattern $sources.WorldDeltas 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?replicationBuildingLifecycleFastTerminalAcksV2\+\+.*?ApplyReplicationWorldObjectDeltaAndAck\(delta\)' `
-    "Already-removed building terminals are still forced through the normal client apply queue."
+Require-SourcePattern $sources.Lifecycle 'TryApplyReplicationBuildingAbsentTerminalV2\(.*?EvaluateLiveDelta\(.*?CommitLiveDelta\(.*?ReplicationClientBuildingTerminalRevisionV2.*?RemoveReplicationClientBuildingPresentationV2' `
+    "Already-removed building terminals do not have a ledger-only apply path."
+Require-SourcePattern $sources.WorldDeltas 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?TryApplyReplicationBuildingAbsentTerminalV2\(.*?replicationBuildingLifecycleFastTerminalAcksV2\+\+.*?SendReplicationWorldObjectDeltaAck\(' `
+    "Already-removed building terminals still re-enter the heavy native lifecycle apply path."
 Require-SourcePattern $sources.Lifecycle 'ReplicationTrackedHostBuildingsByInstanceV2.*?ReferenceObjectComparer\.Instance' `
     "Host lifecycle hooks do not maintain an O(1) building-instance tracker cache."
 Require-SourcePattern $sources.Lifecycle 'TryEnsureReplicationHostBuildingTrackerV2\(.*?ReplicationTrackedHostBuildingsByInstanceV2\.TryGetValue' `
