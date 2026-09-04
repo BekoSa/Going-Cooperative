@@ -72,6 +72,7 @@ $buildingCaptureSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.
 $buildingLifecycleSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
 $motionSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationAgentMotionPresentation.cs"
 $deltaSource = Join-Path $RepositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
+$transportSource = Join-Path $RepositoryRoot "src\GoingCooperative.Core\UdpNetworkTransport.cs"
 $trackedConfig = Join-Path $RepositoryRoot "config\replication.cfg"
 
 Require-Text $configSource 'private static bool replicationConfigPathingPerfDiagnostics;' "default-false gate"
@@ -112,6 +113,7 @@ Require-Text $presenceSource 'ReplicationSelectionResolveBudgetMs = 0\.75f' "tim
 Require-Text $presenceSource 'replicationLastLocalSelectionInspected\s*>=\s*ReplicationSelectionResolveMaxInspected' "selection inspected-count early stop"
 Require-Text $presenceSource 'Stopwatch\.GetTimestamp\(\) - started >= budgetTicks' "selection identity time-budget stop"
 Require-Text $presenceSource 'IsReplicationPresenceAgentSelectionCandidate\(selected\)' "deep identity fallback restricted to agent selections"
+Require-Text $transportSource '(?s)TryReceive\(out TransportEnvelope envelope\).*?TryTakeLatestState\(\s*latestPlayerPresenceBySender.*?TryTakeLatestState\(\s*latestPlayerSelectionBySender.*?inbox\.TryDequeue' "coalesced presence priority ahead of bulk receive inbox"
 Require-Text $presenceSource 'ReplicationRemotePresenceScratch' "reused remote presence list"
 Require-Text $presenceSource 'ReplicationRemoteSelectionWantedScratch' "reused remote selection ID set"
 Require-Text $presenceSource 'ReplicationRemoteSelectionResolvedScratch' "reused remote selection transform map"
