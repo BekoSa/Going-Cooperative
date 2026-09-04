@@ -907,12 +907,11 @@ namespace GoingCooperative.Core
                 SendClientHelloIfDue();
             }
 
-            if (inbox.TryDequeue(out var queued))
-            {
-                envelope = queued;
-                return true;
-            }
-
+            // Presence/selection are already coalesced to one latest state per
+            // sender. Read them before the bulk FIFO so a burst of durable world
+            // deltas cannot make a live cursor expire while its newest position is
+            // already waiting in the transport. The bounded per-sender dictionaries
+            // prevent this priority lane from starving reliable application traffic.
             lock (latestStateLock)
             {
                 if (TryTakeLatestState(
@@ -928,7 +927,16 @@ namespace GoingCooperative.Core
                 {
                     return true;
                 }
+            }
 
+            if (inbox.TryDequeue(out var queued))
+            {
+                envelope = queued;
+                return true;
+            }
+
+            lock (latestStateLock)
+            {
                 if (latestTransformSnapshot != null)
                 {
                     envelope = latestTransformSnapshot;
