@@ -131,12 +131,13 @@ Require-SourcePattern $sources.SaveTransfer 'lock\s*\(stateLock\).*?if\s*\(isRes
 Require-SourcePattern $sources.BuildBatch 'GetReplicationBuildBatchEpoch\(\).*?multiplayerSaveTransfer\.ReplicationEpoch' `
     "Building transaction fences still use the host-global transfer epoch and will diverge after resync."
 
-# Host-local large drags are staged before the reliable map and admitted only
-# after the previous placement/result transaction is ACKed.
+# Host-local large drags are staged before the reliable map. Replay uses a
+# bounded ACK window: several small chunks may be in flight to remove RTT bubbles,
+# while the runtime pump still admits at most one new chunk per host frame.
 Require-SourcePattern $sources.Capture 'ReplicationPendingHostBuildReplayChunks.*?EmitHostLocalReplicationBuildPlacements\(.*?ReplicationPendingHostBuildReplayChunks\.Enqueue' `
     "Host-local build chunks are still registered into the reliable map in one placement frame."
-Require-SourcePattern $sources.Capture 'ProcessPendingReplicationHostBuildReplayChunks\(\).*?IsReplicationBuildingDurableBackpressured\(out\s+var\s+durablePending\).*?if\s*\(durablePending\s*>\s*0\).*?SendReplicationWorldObjectDelta' `
-    "Host-local build replay is not ACK-paced before reliable admission."
+Require-SourcePattern $sources.Capture 'ReplicationHostBuildReplayMaxInFlightChunks\s*=\s*4.*?ProcessPendingReplicationHostBuildReplayChunks\(\).*?IsReplicationBuildingDurableBackpressured\(out\s+var\s+durablePending\).*?if\s*\(durablePending\s*>=\s*ReplicationHostBuildReplayMaxInFlightChunks\).*?SendReplicationWorldObjectDelta' `
+    "Host-local build replay is not bounded by the ACK in-flight window before reliable admission."
 Require-SourcePattern $sources.Runtime 'UpdateReplicationBuildingLifecycleV2\(\);.*?ProcessPendingReplicationHostBuildReplayChunks\(\);.*?ShouldYieldReplicationMainThreadWork\(\)' `
     "The host runtime does not pump staged build replay inside the shared frame budget."
 Require-SourcePattern $sources.Capture 'ShouldCaptureReplicationBuildTransaction\(\).*?replicationConfigHostMode.*?multiplayerLoadingInProgress.*?!replicationRuntimeStarted.*?!replicationRemoteHelloReceived.*?multiplayerHostSyncPauseApplied' `
