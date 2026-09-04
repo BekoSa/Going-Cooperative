@@ -49,6 +49,7 @@ namespace GoingCooperative.Plugin.BepInEx
             new BuildingRevisionLedger(65536);
         private static long replicationBuildingLifecycleDeltasSentV2;
         private static long replicationBuildingLifecycleDeltasAppliedV2;
+        private static long replicationBuildingLifecycleFastTerminalAcksV2;
         private static long replicationBuildingLifecycleNativeEventsV2;
         private static long replicationBuildingRepairDeltasSentV2;
         private static long replicationBuildingRepairDeltasAppliedV2;
@@ -882,6 +883,61 @@ namespace GoingCooperative.Plugin.BepInEx
                     + EncodeReplicationDetailBase64(
                         FormatReplicationCanonicalBuildPlacementRecord(tracked.CanonicalRecord))
                 : detail + " buildReplay=resync-required";
+        }
+
+        private static bool IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2(
+            ReplicationWorldObjectDelta delta,
+            out string detail)
+        {
+            detail = string.Empty;
+            if (!string.Equals(
+                    delta.DeltaKind,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    StringComparison.Ordinal)
+                || delta.UniqueId <= 0L
+                || !TryReadReplicationWorldObjectDetailToken(
+                    delta.Detail,
+                    "state",
+                    out var state)
+                || !string.Equals(state, "removed", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // A semantic Cancel/Deconstruct region normally removes the whole batch
+            // before the durable per-building terminal safety net arrives. Query the
+            // game's O(1) UniqueIdBuildingDictionary directly: if this exact native
+            // ID is already gone, queuing the terminal behind hundreds of other
+            // deltas only delays its ACK and provokes host retries. We still run the
+            // normal lifecycle apply immediately afterwards so epoch/revision ledger
+            // ordering and terminal presentation cleanup remain identical.
+            if (TryMapReplicationLocalBuildingByNativeUniqueIdV2(
+                    delta.UniqueId,
+                    out _,
+                    out _,
+                    out var lookupDetail))
+            {
+                detail = "native-still-present";
+                return false;
+            }
+
+            if (!lookupDetail.StartsWith(
+                    "native-id-not-found",
+                    StringComparison.Ordinal))
+            {
+                // Manager/metadata lookup failures are not proof of removal. Leave
+                // those rows on the normal reliable apply path so repair semantics
+                // remain fail-closed.
+                detail = lookupDetail;
+                return false;
+            }
+
+            RemoveReplicationHostIdentity(
+                delta.UniqueId,
+                null,
+                "building-lifecycle-v2-fast-terminal-absent");
+            detail = lookupDetail;
+            return true;
         }
 
         private static bool TryApplyReplicationBuildingLifecycleV2(
@@ -2826,6 +2882,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationClientBuildingRevisionLedgerV2 = new BuildingRevisionLedger(65536);
             replicationBuildingLifecycleDeltasSentV2 = 0L;
             replicationBuildingLifecycleDeltasAppliedV2 = 0L;
+            replicationBuildingLifecycleFastTerminalAcksV2 = 0L;
             replicationBuildingLifecycleNativeEventsV2 = 0L;
             replicationBuildingRepairDeltasSentV2 = 0L;
             replicationBuildingRepairDeltasAppliedV2 = 0L;
@@ -2861,6 +2918,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 + replicationBuildingLifecycleDeltasSentV2.ToString(CultureInfo.InvariantCulture)
                 + " lifecycleApplied="
                 + replicationBuildingLifecycleDeltasAppliedV2.ToString(CultureInfo.InvariantCulture)
+                + " fastTerminalAcks="
+                + replicationBuildingLifecycleFastTerminalAcksV2.ToString(CultureInfo.InvariantCulture)
                 + " terminalQueue="
                 + ReplicationPendingBuildingTerminalsV2.Count.ToString(CultureInfo.InvariantCulture)
                 + " terminalSemanticGraceMs="
