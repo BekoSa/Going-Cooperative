@@ -227,6 +227,8 @@ Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTermi
     "Building terminals do not give semantic area replay a bounded head start."
 Require-SourcePattern $sources.Lifecycle 'ProcessPendingReplicationBuildingTerminalsV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2.*?return\s*;' `
     "Reliable terminal replay can race the semantic area operation in the same frame."
+Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingTerminalMaxInFlightV2\s*=\s*16.*?CountReplicationBuildingTerminalInFlightV2\(\).*?IsReplicationBuildingRemovedLifecycleDelta.*?inFlight\s*>=\s*ReplicationBuildingTerminalMaxInFlightV2' `
+    "Mass building terminal safety-net is not bounded by ACK progress."
 Require-SourcePattern $sources.Lifecycle 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?state.*?removed.*?TryMapReplicationLocalBuildingByNativeUniqueIdV2.*?native-id-not-found.*?RemoveReplicationHostIdentity' `
     "Already-removed semantic region terminals do not have a native-ID fast path."
 Require-SourcePattern $sources.WorldDeltas 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?replicationBuildingLifecycleFastTerminalAcksV2\+\+.*?ApplyReplicationWorldObjectDeltaAndAck\(delta\)' `
