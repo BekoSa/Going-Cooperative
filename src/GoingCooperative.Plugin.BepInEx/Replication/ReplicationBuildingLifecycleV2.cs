@@ -941,9 +941,9 @@ namespace GoingCooperative.Plugin.BepInEx
             // before the durable per-building terminal safety net arrives. Query the
             // game's O(1) UniqueIdBuildingDictionary directly: if this exact native
             // ID is already gone, queuing the terminal behind hundreds of other
-            // deltas only delays its ACK and provokes host retries. We still run the
-            // normal lifecycle apply immediately afterwards so epoch/revision ledger
-            // ordering and terminal presentation cleanup remain identical.
+            // deltas only delays its ACK and provokes host retries. The caller can
+            // then commit only revision/presentation bookkeeping without performing
+            // the broad native identity lookup a second time.
             if (TryMapReplicationLocalBuildingByNativeUniqueIdV2(
                     delta.UniqueId,
                     out _,
