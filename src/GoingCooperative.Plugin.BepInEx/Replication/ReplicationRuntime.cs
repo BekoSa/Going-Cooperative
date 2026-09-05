@@ -274,6 +274,16 @@ namespace GoingCooperative.Plugin.BepInEx
             }
             else
             {
+                // Mass Cancel/Deconstruct replay is tiled on clients before durable
+                // lifecycle rows are applied. Successful native tiles make those
+                // per-building terminal rows O(1) fast-acks instead of hundreds of
+                // heavyweight DestroyBuilding calls.
+                ProcessPendingReplicationClientMassBuildingRegionReplay();
+                if (ShouldYieldReplicationMainThreadWork())
+                {
+                    return;
+                }
+
                 UpdateReplicationBuildingLifecycleV2();
                 SendClientProofIntentIfDue();
                 SendPendingReplicationCommandIntentsIfDue();
@@ -469,6 +479,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationLastRegionOrderStateKey = string.Empty;
             replicationLastRegionOrderStateRealtime = 0f;
             replicationRegionOrderStateCaptureSuppressionDepth = 0;
+            ResetReplicationClientMassBuildingRegionReplay();
             replicationWorkerManageAuthoritativeApplyDepth = 0;
             replicationLastHostManagementMutationPayload = string.Empty;
             replicationLastHostManagementMutationRealtime = 0f;
@@ -2794,6 +2805,40 @@ namespace GoingCooperative.Plugin.BepInEx
             if (replicationConfigHostMode)
             {
                 replicationLastRegionOrderStateSummary = "ignored-on-host " + FormatReplicationRegionOrderState(state);
+                return;
+            }
+
+            if (IsReplicationMassBuildingRegionOrder(state.OrderType))
+            {
+                if (ScheduleReplicationClientMassBuildingRegionReplay(
+                        state,
+                        out var scheduleDetail))
+                {
+                    replicationLastRegionOrderStateSummary =
+                        "client-tiled-replay "
+                        + scheduleDetail
+                        + " "
+                        + FormatReplicationRegionOrderState(state);
+                    LogReplicationInfo(
+                        "Going Cooperative replication region order state scheduled "
+                        + replicationLastRegionOrderStateSummary);
+                }
+                else
+                {
+                    // Never fall back to one giant SelectionManager.OnOrderCancel /
+                    // OnOrderDeconstruction call on a client. A malformed/stale native
+                    // selection array can throw and strand the entire authoritative
+                    // area. Durable BuildingLifecycleV2 rows remain the fail-closed
+                    // safety net if scheduling itself cannot be established.
+                    replicationLastRegionOrderStateSummary =
+                        "client-tiled-replay-not-scheduled "
+                        + scheduleDetail
+                        + " safetyNet=BuildingLifecycleV2 "
+                        + FormatReplicationRegionOrderState(state);
+                    LogReplicationWarning(
+                        "Going Cooperative replication region order state "
+                        + replicationLastRegionOrderStateSummary);
+                }
                 return;
             }
 
