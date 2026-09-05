@@ -2810,6 +2810,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (IsReplicationMassBuildingRegionOrder(state.OrderType))
             {
+                RememberReplicationClientMassBuildingRegionTombstone(state);
                 if (ScheduleReplicationClientMassBuildingRegionReplay(
                         state,
                         out var scheduleDetail))
