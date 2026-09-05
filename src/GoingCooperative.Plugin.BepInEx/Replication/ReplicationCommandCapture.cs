@@ -376,7 +376,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (pendingDurable != null
                 && IsReplicationBuildBatchCommand(command)
-                && !IsOldestUnrespondedReplicationBuildBatch(
+                && !IsOldestPendingReplicationBuildBatch(
                     command.Sequence))
             {
                 instance?.LogReplicationInfo(
@@ -450,7 +450,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var buildBatch = IsReplicationBuildBatchCommand(pending.Command);
                 if (buildBatch
                     && !pending.HostResponded
-                    && !IsOldestUnrespondedReplicationBuildBatch(
+                    && !IsOldestPendingReplicationBuildBatch(
                         pending.Command.Sequence))
                 {
                     continue;
@@ -595,14 +595,18 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationBuildBatchResultDormantRetrySeconds = 15f;
         private const float ReplicationStoragePolicyStateProofRetrySeconds = 2f;
 
-        private static bool IsOldestUnrespondedReplicationBuildBatch(
+        private static bool IsOldestPendingReplicationBuildBatch(
             long commandSequence)
         {
+            // A BuildBatch is not complete when its command ACK arrives. The exact
+            // authoritative BuildBatchResult owns commit/reject truth and clears the
+            // pending receipt only after reconciliation. Keep later chunks parked
+            // until that result has been applied so one drag cannot accumulate many
+            // protected host manifests and trip durable backpressure for every peer.
             foreach (var pair in ReplicationPendingCommandIntents)
             {
                 var candidate = pair.Value;
-                if (candidate.HostResponded
-                    || !IsReplicationBuildBatchCommand(candidate.Command))
+                if (!IsReplicationBuildBatchCommand(candidate.Command))
                 {
                     continue;
                 }
