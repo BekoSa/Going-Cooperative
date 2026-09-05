@@ -470,12 +470,15 @@ namespace GoingCooperative.Plugin.BepInEx
             var vec3IntType = AccessTools.TypeByName("NSMedieval.Vec3Int");
             var baseBuildingInstanceType = AccessTools.TypeByName(
                 "NSMedieval.BuildingComponents.BaseBuildingInstance");
+            var baseBuildingViewComponentType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BaseBuildingViewComponent");
             if (placementManagerType == null
                 || buildingsPoolType == null
                 || blueprintType == null
                 || factionOwnershipType == null
                 || vec3IntType == null
-                || baseBuildingInstanceType == null)
+                || baseBuildingInstanceType == null
+                || baseBuildingViewComponentType == null)
             {
                 api = null!;
                 detail = "build-batch-required-type-missing";
@@ -494,6 +497,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 placementManagerType,
                 "MouseUpSpawnInitializeBuildings",
                 new[] { typeof(int) });
+            var objectPlacedOnMap = AccessTools.Method(
+                placementManagerType,
+                "ObjectPlacedOnMap",
+                new[] { baseBuildingViewComponentType });
             var spawnRoofAutoTesting = AccessTools.Method(
                 placementManagerType,
                 "SpawnRoofAutoTesting",
@@ -523,6 +530,7 @@ namespace GoingCooperative.Plugin.BepInEx
             if (getBuildableBase == null
                 || spawnFromPool == null
                 || mouseUpSpawn == null
+                || objectPlacedOnMap == null
                 || spawnRoofAutoTesting == null)
             {
                 api = null!;
@@ -532,6 +540,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     + (spawnFromPool != null)
                     + " finalize="
                     + (mouseUpSpawn != null)
+                    + " objectPlaced="
+                    + (objectPlacedOnMap != null)
                     + " roof="
                     + (spawnRoofAutoTesting != null);
                 return false;
@@ -549,6 +559,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 GetBuildableBase = getBuildableBase,
                 SpawnFromPool = spawnFromPool,
                 MouseUpSpawn = mouseUpSpawn,
+                ObjectPlacedOnMap = objectPlacedOnMap,
                 SpawnRoofAutoTesting = spawnRoofAutoTesting,
                 SpawnBeamAxisX = spawnBeamAxisX,
                 SpawnBeamAxisZ = spawnBeamAxisZ,
@@ -607,6 +618,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var getBuildableBase = nativeApi.GetBuildableBase;
                 var spawnFromPool = nativeApi.SpawnFromPool;
                 var mouseUpSpawn = nativeApi.MouseUpSpawn;
+                var objectPlacedOnMap = nativeApi.ObjectPlacedOnMap;
                 var spawnRoofAutoTesting = nativeApi.SpawnRoofAutoTesting;
                 var spawnBeamAxisX = nativeApi.SpawnBeamAxisX;
                 var spawnBeamAxisZ = nativeApi.SpawnBeamAxisZ;
@@ -716,6 +728,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         state.Set("raycastGridPrevious", firstPosition);
 
                         var groupSpawned = 0;
+                        var groupSpawnedViews = new List<object>();
                         for (var i = 0; i < group.Count; i++)
                         {
                             var itemIndex = group[i];
@@ -735,13 +748,63 @@ namespace GoingCooperative.Plugin.BepInEx
                             }
 
                             resultCapture.TrackSpawnedView(itemIndex, view);
+                            groupSpawnedViews.Add(view);
                             groupSpawned++;
                         }
 
                         if (groupSpawned > 0)
                         {
                             state.Set("raycastGridCurrent", lastPosition);
-                            mouseUpSpawn.Invoke(placementManager, new object[] { angleY });
+                            var committedBeforeFinalize = resultCapture.CommittedCount;
+                            try
+                            {
+                                mouseUpSpawn.Invoke(
+                                    placementManager,
+                                    new object[] { angleY });
+                            }
+                            catch (TargetInvocationException ex)
+                                when (ex.InnerException is NullReferenceException
+                                    && resultCapture.CommittedCount == committedBeforeFinalize)
+                            {
+                                // MouseUpSpawnInitializeBuildings depends on live drag/
+                                // raycast state owned by the host cursor. Remote batches
+                                // can legitimately have no such hit and some native
+                                // branches dereference it before calling ObjectPlacedOnMap.
+                                // Fall back only when nothing committed yet, and require
+                                // every exact spawned view to pass through the native
+                                // ObjectPlacedOnMap commit hook before accepting the group.
+                                for (var viewIndex = 0;
+                                     viewIndex < groupSpawnedViews.Count;
+                                     viewIndex++)
+                                {
+                                    objectPlacedOnMap.Invoke(
+                                        placementManager,
+                                        new[] { groupSpawnedViews[viewIndex] });
+                                }
+
+                                var directCommitted =
+                                    resultCapture.CommittedCount
+                                    - committedBeforeFinalize;
+                                if (directCommitted != groupSpawned)
+                                {
+                                    throw new InvalidOperationException(
+                                        "build-batch-direct-finalize-incomplete committed="
+                                            + directCommitted.ToString(CultureInfo.InvariantCulture)
+                                            + "/"
+                                            + groupSpawned.ToString(CultureInfo.InvariantCulture),
+                                        ex);
+                                }
+
+                                instance?.LogReplicationWarning(
+                                    "Going Cooperative BuildBatch native drag finalize NRE recovered via ObjectPlacedOnMap"
+                                        + " blueprintId="
+                                        + blueprintId
+                                        + " angleY="
+                                        + angleY.ToString(CultureInfo.InvariantCulture)
+                                        + " count="
+                                        + groupSpawned.ToString(CultureInfo.InvariantCulture));
+                            }
+
                             placed += groupSpawned;
                         }
                     }
@@ -1186,6 +1249,7 @@ namespace GoingCooperative.Plugin.BepInEx
             public MethodInfo GetBuildableBase { get; set; } = null!;
             public MethodInfo SpawnFromPool { get; set; } = null!;
             public MethodInfo MouseUpSpawn { get; set; } = null!;
+            public MethodInfo ObjectPlacedOnMap { get; set; } = null!;
             public MethodInfo SpawnRoofAutoTesting { get; set; } = null!;
             public MethodInfo? SpawnBeamAxisX { get; set; }
             public MethodInfo? SpawnBeamAxisZ { get; set; }
