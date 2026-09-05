@@ -935,7 +935,60 @@ namespace GoingCooperative.Plugin.BepInEx
                     0,
                     0,
                     string.Empty);
-                if (!TryApplyReplicationBuildingNativeStateV2(
+                var itemApplied = false;
+                string itemDetail;
+                if (TryMapReplicationLocalBuildingByNativeUniqueIdV2(
+                        hostId,
+                        out var candidate,
+                        out var buildingInstance,
+                        out var nativeLookupDetail)
+                    && buildingInstance != null)
+                {
+                    applyingRuntimeCommandDepth++;
+                    try
+                    {
+                        itemApplied = TryDestroyReplicationBuildingNativeV2(
+                            buildingInstance,
+                            out itemDetail);
+                    }
+                    finally
+                    {
+                        applyingRuntimeCommandDepth--;
+                    }
+
+                    if (itemApplied)
+                    {
+                        RecordReplicationClientBuildingRemovalTombstoneV2(
+                            hostId,
+                            delta.SentRealtime);
+                        RemoveReplicationHostIdentity(
+                            hostId,
+                            candidate,
+                            "building-terminal-batch-v2-removed");
+                    }
+                }
+                else if (nativeLookupDetail.StartsWith(
+                    "native-id-not-found",
+                    StringComparison.Ordinal))
+                {
+                    // The semantic region replay already removed this building.
+                    // Do not fall back to the broad identity resolver: that was the
+                    // dominant 100+ ms-per-terminal cost in mass Cancel.
+                    RecordReplicationClientBuildingRemovalTombstoneV2(
+                        hostId,
+                        delta.SentRealtime);
+                    RemoveReplicationHostIdentity(
+                        hostId,
+                        null,
+                        "building-terminal-batch-v2-already-removed");
+                    itemApplied = true;
+                    itemDetail = nativeLookupDetail;
+                }
+                else
+                {
+                    // Manager metadata failures are not proof of absence. Preserve
+                    // fail-closed repair semantics for this rare path.
+                    itemApplied = TryApplyReplicationBuildingNativeStateV2(
                         itemDelta,
                         "removed",
                         string.Empty,
@@ -944,7 +997,10 @@ namespace GoingCooperative.Plugin.BepInEx
                         forbidden: false,
                         markedForDestruction: false,
                         allowExactRepairSeed: false,
-                        out var itemDetail))
+                        out itemDetail);
+                }
+
+                if (!itemApplied)
                 {
                     detail = "building-terminal-batch-v2-apply-failed index="
                         + i.ToString(CultureInfo.InvariantCulture)
