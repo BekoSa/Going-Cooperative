@@ -5471,7 +5471,8 @@ namespace GoingCooperative.Plugin.BepInEx
                 : string.Empty;
 
             var provisionalMismatchDetail = string.Empty;
-            if (TryReadReplicationWorldObjectDetailLong(delta.Detail, "commandSequence", out var commandSequence)
+            if (IsReplicationClientOriginBuildingDelta(delta)
+                && TryReadReplicationWorldObjectDetailLong(delta.Detail, "commandSequence", out var commandSequence)
                 && TryReadReplicationWorldObjectDetailInt(delta.Detail, "itemIndex", out var itemIndex)
                 && TryGetReplicationProvisionalBuildView(commandSequence, itemIndex, out var provisionalView)
                 && provisionalView != null)
@@ -5583,6 +5584,25 @@ namespace GoingCooperative.Plugin.BepInEx
             var resultDetail = TryReadReplicationWorldObjectDetailToken(delta.Detail, "result", out var result)
                 ? " hostResult=" + result
                 : string.Empty;
+
+            if (TryReadReplicationWorldObjectDetailToken(
+                    delta.Detail,
+                    "player",
+                    out var commandPlayerId)
+                && !string.Equals(
+                    commandPlayerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal))
+            {
+                // Rejection only rolls back the command owner's provisional view.
+                // Other clients receive this reliable result too; a same-numbered
+                // local commandSequence must never make them remove their own object.
+                detail = "ok foreign rejected-building ignored player="
+                    + commandPlayerId
+                    + buildingTypeDetail
+                    + resultDetail;
+                return true;
+            }
 
             if (TryReadReplicationWorldObjectDetailLong(delta.Detail, "commandSequence", out var commandSequence)
                 && TryReadReplicationWorldObjectDetailInt(delta.Detail, "itemIndex", out var itemIndex))
