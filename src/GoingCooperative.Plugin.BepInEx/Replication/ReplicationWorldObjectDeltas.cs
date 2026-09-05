@@ -10347,6 +10347,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
+            var localPlayerResult = string.Equals(
+                playerId,
+                GetReplicationLocalPeerId(),
+                StringComparison.Ordinal);
+
             if (replicationBuildBatchRecoveryRequested)
             {
                 detail = "building-batch-result-quarantined-full-resync-pending";
@@ -10403,13 +10408,18 @@ namespace GoingCooperative.Plugin.BepInEx
 
                     if (TryGetReplicationLocalObjectByHostId(hostIds[i], out var mapped, out _) && mapped != null)
                     {
-                        ClearReplicationBuildBatchReplayFailure(commandSequence, i);
-                        RemoveReplicationProvisionalBuildView(commandSequence, i);
+                        ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
+                        if (localPlayerResult)
+                        {
+                            RemoveReplicationProvisionalBuildView(commandSequence, i);
+                        }
                         resolved++;
                         continue;
                     }
 
-                    if (TryGetReplicationProvisionalBuildView(commandSequence, i, out var provisional) && provisional != null)
+                    if (localPlayerResult
+                        && TryGetReplicationProvisionalBuildView(commandSequence, i, out var provisional)
+                        && provisional != null)
                     {
                         if (TryValidateReplicationProvisionalBuildView(
                                 provisional,
@@ -10421,7 +10431,7 @@ namespace GoingCooperative.Plugin.BepInEx
                                 hostIds[i],
                                 provisional,
                                 "building-batch-provisional-result");
-                            ClearReplicationBuildBatchReplayFailure(commandSequence, i);
+                            ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
                             RemoveReplicationProvisionalBuildView(commandSequence, i);
                             resolved++;
                             continue;
@@ -10432,7 +10442,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         {
                             if (!TryRemoveReplicationBuildingCandidate(provisional, itemDelta, out var mismatchRemoveDetail))
                             {
-                                var failures = RecordReplicationBuildBatchReplayFailure(commandSequence, i);
+                                var failures = RecordReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
                                 if (ReplicationOrderingPolicy.ShouldEscalateBuildBatchReplay(
                                         failures,
                                         ReplicationBuildBatchReplayMaxFailures))
@@ -10456,7 +10466,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         RemoveReplicationProvisionalBuildView(commandSequence, i);
                     }
 
-                    var previousFailures = GetReplicationBuildBatchReplayFailureCount(commandSequence, i);
+                    var previousFailures = GetReplicationBuildBatchReplayFailureCount(playerId, commandSequence, i);
                     if (ReplicationOrderingPolicy.ShouldEscalateBuildBatchReplay(
                             previousFailures,
                             ReplicationBuildBatchReplayMaxFailures))
@@ -10472,6 +10482,16 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
+                if (!localPlayerResult)
+                {
+                    ClearReplicationBuildBatchReplayFailure(
+                        playerId,
+                        commandSequence,
+                        i);
+                    resolved++;
+                    continue;
+                }
+
                 if (TryGetReplicationProvisionalBuildView(commandSequence, i, out var rejectedProvisional)
                     && rejectedProvisional != null)
                 {
@@ -10480,7 +10500,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     {
                         if (!TryRemoveReplicationBuildingCandidate(rejectedProvisional, itemDelta, out var removeDetail))
                         {
-                            var failures = RecordReplicationBuildBatchReplayFailure(commandSequence, i);
+                            var failures = RecordReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
                             if (ReplicationOrderingPolicy.ShouldEscalateBuildBatchReplay(
                                     failures,
                                     ReplicationBuildBatchReplayMaxFailures))
@@ -10502,7 +10522,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
                 }
 
-                ClearReplicationBuildBatchReplayFailure(commandSequence, i);
+                ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
                 RemoveReplicationProvisionalBuildView(commandSequence, i);
                 resolved++;
             }
@@ -10528,6 +10548,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         {
                             var failedItemIndex = pendingIndexes[pendingIndex];
                             var failures = RecordReplicationBuildBatchReplayFailure(
+                                playerId,
                                 commandSequence,
                                 failedItemIndex);
                             if (ReplicationOrderingPolicy.ShouldEscalateBuildBatchReplay(
@@ -10542,7 +10563,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         }
 
                         var originalIndex = pendingIndexes[pendingIndex];
-                        ClearReplicationBuildBatchReplayFailure(commandSequence, originalIndex);
+                        ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, originalIndex);
                         RegisterReplicationBuildingHostIdentity(
                             hostIds[originalIndex],
                             committed.View,
@@ -10569,7 +10590,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var reconciled = resolved == records.Count;
             var receiptCleared = reconciled
-                && CompleteReplicationBuildBatchPendingIntent(playerId, commandSequence);
+                && localPlayerResult
+                && CompleteReplicationBuildBatchPendingIntent(
+                    playerId,
+                    commandSequence);
             detail = (reconciled ? "ok " : "building-batch-result-incomplete ")
                 + "resolved="
                 + resolved.ToString(CultureInfo.InvariantCulture)
