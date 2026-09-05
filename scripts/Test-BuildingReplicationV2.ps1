@@ -13,9 +13,11 @@ $paths = @{
     Runtime = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntime.cs"
     BuildBatch = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildBatch.cs"
     Capture = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.Building.cs"
+    CommandCapture = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.cs"
     Lifecycle = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
     WorldDeltas = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
     SaveTransfer = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveTransfer.cs"
+    SaveWorkflow = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveWorkflow.cs"
     RegionOrders = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.RegionOrders.cs"
     RuntimeActions = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntimeCommandActions.cs"
 }
@@ -130,6 +132,57 @@ Require-SourcePattern $sources.SaveTransfer 'lock\s*\(stateLock\).*?if\s*\(isRes
     "Targeted resync does not atomically publish the incremented peer epoch before sending the bundle."
 Require-SourcePattern $sources.BuildBatch 'GetReplicationBuildBatchEpoch\(\).*?multiplayerSaveTransfer\.ReplicationEpoch' `
     "Building transaction fences still use the host-global transfer epoch and will diverge after resync."
+
+# Client-authored BuildBatch chunks are serialized by authoritative result, not
+# merely by the command ACK. A result is the durable per-item commit proof and is
+# the only event allowed to clear the preceding pending receipt.
+Require-SourcePattern $sources.CommandCapture 'SendReplicationLocalCommandIntent\(.*?IsReplicationBuildBatchCommand\(command\).*?!IsOldestPendingReplicationBuildBatch\(\s*command\.Sequence\).*?queued behind prior authoritative transaction' `
+    "Client BuildBatch admission does not park later chunks behind the oldest unresolved result."
+Require-SourcePattern $sources.CommandCapture 'SendPendingReplicationCommandIntentsIfDue\(\).*?if\s*\(buildBatch\s*&&\s*!IsOldestPendingReplicationBuildBatch\(\s*pending\.Command\.Sequence\)\).*?continue\s*;' `
+    "BuildBatch retry scheduling can release later chunks after CommandAck but before BuildBatchResult reconciliation."
+Require-SourcePattern $sources.CommandCapture 'IsOldestPendingReplicationBuildBatch\(.*?foreach\s*\(var\s+pair\s+in\s+ReplicationPendingCommandIntents\).*?if\s*\(!IsReplicationBuildBatchCommand\(candidate\.Command\)\).*?candidate\.Command\.Sequence\s*<\s*commandSequence' `
+    "BuildBatch ordering does not treat host-responded-but-unreconciled receipts as pending."
+if ([regex]::IsMatch(
+        $sources.CommandCapture,
+        'IsOldestPendingReplicationBuildBatch\(.*?candidate\.HostResponded',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("BuildBatch result pacing regressed to ignoring host-responded pending transactions.")
+}
+
+# Build command sequence is per-player, not global. Broadcast authoritative results
+# must update world state on every observer without touching another player's local
+# provisional view, pending receipt, or replay-failure quarantine.
+Require-SourcePattern $sources.CommandCapture 'CompleteReplicationBuildBatchPendingIntent\(.*?string\.Equals\(\s*playerId,\s*GetReplicationLocalPeerId\(\),\s*StringComparison\.Ordinal\).*?ReplicationPendingCommandIntents\.TryGetValue\(\s*commandKey.*?return\s+false\s*;' `
+    "BuildBatch pending receipts are not fail-closed to the exact local player lane."
+if ([regex]::IsMatch(
+        $sources.CommandCapture,
+        'CompleteReplicationBuildBatchPendingIntent\(.*?pair\.Value\.Command\.Sequence\s*==\s*commandSequence',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("BuildBatch pending receipt still has the unsafe sequence-only multi-peer fallback.")
+}
+Require-SourcePattern $sources.Capture 'BuildReplicationBuildBatchReplayFailureKey\(\s*string\s+playerId,\s*long\s+commandSequence,\s*int\s+itemIndex\).*?return\s+playerId.*?commandSequence.*?itemIndex' `
+    "BuildBatch replay-failure state is not scoped by playerId."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchResultCore\(.*?localPlayerResult\s*=\s*string\.Equals\(\s*playerId,\s*GetReplicationLocalPeerId\(\).*?localPlayerResult\s*&&\s*TryGetReplicationProvisionalBuildView' `
+    "Broadcast BuildBatchResult can still resolve another player's command against the local provisional sequence lane."
+Require-SourcePattern $sources.WorldDeltas 'if\s*\(!localPlayerResult\).*?ClearReplicationBuildBatchReplayFailure\(\s*playerId,\s*commandSequence,\s*i\).*?resolved\+\+.*?continue\s*;' `
+    "Foreign rejected BuildBatch results can still mutate local provisional objects."
+Require-SourcePattern $sources.WorldDeltas 'receiptCleared\s*=\s*reconciled\s*&&\s*localPlayerResult\s*&&\s*CompleteReplicationBuildBatchPendingIntent' `
+    "Foreign BuildBatchResult can still clear a local pending receipt."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintPlaced\(.*?IsReplicationClientOriginBuildingDelta\(delta\).*?TryGetReplicationProvisionalBuildView' `
+    "Legacy placed-result reconciliation can still consume another player's provisional sequence."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintRejected\(.*?"player".*?!string\.Equals\(\s*commandPlayerId,\s*GetReplicationLocalPeerId\(\).*?return\s+true\s*;' `
+    "Legacy rejected-result reconciliation can still remove another player's provisional object."
+
+# The Host page must not synchronously rescan the save catalog on Unity's UI thread.
+# Received-client checkpoints retain their explicit import path separately.
+Require-SourcePattern $sources.SaveWorkflow 'GetMultiplayerSaves\(\).*?GlobalSaveController\.Instance\.SavesList' `
+    "Host save picker no longer reads the existing native save catalog."
+if ([regex]::IsMatch(
+        $sources.SaveWorkflow,
+        'GetMultiplayerSaves\(\).*?SynchronizeWithFiles\(',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("Host save picker performs synchronous SynchronizeWithFiles and can freeze the main-menu thread.")
+}
 
 # Host-local large drags are staged before the reliable map. Replay uses a
 # bounded ACK window: several small chunks may be in flight to remove RTT bubbles,
