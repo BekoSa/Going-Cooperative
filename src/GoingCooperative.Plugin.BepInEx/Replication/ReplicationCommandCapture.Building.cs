@@ -1820,25 +1820,44 @@ namespace GoingCooperative.Plugin.BepInEx
             return rolledBack;
         }
 
-        private static string BuildReplicationBuildBatchReplayFailureKey(long commandSequence, int itemIndex)
+        private static string BuildReplicationBuildBatchReplayFailureKey(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
-            return commandSequence.ToString(CultureInfo.InvariantCulture)
+            // Command sequences are monotonic only inside one player lane. Observers
+            // receive results from every peer, so sequence/item alone is not unique.
+            return playerId
+                + "|"
+                + commandSequence.ToString(CultureInfo.InvariantCulture)
                 + "|"
                 + itemIndex.ToString(CultureInfo.InvariantCulture);
         }
 
-        private static int GetReplicationBuildBatchReplayFailureCount(long commandSequence, int itemIndex)
+        private static int GetReplicationBuildBatchReplayFailureCount(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
             return ReplicationBuildBatchReplayFailures.TryGetValue(
-                BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex),
+                BuildReplicationBuildBatchReplayFailureKey(
+                    playerId,
+                    commandSequence,
+                    itemIndex),
                 out var failures)
                 ? failures
                 : 0;
         }
 
-        private static int RecordReplicationBuildBatchReplayFailure(long commandSequence, int itemIndex)
+        private static int RecordReplicationBuildBatchReplayFailure(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
-            var key = BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex);
+            var key = BuildReplicationBuildBatchReplayFailureKey(
+                playerId,
+                commandSequence,
+                itemIndex);
             var failures = ReplicationBuildBatchReplayFailures.TryGetValue(key, out var existing)
                 ? existing + 1
                 : 1;
@@ -1846,10 +1865,16 @@ namespace GoingCooperative.Plugin.BepInEx
             return failures;
         }
 
-        private static void ClearReplicationBuildBatchReplayFailure(long commandSequence, int itemIndex)
+        private static void ClearReplicationBuildBatchReplayFailure(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
             ReplicationBuildBatchReplayFailures.Remove(
-                BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex));
+                BuildReplicationBuildBatchReplayFailureKey(
+                    playerId,
+                    commandSequence,
+                    itemIndex));
         }
 
         private static void ScheduleReplicationBuildBatchRecovery(string reason)
