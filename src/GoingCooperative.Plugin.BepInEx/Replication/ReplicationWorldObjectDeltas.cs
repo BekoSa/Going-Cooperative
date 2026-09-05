@@ -2535,6 +2535,14 @@ namespace GoingCooperative.Plugin.BepInEx
                         && string.Equals(
                             pending.Delta.DeltaKind,
                             ReplicationBuildingBlueprintBatchResultDeltaKind,
+                            StringComparison.Ordinal)
+                        && TryReadReplicationWorldObjectDetailToken(
+                            pending.Delta.Detail,
+                            "player",
+                            out var pendingPlayerId)
+                        && string.Equals(
+                            pendingPlayerId,
+                            command.PlayerId,
                             StringComparison.Ordinal))
                     {
                         pendingResult = pending.Delta;
