@@ -449,7 +449,6 @@ namespace GoingCooperative.Plugin.BepInEx
                 var storagePolicy = IsReplicationStoragePolicyUpdateCommand(pending.Command);
                 var buildBatch = IsReplicationBuildBatchCommand(pending.Command);
                 if (buildBatch
-                    && !pending.HostResponded
                     && !IsOldestPendingReplicationBuildBatch(
                         pending.Command.Sequence))
                 {
