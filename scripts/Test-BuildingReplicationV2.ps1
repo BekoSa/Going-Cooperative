@@ -277,6 +277,16 @@ Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionEventPost
     "Host-local Cancel/Deconstruct does not publish its exact semantic region replay after native completion."
 Require-SourcePattern $sources.Runtime 'SendReplicationRegionOrderStateIfSupported\(.*?IsReplicationMassBuildingRegionOrder\(orderType\).*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(' `
     "Client-originated Cancel/Deconstruct does not pace durable terminals behind the canonical region state."
+Require-SourcePattern $sources.Runtime 'HandleReplicationRegionOrderState\(.*?IsReplicationMassBuildingRegionOrder\(state\.OrderType\).*?ScheduleReplicationClientMassBuildingRegionReplay\(.*?return\s*;' `
+    "Client authoritative Cancel/Deconstruct can still invoke one giant SelectionManager region action synchronously."
+Require-SourcePattern $sources.RegionOrders 'ReplicationClientMassBuildingRegionBaseTileSpan\s*=\s*6.*?ScheduleReplicationClientMassBuildingRegionReplay\(.*?ReplicationPendingClientMassBuildingRegionTiles\.Enqueue' `
+    "Client mass-building region replay is not split into bounded initial tiles."
+Require-SourcePattern $sources.RegionOrders 'ProcessPendingReplicationClientMassBuildingRegionReplay\(.*?TryInvokeSelectionManagerRegionAction\(.*?TrySplitReplicationClientMassBuildingRegionTile\(.*?FailedLeafTiles\+\+' `
+    "Client mass-building region replay does not split failed native tiles down to a lifecycle safety-net leaf."
+Require-SourcePattern $sources.Runtime 'ProcessPendingReplicationClientMassBuildingRegionReplay\(\);.*?ShouldYieldReplicationMainThreadWork\(\).*?UpdateReplicationBuildingLifecycleV2\(\).*?ProcessPendingReplicationWorldObjectDeltaApplies\(\)' `
+    "Client tiled Cancel/Deconstruct replay is not frame-budgeted ahead of terminal world-delta application."
+Require-SourcePattern $sources.Runtime 'replicationRegionOrderStateCaptureSuppressionDepth\s*=\s*0\s*;.*?ResetReplicationClientMassBuildingRegionReplay\(\)' `
+    "Client mass-building replay queue is not cleared across replication runtime reset/resync."
 Require-SourcePattern $sources.RegionOrders 'replicationRegionSelectionActionDepth.*?ReplicationRegionResourceSurfacePostfix\(.*?replicationRegionSelectionActionFrame\s*==\s*Time\.frameCount.*?return\s*;' `
     "Cancel/Deconstruct side-effect resource callbacks can still emit a duplicate region command."
 Require-SourcePattern $sources.RegionOrders 'ZoneSelectionFinished.*?orderType.*?None.*?replicationLastRegionOrderType.*?Cancel.*?Deconstruct.*?return\s+true\s*;' `
