@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using GoingCooperative.Core;
+using GoingCooperative.Core.Replication;
 using HarmonyLib;
 using UnityEngine;
 
