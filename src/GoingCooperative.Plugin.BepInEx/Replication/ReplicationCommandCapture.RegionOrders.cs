@@ -1782,7 +1782,9 @@ namespace GoingCooperative.Plugin.BepInEx
             for (var i = ReplicationClientMassBuildingRegionTombstones.Count - 1; i >= 0; i--)
             {
                 var tombstone = ReplicationClientMassBuildingRegionTombstones[i];
-                if (buildSentRealtime > tombstone.SentRealtime + 0.001f
+                if (!ReplicationOrderingPolicy.IsBuildSupersededByRemoval(
+                        buildSentRealtime,
+                        tombstone.SentRealtime)
                     || !DoesReplicationBuildPlacementOverlapRegionXZ(
                         record,
                         tombstone.MinX,
