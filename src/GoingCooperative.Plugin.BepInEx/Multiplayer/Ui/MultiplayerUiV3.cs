@@ -99,8 +99,10 @@ namespace GoingCooperative.Plugin.BepInEx
             multiplayerCanvasHostInput = null;
             multiplayerCanvasPortInput = null;
             multiplayerCanvasSessionInput = null;
+            multiplayerCanvasNicknameInput = null;
             multiplayerCanvasMessageText = null;
             multiplayerCanvasStatusValuesText = null;
+            multiplayerCanvasRosterText = null;
             multiplayerCanvasTransferPhaseText = null;
             multiplayerCanvasTransferDetailText = null;
             multiplayerCanvasTransferFill = null;
@@ -126,23 +128,23 @@ namespace GoingCooperative.Plugin.BepInEx
             var content = multiplayerCanvasContent!.transform;
             var heading = CreateV2Heading(content, "Page Title", "Play together", 23f, TextAlignmentOptions.TopLeft);
             SetMultiplayerCanvasRect(heading.rectTransform, new Vector2(0f, 0.88f), new Vector2(1f, 1f), Vector2.zero, Vector2.zero);
-            CreateMultiplayerCanvasText(content, "Page Subtitle", "The host runs the world; the friend plays inside it. Pick your role to continue.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.8f), new Vector2(1f, 0.9f));
+            CreateMultiplayerCanvasText(content, "Page Subtitle", "Direct/IP supports a live host world with up to four players. Players can join later without restarting the settlement.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.8f), new Vector2(1f, 0.9f));
 
             var hostCard = BuildV2Card(content, "Host Card", new Vector2(0f, 0.16f), new Vector2(0.49f, 0.74f));
             var hostTitle = CreateV2Heading(hostCard.transform, "Title", "HOST", 26f, TextAlignmentOptions.TopLeft);
             SetMultiplayerCanvasRect(hostTitle.rectTransform, new Vector2(0.08f, 0.68f), new Vector2(0.92f, 0.92f), Vector2.zero, Vector2.zero);
-            CreateMultiplayerCanvasText(hostCard.transform, "Body", "Run your settlement for both players. Your save is sent to the joining player automatically.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.08f, 0.34f), new Vector2(0.92f, 0.66f));
+            CreateMultiplayerCanvasText(hostCard.transform, "Body", "Host a save or the world you are already playing. New Direct players receive a fresh checkpoint and join in progress.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.08f, 0.34f), new Vector2(0.92f, 0.66f));
             var hostButton = CreateV2Button(hostCard.transform, "Host", "HOST A GAME", () => ShowMultiplayerCanvasPageV3(MultiplayerMenuPage.Host), V2Accent, 16f);
             SetMultiplayerCanvasRect(hostButton.GetComponent<RectTransform>(), new Vector2(0.08f, 0.08f), new Vector2(0.92f, 0.28f), Vector2.zero, Vector2.zero);
 
             var joinCard = BuildV2Card(content, "Join Card", new Vector2(0.51f, 0.16f), new Vector2(1f, 0.74f));
             var joinTitle = CreateV2Heading(joinCard.transform, "Title", "JOIN", 26f, TextAlignmentOptions.TopLeft);
             SetMultiplayerCanvasRect(joinTitle.rectTransform, new Vector2(0.08f, 0.68f), new Vector2(0.92f, 0.92f), Vector2.zero, Vector2.zero);
-            CreateMultiplayerCanvasText(joinCard.transform, "Body", "Play inside a friend's settlement. Accept a Steam invite or enter the address they share with you.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.08f, 0.34f), new Vector2(0.92f, 0.66f));
+            CreateMultiplayerCanvasText(joinCard.transform, "Body", "Join a settlement that is already running. The current host checkpoint downloads and loads automatically.", 13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.08f, 0.34f), new Vector2(0.92f, 0.66f));
             var joinButton = CreateV2Button(joinCard.transform, "Join", "JOIN A GAME", () => ShowMultiplayerCanvasPageV3(MultiplayerMenuPage.Join), V2Accent, 16f);
             SetMultiplayerCanvasRect(joinButton.GetComponent<RectTransform>(), new Vector2(0.08f, 0.08f), new Vector2(0.92f, 0.28f), Vector2.zero, Vector2.zero);
 
-            CreateMultiplayerCanvasText(content, "Notice", "Experimental build · both computers need the same game version and the same Going Cooperative release.", 12, FontStyle.Normal, TextAnchor.MiddleCenter, V2Muted, new Vector2(0.02f, 0.02f), new Vector2(0.98f, 0.12f));
+            CreateMultiplayerCanvasText(content, "Notice", "Experimental build · every player needs the same game version and Going Cooperative release. Steam remains on the legacy two-player path for now.", 12, FontStyle.Normal, TextAnchor.MiddleCenter, V2Muted, new Vector2(0.02f, 0.02f), new Vector2(0.98f, 0.12f));
         }
 
         private void BuildV3StepHeading(string title, string subtitle, MultiplayerMenuPage backPage)
@@ -188,114 +190,406 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             EnsureDirectHostSessionCode();
             var content = multiplayerCanvasContent!.transform;
-            var steamMode = MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam;
-            BuildV3StepHeading("Host a game", steamMode
-                ? "The selected save is sent to your friend through Steam. No port forwarding needed."
-                : "The selected save is sent to the joining player over your LAN or VPN.", MultiplayerMenuPage.Home);
+            var steamMode =
+                MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam;
+            BuildV3StepHeading(
+                "Host a game",
+                steamMode
+                    ? "Steam currently uses the legacy two-player session path."
+                    : multiplayerMainMenuActive
+                        ? "Load a save and keep the session open for players who join later."
+                        : "Open the settlement you are already playing. No world restart is required.",
+                MultiplayerMenuPage.Home);
             BuildV3ModeSelector(content, 0.66f, 0.8f);
 
-            var saveCard = BuildV2Card(content, "Save Card", new Vector2(0f, 0.46f), new Vector2(1f, 0.64f));
-            CreateMultiplayerCanvasText(saveCard.transform, "Save Label", "WORLD TO HOST", 12, FontStyle.Bold, TextAnchor.MiddleLeft, V2Muted, new Vector2(0.03f, 0.55f), new Vector2(0.6f, 0.95f));
-            CreateMultiplayerCanvasText(saveCard.transform, "Selected Save", GetSelectedMultiplayerSaveLabel(), 15, FontStyle.Bold, TextAnchor.MiddleLeft, V2TextColor, new Vector2(0.03f, 0.08f), new Vector2(0.82f, 0.6f));
-            var previousSave = CreateV2Button(saveCard.transform, "Previous Save", "<", SelectPreviousMultiplayerSave, V2Field, 14f);
-            SetMultiplayerCanvasRect(previousSave.GetComponent<RectTransform>(), new Vector2(0.84f, 0.15f), new Vector2(0.905f, 0.85f), Vector2.zero, Vector2.zero);
-            var nextSave = CreateV2Button(saveCard.transform, "Next Save", ">", SelectNextMultiplayerSave, V2Field, 14f);
-            SetMultiplayerCanvasRect(nextSave.GetComponent<RectTransform>(), new Vector2(0.92f, 0.15f), new Vector2(0.99f, 0.85f), Vector2.zero, Vector2.zero);
+            var saveCard = BuildV2Card(
+                content,
+                "Save Card",
+                new Vector2(0f, 0.47f),
+                new Vector2(1f, 0.64f));
+            if (multiplayerMainMenuActive || steamMode)
+            {
+                CreateMultiplayerCanvasText(
+                    saveCard.transform,
+                    "Save Label",
+                    "WORLD TO HOST",
+                    12,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleLeft,
+                    V2Muted,
+                    new Vector2(0.03f, 0.55f),
+                    new Vector2(0.6f, 0.95f));
+                CreateMultiplayerCanvasText(
+                    saveCard.transform,
+                    "Selected Save",
+                    GetSelectedMultiplayerSaveLabel(),
+                    15,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleLeft,
+                    V2TextColor,
+                    new Vector2(0.03f, 0.08f),
+                    new Vector2(0.82f, 0.6f));
+                var previousSave = CreateV2Button(
+                    saveCard.transform,
+                    "Previous Save",
+                    "<",
+                    SelectPreviousMultiplayerSave,
+                    V2Field,
+                    14f);
+                SetMultiplayerCanvasRect(
+                    previousSave.GetComponent<RectTransform>(),
+                    new Vector2(0.84f, 0.15f),
+                    new Vector2(0.905f, 0.85f),
+                    Vector2.zero,
+                    Vector2.zero);
+                var nextSave = CreateV2Button(
+                    saveCard.transform,
+                    "Next Save",
+                    ">",
+                    SelectNextMultiplayerSave,
+                    V2Field,
+                    14f);
+                SetMultiplayerCanvasRect(
+                    nextSave.GetComponent<RectTransform>(),
+                    new Vector2(0.92f, 0.15f),
+                    new Vector2(0.99f, 0.85f),
+                    Vector2.zero,
+                    Vector2.zero);
+            }
+            else
+            {
+                CreateMultiplayerCanvasText(
+                    saveCard.transform,
+                    "Current World",
+                    "CURRENT WORLD  ·  JOIN-IN-PROGRESS",
+                    15,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleLeft,
+                    V2TextColor,
+                    new Vector2(0.03f, 0.1f),
+                    new Vector2(0.97f, 0.9f));
+            }
 
-            multiplayerCanvasPortInput = CreateV2Input("Listen port", MultiplayerMenu.PortText, 0.34f);
+            multiplayerCanvasNicknameInput = CreateV2Input(
+                "Nickname",
+                MultiplayerMenu.Nickname,
+                0.39f);
+            multiplayerCanvasNicknameInput.characterLimit =
+                MultiplayerNickname.MaxLength;
+            multiplayerCanvasPortInput = CreateV2Input(
+                "Listen port",
+                MultiplayerMenu.PortText,
+                0.29f);
+
             if (steamMode)
             {
-                CreateMultiplayerCanvasText(content, "Steam Info", GetMultiplayerSteamStatusLine()
-                    + "\nHOST first, then invite a friend from the Steam overlay. Their game connects through Steam relay.",
-                    13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.16f), new Vector2(0.66f, 0.32f));
-                var invite = CreateV2Button(content, "Invite", "INVITE FRIENDS", OpenV2SteamInviteDialog, V2Card, 13f);
-                SetMultiplayerCanvasRect(invite.GetComponent<RectTransform>(), new Vector2(0.68f, 0.21f), new Vector2(0.98f, 0.31f), Vector2.zero, Vector2.zero);
+                MultiplayerMenu.RequestedPlayerLimit = 2;
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Steam Info",
+                    GetMultiplayerSteamStatusLine()
+                        + "\nSteam multiplayer is still limited to the legacy two-player path in this revision.",
+                    12,
+                    FontStyle.Normal,
+                    TextAnchor.UpperLeft,
+                    V2Muted,
+                    new Vector2(0f, 0.11f),
+                    new Vector2(0.67f, 0.25f));
+                var invite = CreateV2Button(
+                    content,
+                    "Invite",
+                    "INVITE FRIEND",
+                    OpenV2SteamInviteDialog,
+                    V2Card,
+                    13f);
+                SetMultiplayerCanvasRect(
+                    invite.GetComponent<RectTransform>(),
+                    new Vector2(0.7f, 0.15f),
+                    new Vector2(0.98f, 0.24f),
+                    Vector2.zero,
+                    Vector2.zero);
             }
             else
             {
                 if (replicationConfigDirectTransportSecurityV1)
                 {
-                    multiplayerCanvasSessionInput = CreateV2Input("Session code", MultiplayerMenu.DirectSessionCode, 0.23f);
+                    multiplayerCanvasSessionInput = CreateV2Input(
+                        "Session code",
+                        MultiplayerMenu.DirectSessionCode,
+                        0.19f);
                 }
 
-                CreateMultiplayerCanvasText(content, "Preflight", "Share this address: " + GetMultiplayerLanAddressSummary() + ":" + MultiplayerMenu.PortText
-                    + "   ·   Plugin " + GoingCooperativeConstants.Version + "   ·   Protocol " + GetMultiplayerProtocolLabel(),
-                    13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.155f), new Vector2(1f, 0.21f));
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Player Limit Label",
+                    "DIRECT PLAYER LIMIT",
+                    12,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleLeft,
+                    V2Muted,
+                    new Vector2(0f, 0.105f),
+                    new Vector2(0.22f, 0.17f));
+                var playerLimit = CreateV2Button(
+                    content,
+                    "Player Limit",
+                    MultiplayerMenu.RequestedPlayerLimit.ToString(
+                        CultureInfo.InvariantCulture)
+                        + (MultiplayerMenu.RequestedPlayerLimit > 4
+                            ? "  EXPERIMENTAL"
+                            : " PLAYERS"),
+                    CycleMultiplayerPlayerLimit,
+                    MultiplayerMenu.RequestedPlayerLimit <= 4
+                        ? V2AccentDark
+                        : V2Card,
+                    12f);
+                SetMultiplayerCanvasRect(
+                    playerLimit.GetComponent<RectTransform>(),
+                    new Vector2(0.23f, 0.105f),
+                    new Vector2(0.48f, 0.17f),
+                    Vector2.zero,
+                    Vector2.zero);
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Preflight",
+                    "Share "
+                        + GetMultiplayerLanAddressSummary()
+                        + ":"
+                        + MultiplayerMenu.PortText
+                        + " · new players get a checkpoint automatically",
+                    12,
+                    FontStyle.Normal,
+                    TextAnchor.MiddleLeft,
+                    V2Muted,
+                    new Vector2(0.5f, 0.105f),
+                    new Vector2(1f, 0.17f));
             }
 
-            var start = CreateV2Button(content, "Start", steamMode ? "HOST OVER STEAM" : "HOST", StartMultiplayerCanvasHostV3, V2Accent, 15f);
-            SetMultiplayerCanvasRect(start.GetComponent<RectTransform>(), new Vector2(0f, 0.02f), new Vector2(0.28f, 0.125f), Vector2.zero, Vector2.zero);
-            multiplayerCanvasMessageText = CreateMultiplayerCanvasText(content, "Message", MultiplayerMenu.StatusMessage, 12, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.31f, 0.02f), new Vector2(1f, 0.125f));
+            var start = CreateV2Button(
+                content,
+                "Start",
+                steamMode
+                    ? "HOST OVER STEAM"
+                    : multiplayerMainMenuActive
+                        ? "HOST & LOAD"
+                        : "HOST CURRENT WORLD",
+                StartMultiplayerCanvasHostV3,
+                V2Accent,
+                15f);
+            SetMultiplayerCanvasRect(
+                start.GetComponent<RectTransform>(),
+                new Vector2(0f, 0.01f),
+                new Vector2(0.29f, 0.09f),
+                Vector2.zero,
+                Vector2.zero);
+            multiplayerCanvasMessageText = CreateMultiplayerCanvasText(
+                content,
+                "Message",
+                MultiplayerMenu.StatusMessage,
+                12,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                V2Muted,
+                new Vector2(0.32f, 0.01f),
+                new Vector2(1f, 0.09f));
         }
 
         private void BuildV3JoinPage()
         {
             var content = multiplayerCanvasContent!.transform;
-            var steamMode = MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam;
-            BuildV3StepHeading("Join a game", steamMode
-                ? "Accept a Steam invite and this connects automatically — or enter the host's SteamID64."
-                : "Enter the address the host shared with you.", MultiplayerMenuPage.Home);
+            var steamMode =
+                MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam;
+            BuildV3StepHeading(
+                "Join a game",
+                steamMode
+                    ? "Steam currently joins the legacy two-player session path."
+                    : "Join a live settlement. The current checkpoint loads automatically; there is no shared PLAY barrier.",
+                MultiplayerMenuPage.Home);
             BuildV3ModeSelector(content, 0.66f, 0.8f);
+
+            multiplayerCanvasNicknameInput = CreateV2Input(
+                "Nickname",
+                MultiplayerMenu.Nickname,
+                0.54f);
+            multiplayerCanvasNicknameInput.characterLimit =
+                MultiplayerNickname.MaxLength;
 
             if (steamMode)
             {
-                multiplayerCanvasHostInput = CreateV2Input("Host SteamID64", MultiplayerMenu.SteamHostIdText, 0.5f);
-                CreateMultiplayerCanvasText(content, "Steam Hint", GetMultiplayerSteamStatusLine()
-                    + "\nAccepting a Steam invite fills this in and connects on its own; the field is only needed for manual joins between friends.",
-                    13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.24f), new Vector2(1f, 0.46f));
+                multiplayerCanvasHostInput = CreateV2Input(
+                    "Host SteamID64",
+                    MultiplayerMenu.SteamHostIdText,
+                    0.42f);
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Steam Hint",
+                    GetMultiplayerSteamStatusLine()
+                        + "\nAccepting a Steam invite fills this in automatically.",
+                    13,
+                    FontStyle.Normal,
+                    TextAnchor.UpperLeft,
+                    V2Muted,
+                    new Vector2(0f, 0.18f),
+                    new Vector2(1f, 0.36f));
             }
             else
             {
-                multiplayerCanvasHostInput = CreateV2Input("Host address", MultiplayerMenu.HostAddress, 0.5f);
-                multiplayerCanvasPortInput = CreateV2Input("Port", MultiplayerMenu.PortText, 0.38f);
+                multiplayerCanvasHostInput = CreateV2Input(
+                    "Host address",
+                    MultiplayerMenu.HostAddress,
+                    0.42f);
+                multiplayerCanvasPortInput = CreateV2Input(
+                    "Port",
+                    MultiplayerMenu.PortText,
+                    0.32f);
                 if (replicationConfigDirectTransportSecurityV1)
                 {
-                    multiplayerCanvasSessionInput = CreateV2Input("Session code", MultiplayerMenu.DirectSessionCode, 0.26f);
+                    multiplayerCanvasSessionInput = CreateV2Input(
+                        "Session code",
+                        MultiplayerMenu.DirectSessionCode,
+                        0.22f);
                 }
 
-                CreateMultiplayerCanvasText(content, "Compatibility", replicationConfigDirectTransportSecurityV1
-                    ? "A matching plugin build, protocol, and session code must respond before the session becomes Connected."
-                    : "A matching plugin build and protocol must respond before the session becomes Connected.",
-                    13, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0f, 0.155f), new Vector2(1f, 0.23f));
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Compatibility",
+                    "Same game/mod/protocol required. Once verified, the host sends a current-world checkpoint and this client joins automatically.",
+                    12,
+                    FontStyle.Normal,
+                    TextAnchor.UpperLeft,
+                    V2Muted,
+                    new Vector2(0f, 0.11f),
+                    new Vector2(1f, 0.19f));
             }
 
-            var connect = CreateV2Button(content, "Connect", steamMode ? "CONNECT VIA STEAM" : "CONNECT", StartMultiplayerCanvasJoinV3, V2Accent, 15f);
-            SetMultiplayerCanvasRect(connect.GetComponent<RectTransform>(), new Vector2(0f, 0.02f), new Vector2(0.28f, 0.125f), Vector2.zero, Vector2.zero);
-            multiplayerCanvasMessageText = CreateMultiplayerCanvasText(content, "Message", MultiplayerMenu.StatusMessage, 12, FontStyle.Normal, TextAnchor.UpperLeft, V2Muted, new Vector2(0.31f, 0.02f), new Vector2(1f, 0.125f));
+            var connect = CreateV2Button(
+                content,
+                "Connect",
+                steamMode ? "CONNECT VIA STEAM" : "JOIN LIVE WORLD",
+                StartMultiplayerCanvasJoinV3,
+                V2Accent,
+                15f);
+            SetMultiplayerCanvasRect(
+                connect.GetComponent<RectTransform>(),
+                new Vector2(0f, 0.01f),
+                new Vector2(0.29f, 0.09f),
+                Vector2.zero,
+                Vector2.zero);
+            multiplayerCanvasMessageText = CreateMultiplayerCanvasText(
+                content,
+                "Message",
+                MultiplayerMenu.StatusMessage,
+                12,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                V2Muted,
+                new Vector2(0.32f, 0.01f),
+                new Vector2(1f, 0.09f));
         }
 
         private void BuildV3SessionPage()
         {
             var content = multiplayerCanvasContent!.transform;
-            BuildV3StepHeading("Session", "Live replication and compatibility state.", MultiplayerMenuPage.Home);
-            var card = BuildV2Card(content, "Status Card", new Vector2(0f, 0.3f), new Vector2(1f, 0.78f));
-            CreateMultiplayerCanvasText(card.transform, "Labels", "Connection\nRole\nEndpoint\nProtocol\nPlugin\nHandshake", 14, FontStyle.Bold, TextAnchor.UpperLeft, V2Muted, new Vector2(0.03f, 0.08f), new Vector2(0.25f, 0.92f));
-            multiplayerCanvasStatusValuesText = CreateMultiplayerCanvasText(card.transform, "Values", BuildMultiplayerCanvasStatusValues(), 14, FontStyle.Normal, TextAnchor.UpperLeft, V2TextColor, new Vector2(0.26f, 0.08f), new Vector2(0.97f, 0.92f));
-            if (replicationConfigSteamNetworking)
+            BuildV3StepHeading(
+                "Live session",
+                "The world keeps running while this menu is closed. Direct players may join later.",
+                MultiplayerMenuPage.Home);
+
+            var card = BuildV2Card(
+                content,
+                "Status Card",
+                new Vector2(0f, 0.48f),
+                new Vector2(1f, 0.78f));
+            CreateMultiplayerCanvasText(
+                card.transform,
+                "Labels",
+                "Connection\nRole\nNickname\nEndpoint\nPlayers\nProtocol\nPlugin\nHandshake",
+                13,
+                FontStyle.Bold,
+                TextAnchor.UpperLeft,
+                V2Muted,
+                new Vector2(0.03f, 0.05f),
+                new Vector2(0.25f, 0.95f));
+            multiplayerCanvasStatusValuesText = CreateMultiplayerCanvasText(
+                card.transform,
+                "Values",
+                BuildMultiplayerCanvasStatusValues(),
+                13,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                V2TextColor,
+                new Vector2(0.26f, 0.05f),
+                new Vector2(0.97f, 0.95f));
+
+            multiplayerCanvasRosterText = CreateMultiplayerCanvasText(
+                content,
+                "Roster",
+                BuildMultiplayerCanvasRosterText(),
+                13,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                V2TextColor,
+                new Vector2(0f, 0.22f),
+                new Vector2(1f, 0.45f));
+
+            if (replicationConfigSteamNetworking
+                && MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam)
             {
-                CreateMultiplayerCanvasText(content, "Steam Status", GetMultiplayerSteamStatusLine(), 12, FontStyle.Normal, TextAnchor.MiddleLeft, V2Muted, new Vector2(0f, 0.23f), new Vector2(1f, 0.29f));
+                CreateMultiplayerCanvasText(
+                    content,
+                    "Steam Status",
+                    GetMultiplayerSteamStatusLine(),
+                    11,
+                    FontStyle.Normal,
+                    TextAnchor.MiddleLeft,
+                    V2Muted,
+                    new Vector2(0f, 0.17f),
+                    new Vector2(1f, 0.21f));
             }
 
-            var disconnect = CreateV2Button(content, "Disconnect", "DISCONNECT", () =>
+            var disconnect = CreateV2Button(
+                content,
+                "Disconnect",
+                replicationConfigHostMode ? "CLOSE SESSION" : "LEAVE SESSION",
+                () =>
+                {
+                    StopMultiplayerSession();
+                    ShowMultiplayerCanvasPageV3(MultiplayerMenuPage.Home);
+                },
+                V2Card,
+                14f);
+            SetMultiplayerCanvasRect(
+                disconnect.GetComponent<RectTransform>(),
+                new Vector2(0f, 0.08f),
+                new Vector2(0.24f, 0.16f),
+                Vector2.zero,
+                Vector2.zero);
+
+            if (!replicationConfigHostMode && replicationRuntimeStarted)
             {
-                StopMultiplayerSession();
-                ShowMultiplayerCanvasPageV3(MultiplayerMenuPage.Home);
-            }, V2Card, 14f);
-            SetMultiplayerCanvasRect(disconnect.GetComponent<RectTransform>(), new Vector2(0f, 0.11f), new Vector2(0.24f, 0.215f), Vector2.zero, Vector2.zero);
-            var play = CreateV2Button(content, "Play", "PLAY", MarkMultiplayerReadyToPlay, V2Accent, 14f);
-            SetMultiplayerCanvasRect(play.GetComponent<RectTransform>(), new Vector2(0.26f, 0.11f), new Vector2(0.5f, 0.215f), Vector2.zero, Vector2.zero);
-            if (!replicationConfigHostMode)
-            {
-                var resync = CreateV2Button(content, "Resync", "FULL RESYNC", RequestMultiplayerCanvasResync, V2AccentDark, 14f);
-                SetMultiplayerCanvasRect(resync.GetComponent<RectTransform>(), new Vector2(0.52f, 0.11f), new Vector2(0.76f, 0.215f), Vector2.zero, Vector2.zero);
+                var resync = CreateV2Button(
+                    content,
+                    "Resync",
+                    "FULL RESYNC",
+                    RequestMultiplayerCanvasResync,
+                    V2AccentDark,
+                    14f);
+                SetMultiplayerCanvasRect(
+                    resync.GetComponent<RectTransform>(),
+                    new Vector2(0.27f, 0.08f),
+                    new Vector2(0.51f, 0.16f),
+                    Vector2.zero,
+                    Vector2.zero);
             }
 
-            CreateV2TransferProgress(0.0f, 0.09f);
+            CreateV2TransferProgress(0.0f, 0.065f);
         }
 
         private void StartMultiplayerCanvasHostV3()
         {
-            MultiplayerMenu.PortText = multiplayerCanvasPortInput?.text ?? MultiplayerMenu.PortText;
+            MultiplayerMenu.Nickname = MultiplayerNickname.Normalize(
+                multiplayerCanvasNicknameInput?.text ?? MultiplayerMenu.Nickname);
+            MultiplayerMenu.PortText =
+                multiplayerCanvasPortInput?.text ?? MultiplayerMenu.PortText;
             string detail;
             if (MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam)
             {
@@ -321,6 +615,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void StartMultiplayerCanvasJoinV3()
         {
+            MultiplayerMenu.Nickname = MultiplayerNickname.Normalize(
+                multiplayerCanvasNicknameInput?.text ?? MultiplayerMenu.Nickname);
             string detail;
             if (MultiplayerMenu.ConnectionMode == MultiplayerConnectionMode.Steam)
             {

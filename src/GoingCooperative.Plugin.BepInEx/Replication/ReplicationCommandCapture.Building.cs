@@ -20,12 +20,28 @@ namespace GoingCooperative.Plugin.BepInEx
             new Dictionary<string, ReplicationProvisionalBuildView>(StringComparer.Ordinal);
         private static readonly Dictionary<string, int> ReplicationBuildBatchReplayFailures =
             new Dictionary<string, int>(StringComparer.Ordinal);
+        private static readonly Queue<ReplicationPendingHostBuildReplayChunk> ReplicationPendingHostBuildReplayChunks =
+            new Queue<ReplicationPendingHostBuildReplayChunk>();
         private static long replicationBuildCaptureTransactionSequence;
         private static bool replicationBuildBatchRecoveryRequested;
         private static bool replicationBuildBatchRecoveryAttempted;
         private static string replicationBuildBatchRecoveryReason = string.Empty;
         private const int ReplicationBuildBatchReplayMaxFailures = 8;
+        // Native BuildingPlacementManager finalization is not interruptible by
+        // the replication frame budget. Keep remote bursts to two placements so a
+        // large drag produces shorter frames while ACK pacing preserves ordering.
+        private const int ReplicationClientBuildCommandChunkPlacements = 2;
+        private const int ReplicationHostBuildReplayChunkPlacements = 2;
+        // Keep a small sliding window of host-authored replay chunks in flight.
+        // Client native apply is still frame/time-budgeted and this pump admits at
+        // most one new chunk per host frame; the window only removes RTT bubbles
+        // between two-object chunks.
+        private const int ReplicationHostBuildReplayMaxInFlightChunks = 4;
         private static ReplicationBuildSemanticContext? replicationActiveBuildSemanticContext;
+        private static Type? replicationRoofViewComponentType;
+        private static Type? replicationBeamViewComponentType;
+        private static readonly Dictionary<int, ReplicationBuildBlueprintMetadataCacheEntry> ReplicationBuildBlueprintMetadataByIdentity =
+            new Dictionary<int, ReplicationBuildBlueprintMetadataCacheEntry>();
 
         private static readonly string[] ReplicationBuildBlueprintIdMemberNames =
         {
@@ -249,6 +265,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationBuildOnLeftMouseUpPrefix(out ReplicationBuildCaptureTransaction? __state)
         {
+            MarkReplicationInteractiveQoS(0.65f);
             __state = null;
             if (!ShouldCaptureReplicationBuildTransaction())
             {
@@ -263,6 +280,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationBuildObjectPlacedOnMapPrefix(object __0)
         {
+            MarkReplicationInteractiveQoS(0.35f);
             if (__0 == null)
             {
                 return;
@@ -428,12 +446,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            if (!TryExtractReplicationBuildPayloadFields(
+            if (!TryGetReplicationBuildBlueprintMetadata(
                     blueprint,
-                    "Player",
                     out var blueprintId,
                     out var buildingType,
                     out var faction,
+                    out var unsupportedCategory,
                     out var payloadDetail)
                 || !TryResolveReplicationBuildingCandidateGrid(view, out var x, out var y, out var z))
             {
@@ -505,7 +523,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            if (IsUnsupportedReplicationBuildBlueprint(blueprint, out var unsupportedCategory)
+            if (unsupportedCategory.Length > 0
                 && !IsSupportedReplicationSemanticRecord(record, unsupportedCategory))
             {
                 unsupportedReason = "semantic-category=" + unsupportedCategory;
@@ -535,7 +553,8 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             record = null!;
             detail = "beam-topology-unreadable";
-            var beamViewType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BeamViewComponent");
+            var beamViewType = replicationBeamViewComponentType ??=
+                AccessTools.TypeByName("NSMedieval.BuildingComponents.BeamViewComponent");
             if (beamViewType == null || !(view is Component component))
             {
                 return false;
@@ -601,7 +620,8 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             roofRecord = null;
             detail = "not-roof";
-            var roofViewType = AccessTools.TypeByName("NSMedieval.BuildingComponents.RoofViewComponent");
+            var roofViewType = replicationRoofViewComponentType ??=
+                AccessTools.TypeByName("NSMedieval.BuildingComponents.RoofViewComponent");
             if (roofViewType == null || !(view is Component component))
             {
                 return false;
@@ -822,22 +842,24 @@ namespace GoingCooperative.Plugin.BepInEx
             for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             {
                 var group = groups[groupIndex];
-                // One native drag is one semantic command. The transport layer owns
-                // byte fragmentation/reassembly; splitting here would create multiple
-                // independently accepted host transactions and break drag atomicity.
+                // One native drag is one semantic command. Client-authored input
+                // stays atomic here. Host-local state is already committed and its
+                // downstream replay is chunked later only for bounded client apply.
                 if (replicationConfigHostMode)
                 {
-                    EmitHostLocalReplicationBuildPlacements(
-                        group,
-                        transaction.TransactionId,
-                        groupIndex);
+                    if (EmitHostLocalReplicationBuildPlacements(
+                            group,
+                            transaction.TransactionId,
+                            groupIndex))
+                    {
+                        emitted += group.Count;
+                    }
                 }
                 else
                 {
                     EmitClientReplicationBuildBatch(group, transaction.TransactionId);
+                    emitted += group.Count;
                 }
-
-                emitted += group.Count;
             }
 
             instance?.LogReplicationInfo("Going Cooperative replication build transaction committed id="
@@ -861,92 +883,378 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            var first = placements[0];
-            var records = new string[placements.Count];
-            for (var i = 0; i < placements.Count; i++)
+            // The client has already created provisional views locally. Send the
+            // authoritative request in small sequential chunks: the durable command
+            // queue deliberately holds every later BuildBatch until the previous
+            // sequence receives its host ACK. This bounds the host Unity apply cost
+            // without producing a simultaneous command burst.
+            var chunkIndex = 0;
+            for (var offset = 0;
+                 offset < placements.Count;
+                 offset += ReplicationClientBuildCommandChunkPlacements)
             {
-                records[i] = FormatReplicationBuildPlacementRecord(placements[i].Record);
-            }
+                var count = Math.Min(
+                    ReplicationClientBuildCommandChunkPlacements,
+                    placements.Count - offset);
+                var first = placements[offset];
+                var records = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    records[i] = FormatReplicationBuildPlacementRecord(
+                        placements[offset + i].Record);
+                }
 
-            var command = new LockstepCommand(
-                ReplicationClientPeerId,
-                ++replicationIntentSequence,
-                0L,
-                CommandKind.Build,
-                LockstepCommandPayloads.CreateBuildBatchPayload(
-                    first.BlueprintId,
-                    first.BuildingType,
-                    first.Faction,
-                    afterLoading: false,
-                    records,
-                    GetReplicationBuildBatchEpoch()),
-                null,
-                first.Record.X,
-                first.Record.Y,
-                first.Record.Z);
+                var command = new LockstepCommand(
+                    GetReplicationLocalPeerId(),
+                    ++replicationIntentSequence,
+                    0L,
+                    CommandKind.Build,
+                    LockstepCommandPayloads.CreateBuildBatchPayload(
+                        first.BlueprintId,
+                        first.BuildingType,
+                        first.Faction,
+                        afterLoading: false,
+                        records,
+                        GetReplicationBuildBatchEpoch()),
+                    null,
+                    first.Record.X,
+                    first.Record.Y,
+                    first.Record.Z);
 
-            if (IsReplicationCaptureModeShadow(replicationConfigCommandCaptureMode))
-            {
-                LogReplicationLocalCommandShadow(command, "build-transaction:" + transactionId.ToString(CultureInfo.InvariantCulture));
-                return;
-            }
-
-            if (!IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode))
-            {
-                return;
-            }
-
-            for (var i = 0; i < placements.Count; i++)
-            {
-                ReplicationProvisionalBuildViews[BuildReplicationProvisionalBuildKey(command.Sequence, i)] =
-                    new ReplicationProvisionalBuildView(placements[i].View, Time.realtimeSinceStartup);
-            }
-
-            SendReplicationLocalCommandIntent(
-                command,
-                "build-transaction:"
+                var source = "build-transaction:"
                     + transactionId.ToString(CultureInfo.InvariantCulture)
+                    + " chunk="
+                    + chunkIndex.ToString(CultureInfo.InvariantCulture)
+                    + " offset="
+                    + offset.ToString(CultureInfo.InvariantCulture)
                     + " count="
-                    + placements.Count.ToString(CultureInfo.InvariantCulture));
+                    + count.ToString(CultureInfo.InvariantCulture)
+                    + "/"
+                    + placements.Count.ToString(CultureInfo.InvariantCulture);
+
+                if (IsReplicationCaptureModeShadow(replicationConfigCommandCaptureMode))
+                {
+                    LogReplicationLocalCommandShadow(command, source);
+                    chunkIndex++;
+                    continue;
+                }
+
+                if (!IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode))
+                {
+                    return;
+                }
+
+                for (var i = 0; i < count; i++)
+                {
+                    ReplicationProvisionalBuildViews[
+                        BuildReplicationProvisionalBuildKey(
+                            command.Sequence,
+                            i)] =
+                        new ReplicationProvisionalBuildView(
+                            placements[offset + i].View,
+                            Time.realtimeSinceStartup);
+                }
+
+                SendReplicationLocalCommandIntent(
+                    command,
+                    source);
+                chunkIndex++;
+            }
         }
 
-        private static void EmitHostLocalReplicationBuildPlacements(
+        private static bool EmitHostLocalReplicationBuildPlacements(
             List<ReplicationCapturedBuildPlacement> placements,
             long transactionId,
             int groupIndex)
         {
-            if (instance == null || !replicationRemoteHelloReceived)
+            var current = instance;
+            // The retained static multiplayer runtime can outlive Unity's plugin object.
+            // Use CLR null semantics; Unity fake-null must not suppress host builds.
+            if (ReferenceEquals(current, null)
+                || placements.Count == 0
+                || !replicationRemoteHelloReceived
+                || replicationTransport == null)
+            {
+                current?.LogReplicationWarning(
+                    "[MP/BUILD] host-local batch not emitted transaction="
+                    + transactionId.ToString(CultureInfo.InvariantCulture)
+                    + " group="
+                    + groupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " placements="
+                    + placements.Count.ToString(CultureInfo.InvariantCulture)
+                    + " remoteHello="
+                    + replicationRemoteHelloReceived
+                    + " transport="
+                    + (replicationTransport == null ? "missing" : "ready"));
+                return false;
+            }
+
+            for (var i = 0; i < placements.Count; i++)
+            {
+                TrackReplicationBuildingLifecycleV2(
+                    placements[i],
+                    "host-local-building-v2");
+            }
+
+            // Do not register every reliable chunk in the same Unity frame. A large
+            // host drag used to enqueue 30+ durable BuildBatchResult rows at once;
+            // the shared retry scheduler then sent almost all of them in one scan.
+            // Keep the semantic chunks, but stage them before the reliable map and
+            // admit at most one new chunk per runtime frame.
+            var chunkIndex = 0;
+            for (var offset = 0;
+                 offset < placements.Count;
+                 offset += ReplicationHostBuildReplayChunkPlacements)
+            {
+                var count = Math.Min(
+                    ReplicationHostBuildReplayChunkPlacements,
+                    placements.Count - offset);
+                var chunk = new List<ReplicationCapturedBuildPlacement>(count);
+                for (var i = 0; i < count; i++)
+                {
+                    chunk.Add(placements[offset + i]);
+                }
+
+                var first = chunk[0];
+                var payload = CreateReplicationBuildBatchWirePayload(
+                    first.BlueprintId,
+                    first.BuildingType,
+                    first.Faction,
+                    chunk);
+                // Each replay chunk needs its own semantic ledger key.
+                // Using only groupIndex would make chunk 1+ look already applied after
+                // chunk 0 committed on the client.
+                var semanticGroup = checked(groupIndex * 1024 + chunkIndex);
+                var commandSequence =
+                    4000000000000000000L
+                    + transactionId * 1048576L
+                    + semanticGroup;
+                var manifest = new ReplicationBuildBatchCommitManifest(
+                    ReplicationHostPeerId,
+                    commandSequence,
+                    payload,
+                    first.BlueprintId,
+                    first.BuildingType,
+                    first.Faction,
+                    afterLoading: false,
+                    first.Record.X,
+                    first.Record.Y,
+                    first.Record.Z,
+                    FormatReplicationBuildBatchIds(chunk),
+                    new string('1', chunk.Count),
+                    chunk.Count,
+                    "host-local-batch transaction="
+                        + transactionId.ToString(CultureInfo.InvariantCulture)
+                        + " group="
+                        + groupIndex.ToString(CultureInfo.InvariantCulture)
+                        + " chunk="
+                        + chunkIndex.ToString(CultureInfo.InvariantCulture),
+                    semanticTransactionId: transactionId,
+                    semanticGroup: semanticGroup);
+
+                ReplicationPendingHostBuildReplayChunks.Enqueue(
+                    new ReplicationPendingHostBuildReplayChunk(
+                        manifest,
+                        chunk,
+                        transactionId,
+                        groupIndex,
+                        chunkIndex,
+                        offset,
+                        chunk.Count,
+                        placements.Count));
+                chunkIndex++;
+            }
+
+            current.LogReplicationInfo(
+                "[MP/BUILD] host-local replay queued transaction="
+                + transactionId.ToString(CultureInfo.InvariantCulture)
+                + " group="
+                + groupIndex.ToString(CultureInfo.InvariantCulture)
+                + " placements="
+                + placements.Count.ToString(CultureInfo.InvariantCulture)
+                + " chunks="
+                + chunkIndex.ToString(CultureInfo.InvariantCulture)
+                + " queue="
+                + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture));
+            return true;
+        }
+
+        private static void ProcessPendingReplicationHostBuildReplayChunks()
+        {
+            if (!replicationConfigHostMode
+                || ReplicationPendingHostBuildReplayChunks.Count == 0
+                || !replicationRemoteHelloReceived
+                || replicationTransport == null
+                || ReferenceEquals(instance, null))
             {
                 return;
             }
 
-            var first = placements[0];
-            for (var i = 0; i < placements.Count; i++)
+            IsReplicationBuildingDurableBackpressured(out var durablePending);
+            if (durablePending >= ReplicationHostBuildReplayMaxInFlightChunks)
             {
-                TrackReplicationBuildingLifecycleV2(placements[i], "host-local-building-v2");
+                // Bounded sliding window: preserve reliable ordering and the
+                // client's native apply budget without paying one full RTT for
+                // every two-object chunk. This method is called once per host frame,
+                // so the window cannot be filled in a single same-frame burst.
+                return;
             }
 
+            var pending = ReplicationPendingHostBuildReplayChunks.Peek();
+            var deltaSequence = ++replicationWorldObjectDeltaSequence;
+            var sent = instance!.SendReplicationWorldObjectDelta(
+                pending.Manifest.CreateDelta(
+                    deltaSequence,
+                    Time.realtimeSinceStartup));
+            if (!sent)
+            {
+                return;
+            }
+
+            ReplicationPendingHostBuildReplayChunks.Dequeue();
+            instance.LogReplicationInfo(
+                "[MP/BUILD] host-local replay admitted transaction="
+                + pending.TransactionId.ToString(CultureInfo.InvariantCulture)
+                + " group="
+                + pending.GroupIndex.ToString(CultureInfo.InvariantCulture)
+                + " chunk="
+                + pending.ChunkIndex.ToString(CultureInfo.InvariantCulture)
+                + " offset="
+                + pending.Offset.ToString(CultureInfo.InvariantCulture)
+                + " count="
+                + pending.Count.ToString(CultureInfo.InvariantCulture)
+                + "/"
+                + pending.TotalCount.ToString(CultureInfo.InvariantCulture)
+                + " deltaSequence="
+                + deltaSequence.ToString(CultureInfo.InvariantCulture)
+                + " commandSequence="
+                + pending.Manifest.CommandSequence.ToString(CultureInfo.InvariantCulture)
+                + " durablePending="
+                + durablePending.ToString(CultureInfo.InvariantCulture)
+                + " queueRemaining="
+                + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private static int SupersedePendingReplicationHostBuildReplayChunksInRegion(
+            int startX,
+            int startZ,
+            int endX,
+            int endZ)
+        {
+            if (ReplicationPendingHostBuildReplayChunks.Count == 0)
+            {
+                return 0;
+            }
+
+            var retained = new Queue<ReplicationPendingHostBuildReplayChunk>();
+            var supersededPlacements = 0;
+            var droppedChunks = 0;
+            var rewrittenChunks = 0;
+            while (ReplicationPendingHostBuildReplayChunks.Count > 0)
+            {
+                var pending = ReplicationPendingHostBuildReplayChunks.Dequeue();
+                var keptPlacements = new List<ReplicationCapturedBuildPlacement>(pending.Placements.Count);
+                for (var i = 0; i < pending.Placements.Count; i++)
+                {
+                    var placement = pending.Placements[i];
+                    if (DoesReplicationBuildPlacementOverlapRegionXZ(
+                            placement.Record,
+                            startX,
+                            startZ,
+                            endX,
+                            endZ))
+                    {
+                        supersededPlacements++;
+                    }
+                    else
+                    {
+                        keptPlacements.Add(placement);
+                    }
+                }
+
+                if (keptPlacements.Count == pending.Placements.Count)
+                {
+                    retained.Enqueue(pending);
+                }
+                else if (keptPlacements.Count == 0)
+                {
+                    droppedChunks++;
+                }
+                else
+                {
+                    retained.Enqueue(RebuildPendingReplicationHostBuildReplayChunk(pending, keptPlacements));
+                    rewrittenChunks++;
+                }
+            }
+
+            while (retained.Count > 0)
+            {
+                ReplicationPendingHostBuildReplayChunks.Enqueue(retained.Dequeue());
+            }
+
+            if (supersededPlacements > 0)
+            {
+                instance?.LogReplicationInfo(
+                    "[MP/BUILD] host-local replay superseded by region removal placements="
+                    + supersededPlacements.ToString(CultureInfo.InvariantCulture)
+                    + " droppedChunks="
+                    + droppedChunks.ToString(CultureInfo.InvariantCulture)
+                    + " rewrittenChunks="
+                    + rewrittenChunks.ToString(CultureInfo.InvariantCulture)
+                    + " queueRemaining="
+                    + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return supersededPlacements;
+        }
+
+        private static ReplicationPendingHostBuildReplayChunk RebuildPendingReplicationHostBuildReplayChunk(
+            ReplicationPendingHostBuildReplayChunk pending,
+            List<ReplicationCapturedBuildPlacement> placements)
+        {
+            var first = placements[0];
             var payload = CreateReplicationBuildBatchWirePayload(
                 first.BlueprintId,
                 first.BuildingType,
                 first.Faction,
                 placements);
-            instance.SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
-                ++replicationWorldObjectDeltaSequence,
-                Time.realtimeSinceStartup,
-                ReplicationBuildingBlueprintBatchPlacedDeltaKind,
-                first.UniqueId,
+            var semanticGroup = checked(pending.GroupIndex * 1024 + pending.ChunkIndex);
+            var manifest = new ReplicationBuildBatchCommitManifest(
+                ReplicationHostPeerId,
+                pending.Manifest.CommandSequence,
+                payload,
                 first.BlueprintId,
+                first.BuildingType,
+                first.Faction,
+                afterLoading: false,
                 first.Record.X,
                 first.Record.Y,
                 first.Record.Z,
-                "payloadB64=" + EncodeReplicationDetailBase64(payload)
-                    + " epoch=" + GetReplicationBuildBatchEpoch().ToString(CultureInfo.InvariantCulture)
-                    + " transactionId=" + transactionId.ToString(CultureInfo.InvariantCulture)
-                    + " group=" + groupIndex.ToString(CultureInfo.InvariantCulture)
-                    + " ids=" + FormatReplicationBuildBatchIds(placements)
-                    + " count=" + placements.Count.ToString(CultureInfo.InvariantCulture)
-                    + " source=host-local-batch"));
+                FormatReplicationBuildBatchIds(placements),
+                new string('1', placements.Count),
+                placements.Count,
+                "host-local-batch transaction="
+                    + pending.TransactionId.ToString(CultureInfo.InvariantCulture)
+                    + " group="
+                    + pending.GroupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " chunk="
+                    + pending.ChunkIndex.ToString(CultureInfo.InvariantCulture),
+                semanticTransactionId: pending.TransactionId,
+                semanticGroup: semanticGroup);
+            return new ReplicationPendingHostBuildReplayChunk(
+                manifest,
+                placements,
+                pending.TransactionId,
+                pending.GroupIndex,
+                pending.ChunkIndex,
+                pending.Offset,
+                placements.Count,
+                pending.TotalCount);
+        }
+
+        private static void ClearPendingReplicationHostBuildReplayChunks()
+        {
+            ReplicationPendingHostBuildReplayChunks.Clear();
         }
 
         private static bool TryGetReplicationProvisionalBuildView(long commandSequence, int itemIndex, out object? view)
@@ -1088,6 +1396,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationBuildBatchReplayDisabled = false;
             ReplicationProvisionalBuildViews.Clear();
             ReplicationBuildBatchReplayFailures.Clear();
+            ClearPendingReplicationHostBuildReplayChunks();
             replicationBuildCaptureTransactionSequence = 0L;
             replicationBuildBatchRecoveryRequested = false;
             replicationBuildBatchRecoveryAttempted = false;
@@ -1178,9 +1487,87 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ShouldCaptureReplicationBuildTransaction()
         {
-            return !IsReplicationCaptureModeOff(replicationConfigCommandCaptureMode)
-                && replicationConfigEnabled
-                && applyingRuntimeCommandDepth <= 0;
+            if (IsReplicationCaptureModeOff(replicationConfigCommandCaptureMode)
+                || !replicationConfigEnabled
+                || applyingRuntimeCommandDepth > 0)
+            {
+                return false;
+            }
+
+            // Host-side native save/checkpoint reconstruction can invoke the same
+            // placement surfaces as real player input. Capturing those callbacks
+            // turns hundreds of already-saved buildings into new durable replay
+            // chunks during first join/resync. Existing host state is transferred
+            // by the synchronized checkpoint; only capture host-local placement
+            // after the replication runtime and peer handshake are fully ready.
+            if (replicationConfigHostMode
+                && (multiplayerLoadingInProgress
+                    || !replicationRuntimeStarted
+                    || !replicationRemoteHelloReceived
+                    || replicationTransport == null
+                    || (!ReferenceEquals(instance, null)
+                        && instance!.multiplayerHostSyncPauseApplied)))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryGetReplicationBuildBlueprintMetadata(
+            object blueprint,
+            out string blueprintId,
+            out string buildingType,
+            out string faction,
+            out string unsupportedCategory,
+            out string detail)
+        {
+            var identity = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(blueprint);
+            if (ReplicationBuildBlueprintMetadataByIdentity.TryGetValue(identity, out var cached)
+                && ReferenceEquals(cached.Blueprint, blueprint))
+            {
+                blueprintId = cached.BlueprintId;
+                buildingType = cached.BuildingType;
+                faction = cached.Faction;
+                unsupportedCategory = cached.UnsupportedCategory;
+                detail = "cached";
+                return true;
+            }
+
+            if (!TryExtractReplicationBuildPayloadFields(
+                    blueprint,
+                    "Player",
+                    out blueprintId,
+                    out buildingType,
+                    out faction,
+                    out detail))
+            {
+                unsupportedCategory = string.Empty;
+                return false;
+            }
+
+            // ConstructableBaseCategory is present on every normal building
+            // blueprint (Building, Stairs, Furniture, Decoration, ProductionBuilding,
+            // etc.). Only beam/socket categories require semantic topology and must
+            // enter the fail-closed lane. Do not leak an ordinary category name into
+            // unsupportedCategory when the classifier returns false.
+            if (!IsUnsupportedReplicationBuildBlueprint(blueprint, out unsupportedCategory))
+            {
+                unsupportedCategory = string.Empty;
+            }
+
+            if (ReplicationBuildBlueprintMetadataByIdentity.Count > 512)
+            {
+                ReplicationBuildBlueprintMetadataByIdentity.Clear();
+            }
+            ReplicationBuildBlueprintMetadataByIdentity[identity] =
+                new ReplicationBuildBlueprintMetadataCacheEntry(
+                    blueprint,
+                    blueprintId,
+                    buildingType,
+                    faction,
+                    unsupportedCategory);
+            return true;
         }
 
         private static bool TryExtractReplicationBuildPayloadFields(
@@ -1551,25 +1938,44 @@ namespace GoingCooperative.Plugin.BepInEx
             return rolledBack;
         }
 
-        private static string BuildReplicationBuildBatchReplayFailureKey(long commandSequence, int itemIndex)
+        private static string BuildReplicationBuildBatchReplayFailureKey(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
-            return commandSequence.ToString(CultureInfo.InvariantCulture)
+            // Command sequences are monotonic only inside one player lane. Observers
+            // receive results from every peer, so sequence/item alone is not unique.
+            return playerId
+                + "|"
+                + commandSequence.ToString(CultureInfo.InvariantCulture)
                 + "|"
                 + itemIndex.ToString(CultureInfo.InvariantCulture);
         }
 
-        private static int GetReplicationBuildBatchReplayFailureCount(long commandSequence, int itemIndex)
+        private static int GetReplicationBuildBatchReplayFailureCount(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
             return ReplicationBuildBatchReplayFailures.TryGetValue(
-                BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex),
+                BuildReplicationBuildBatchReplayFailureKey(
+                    playerId,
+                    commandSequence,
+                    itemIndex),
                 out var failures)
                 ? failures
                 : 0;
         }
 
-        private static int RecordReplicationBuildBatchReplayFailure(long commandSequence, int itemIndex)
+        private static int RecordReplicationBuildBatchReplayFailure(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
-            var key = BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex);
+            var key = BuildReplicationBuildBatchReplayFailureKey(
+                playerId,
+                commandSequence,
+                itemIndex);
             var failures = ReplicationBuildBatchReplayFailures.TryGetValue(key, out var existing)
                 ? existing + 1
                 : 1;
@@ -1577,10 +1983,16 @@ namespace GoingCooperative.Plugin.BepInEx
             return failures;
         }
 
-        private static void ClearReplicationBuildBatchReplayFailure(long commandSequence, int itemIndex)
+        private static void ClearReplicationBuildBatchReplayFailure(
+            string playerId,
+            long commandSequence,
+            int itemIndex)
         {
             ReplicationBuildBatchReplayFailures.Remove(
-                BuildReplicationBuildBatchReplayFailureKey(commandSequence, itemIndex));
+                BuildReplicationBuildBatchReplayFailureKey(
+                    playerId,
+                    commandSequence,
+                    itemIndex));
         }
 
         private static void ScheduleReplicationBuildBatchRecovery(string reason)
@@ -1671,6 +2083,61 @@ namespace GoingCooperative.Plugin.BepInEx
                     ? "Going Cooperative: this roof could not be replicated safely because its committed topology was unavailable."
                 : "Going Cooperative: beam and wall-socket placement is not supported in multiplayer yet.";
             ShowReplicationBuildMessage(message);
+        }
+
+        private sealed class ReplicationPendingHostBuildReplayChunk
+        {
+            public ReplicationPendingHostBuildReplayChunk(
+                ReplicationBuildBatchCommitManifest manifest,
+                List<ReplicationCapturedBuildPlacement> placements,
+                long transactionId,
+                int groupIndex,
+                int chunkIndex,
+                int offset,
+                int count,
+                int totalCount)
+            {
+                Manifest = manifest;
+                Placements = placements;
+                TransactionId = transactionId;
+                GroupIndex = groupIndex;
+                ChunkIndex = chunkIndex;
+                Offset = offset;
+                Count = count;
+                TotalCount = totalCount;
+            }
+
+            public ReplicationBuildBatchCommitManifest Manifest { get; }
+            public List<ReplicationCapturedBuildPlacement> Placements { get; }
+            public long TransactionId { get; }
+            public int GroupIndex { get; }
+            public int ChunkIndex { get; }
+            public int Offset { get; }
+            public int Count { get; }
+            public int TotalCount { get; }
+        }
+
+        private sealed class ReplicationBuildBlueprintMetadataCacheEntry
+        {
+            public ReplicationBuildBlueprintMetadataCacheEntry(
+                object blueprint,
+                string blueprintId,
+                string buildingType,
+                string faction,
+                string unsupportedCategory)
+            {
+                Blueprint = blueprint;
+                BlueprintId = blueprintId;
+                BuildingType = buildingType;
+                Faction = faction;
+                UnsupportedCategory = unsupportedCategory;
+            }
+
+            public object Blueprint { get; }
+            public string BlueprintId { get; }
+            public string BuildingType { get; }
+            public string Faction { get; }
+            public string UnsupportedCategory { get; }
         }
 
         private sealed class ReplicationBuildCaptureTransaction

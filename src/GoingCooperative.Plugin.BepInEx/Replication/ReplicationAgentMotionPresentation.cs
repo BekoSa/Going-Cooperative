@@ -22,6 +22,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationSemanticMotionInterpolationBehindDot = -0.2f;
         private const float ReplicationSemanticMotionBufferedEventSeconds = 30f;
         private const int ReplicationSemanticMotionBufferedEventLimit = 128;
+        // PathChanged is presentation state, not simulation authority. Rapid path
+        // recalculation can otherwise produce hundreds of JSON/UDP deltas per second
+        // and starve durable host mutations on a busy settlement.
+        private const float ReplicationSemanticMotionMinimumPathSendSeconds = 0.10f;
 
         private sealed class ReplicationSemanticHostMotionState
         {
@@ -35,7 +39,9 @@ namespace GoingCooperative.Plugin.BepInEx
             public int SpeedBucket;
             public ReplicationAgentLocomotionGait Gait;
             public bool CaptureKeyInitialized;
+            public bool PathUpdatePending;
             public float LastSeenRealtime;
+            public float LastPathSentRealtime;
             public Vector3 LastPosition;
             public Quaternion LastRotation;
         }
@@ -173,6 +179,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     driver);
                 var speedBucket = Mathf.RoundToInt(desiredSpeed * 2f);
                 if (state.CaptureKeyInitialized
+                    && !state.PathUpdatePending
                     && ReferenceEquals(state.PathIdentity, pathIdentity)
                     && state.CurrentNodeIndex == currentNodeIndex
                     && state.FinalDestinationHash == finalDestinationHash
@@ -227,6 +234,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     state.ActivityId = ++replicationSemanticMotionActivitySequence;
                     state.Revision = 1L;
                     state.CornerSignature = cornerSignature;
+                    state.PathUpdatePending = false;
+                    state.LastPathSentRealtime = now;
                     SendReplicationSemanticAgentMotionPath(
                         entityId,
                         state,
@@ -244,8 +253,20 @@ namespace GoingCooperative.Plugin.BepInEx
                     return;
                 }
 
+                if (now - state.LastPathSentRealtime
+                    < ReplicationSemanticMotionMinimumPathSendSeconds)
+                {
+                    // Capture-key fields above already describe the newest native
+                    // path. Keep a pending marker so the normal unchanged-key fast
+                    // path cannot swallow this unsent revision on the next frame.
+                    state.PathUpdatePending = true;
+                    return;
+                }
+
                 state.CornerSignature = cornerSignature;
+                state.PathUpdatePending = false;
                 state.Revision++;
+                state.LastPathSentRealtime = now;
                 SendReplicationSemanticAgentMotionPath(
                     entityId,
                     state,

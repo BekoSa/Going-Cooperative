@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using GoingCooperative.Core;
 using GoingCooperative.Core.Replication;
@@ -14,28 +15,23 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float ReplicationPresenceSendIntervalSeconds = 0.1f;
         private const float ReplicationPresenceTimeoutSeconds = 1.25f;
         private const float ReplicationSelectionHeartbeatSeconds = 2f;
+        private const float ReplicationSelectionPollIntervalSeconds = 0.1f;
         private const float ReplicationSelectionTimeoutSeconds = 5f;
         private const float ReplicationSelectionResolveSeconds = 0.5f;
         private const float ReplicationPingLifetimeSeconds = 4f;
-        private const int ReplicationMaxVisiblePings = 8;
+        private const int ReplicationMaxVisiblePings = 24;
         private const int ReplicationMaxSelectedEntities = 16;
+        private const int ReplicationSelectionResolveMaxInspected = 24;
+        private const float ReplicationSelectionResolveBudgetMs = 0.75f;
 
         private static float replicationNextPresenceSendRealtime;
+        private static float replicationNextSelectionPollRealtime;
         private static float replicationNextSelectionHeartbeatRealtime;
         private static float replicationNextSelectionResolveRealtime;
         private static float replicationNextPresenceDiagnosticsRealtime;
         private static long replicationPresenceSequence;
         private static long replicationPingSequence;
         private static long replicationSelectionSequence;
-        private static long replicationLastRemotePresenceSequence;
-        private static long replicationLastRemotePingSequence;
-        private static long replicationLastRemoteSelectionSequence;
-        private static bool replicationRemotePresenceVisible;
-        private static bool replicationRemotePresenceDisplayInitialized;
-        private static Vector3 replicationRemotePresenceWorld;
-        private static Vector3 replicationRemotePresenceDisplayWorld;
-        private static float replicationRemotePresenceReceivedRealtime;
-        private static float replicationRemoteSelectionReceivedRealtime;
         private static Camera? replicationPresenceCamera;
         private static Type? replicationSelectableObjectManagerType;
         private static Type? replicationRaycastUtilsType;
@@ -44,16 +40,55 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationPresenceCursorSource = "none";
         private static string replicationLastLocalSelectionSignature = string.Empty;
         private static int replicationLastLocalSelectionUnresolved;
-        private static readonly List<string> ReplicationRemoteSelectedEntityIds = new List<string>();
-        private static readonly Dictionary<string, Transform> ReplicationRemoteSelectionTransforms =
-            new Dictionary<string, Transform>(StringComparer.Ordinal);
-        private static readonly List<ReplicationPresencePingState> ReplicationPresencePings =
-            new List<ReplicationPresencePingState>();
+        private static int replicationLastLocalSelectionInspected;
+        private static long replicationLocalSelectionResolveBudgetStops;
+        private static long replicationLocalSelectionResolveInspectionStops;
+        private static readonly Dictionary<string, ReplicationRemotePresenceState>
+            ReplicationRemotePresenceByPeerId =
+                new Dictionary<string, ReplicationRemotePresenceState>(
+                    StringComparer.Ordinal);
+        private static readonly List<ReplicationPresencePingState>
+            ReplicationPresencePings =
+                new List<ReplicationPresencePingState>();
+        private static readonly List<ReplicationRemotePresenceState>
+            ReplicationRemotePresenceScratch =
+                new List<ReplicationRemotePresenceState>();
+        private static readonly HashSet<string>
+            ReplicationRemoteSelectionWantedScratch =
+                new HashSet<string>(StringComparer.Ordinal);
+        private static readonly Dictionary<string, Transform>
+            ReplicationRemoteSelectionResolvedScratch =
+                new Dictionary<string, Transform>(StringComparer.Ordinal);
+
+        private sealed class ReplicationRemotePresenceState
+        {
+            public ReplicationRemotePresenceState(string peerId)
+            {
+                PeerId = peerId;
+                DisplayName = peerId;
+            }
+
+            public string PeerId { get; }
+            public string DisplayName { get; set; }
+            public long LastPresenceSequence { get; set; }
+            public long LastPingSequence { get; set; }
+            public long LastSelectionSequence { get; set; }
+            public bool CursorVisible { get; set; }
+            public bool CursorDisplayInitialized { get; set; }
+            public Vector3 CursorWorld { get; set; }
+            public Vector3 CursorDisplayWorld { get; set; }
+            public float PresenceReceivedRealtime { get; set; }
+            public float SelectionReceivedRealtime { get; set; }
+            public List<string> SelectedEntityIds { get; } =
+                new List<string>();
+            public Dictionary<string, Transform> SelectionTransforms { get; } =
+                new Dictionary<string, Transform>(StringComparer.Ordinal);
+        }
 
         private sealed class ReplicationPresencePingState
         {
+            public string PeerId = string.Empty;
             public long Sequence;
-            public bool Remote;
             public Vector3 WorldPosition;
             public float CreatedRealtime;
             public float ExpiresRealtime;
@@ -80,7 +115,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             SendReplicationLocalSelectionIfChangedOrDue(now);
 
-            if (Input.GetKeyDown(KeyCode.F9)
+            if (Input.GetKeyDown(replicationConfigPingKey)
                 && TryGetReplicationCursorWorldPoint(out var pingPosition))
             {
                 SendReplicationLocalPing(pingPosition);
@@ -104,7 +139,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 var message = new ReplicationPlayerPresence(
                     ++replicationPresenceSequence,
                     visible,
@@ -127,6 +162,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            // Selection discovery walks Unity objects and resolves stable IDs. It used
+            // to run every render frame even though selection replication itself is a
+            // low-frequency presence feature. Poll at 10 Hz, while still honoring the
+            // 2-second heartbeat if a frame arrives after the normal poll deadline.
+            if (now < replicationNextSelectionPollRealtime
+                && now < replicationNextSelectionHeartbeatRealtime)
+            {
+                return;
+            }
+
+            replicationNextSelectionPollRealtime =
+                now + ReplicationSelectionPollIntervalSeconds;
             var entityIds = CollectReplicationLocalSelectedEntityIds(out var unresolved);
             var signature = string.Join("\n", entityIds);
             if (string.Equals(signature, replicationLastLocalSelectionSignature, StringComparison.Ordinal)
@@ -141,7 +188,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextSelectionHeartbeatRealtime = now + ReplicationSelectionHeartbeatSeconds;
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 replicationTransport.Send(ReplicationPresencePayloadCodec.ForSelection(
                     senderId,
                     new ReplicationPlayerSelection(++replicationSelectionSequence, entityIds)));
@@ -161,10 +208,14 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var sequence = ++replicationPingSequence;
-            AddReplicationPresencePing(sequence, false, world, Time.realtimeSinceStartup);
+            AddReplicationPresencePing(
+                GetReplicationLocalPeerId(),
+                sequence,
+                world,
+                Time.realtimeSinceStartup);
             try
             {
-                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : ReplicationClientPeerId;
+                var senderId = replicationConfigHostMode ? ReplicationHostPeerId : GetReplicationLocalPeerId();
                 replicationTransport.Send(ReplicationPresencePayloadCodec.ForPing(
                     senderId,
                     new ReplicationPlayerPing(sequence, world.x, world.y, world.z)));
@@ -177,87 +228,163 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
-        private void HandleReplicationPlayerPresence(TransportEnvelope envelope)
+        private void HandleReplicationPlayerPresence(
+            TransportEnvelope envelope)
         {
-            if (!ReplicationPresencePayloadCodec.TryReadPresence(envelope, out var presence, out var error)
+            if (!ReplicationPresencePayloadCodec.TryReadPresence(
+                    envelope,
+                    out var presence,
+                    out var error)
                 || presence == null)
             {
-                LogReplicationWarning("[MP/NET] presence decode failed error=" + error);
+                LogReplicationWarning(
+                    "[MP/NET] presence decode failed error=" + error);
                 return;
             }
 
-            if (presence.Sequence <= replicationLastRemotePresenceSequence)
+            if (!TryGetReplicationRemotePresenceState(
+                    envelope.SenderId,
+                    create: true,
+                    out var state)
+                || state == null
+                || presence.Sequence <= state.LastPresenceSequence)
             {
                 return;
             }
 
-            replicationLastRemotePresenceSequence = presence.Sequence;
-            replicationRemotePresenceVisible = presence.Visible;
-            replicationRemotePresenceWorld = new Vector3(
+            state.LastPresenceSequence = presence.Sequence;
+            state.CursorVisible = presence.Visible;
+            state.CursorWorld = new Vector3(
                 presence.WorldX,
                 presence.WorldY,
                 presence.WorldZ);
-            replicationRemotePresenceReceivedRealtime = Time.realtimeSinceStartup;
-            if (!replicationRemotePresenceDisplayInitialized && presence.Visible)
+            state.PresenceReceivedRealtime = Time.realtimeSinceStartup;
+            if (!state.CursorDisplayInitialized && presence.Visible)
             {
-                replicationRemotePresenceDisplayWorld = replicationRemotePresenceWorld;
-                replicationRemotePresenceDisplayInitialized = true;
+                state.CursorDisplayWorld = state.CursorWorld;
+                state.CursorDisplayInitialized = true;
             }
+
+            RelayReplicationPresenceFromClientIfNeeded(envelope);
         }
 
-        private void HandleReplicationPlayerPing(TransportEnvelope envelope)
+        private void HandleReplicationPlayerPing(
+            TransportEnvelope envelope)
         {
-            if (!ReplicationPresencePayloadCodec.TryReadPing(envelope, out var ping, out var error)
+            if (!ReplicationPresencePayloadCodec.TryReadPing(
+                    envelope,
+                    out var ping,
+                    out var error)
                 || ping == null)
             {
-                LogReplicationWarning("[MP/NET] ping decode failed error=" + error);
+                LogReplicationWarning(
+                    "[MP/NET] ping decode failed error=" + error);
                 return;
             }
 
-            if (ping.Sequence <= replicationLastRemotePingSequence)
+            if (!TryGetReplicationRemotePresenceState(
+                    envelope.SenderId,
+                    create: true,
+                    out var state)
+                || state == null
+                || ping.Sequence <= state.LastPingSequence)
             {
                 return;
             }
 
-            replicationLastRemotePingSequence = ping.Sequence;
+            state.LastPingSequence = ping.Sequence;
             AddReplicationPresencePing(
+                envelope.SenderId,
                 ping.Sequence,
-                true,
-                new Vector3(ping.WorldX, ping.WorldY, ping.WorldZ),
+                new Vector3(
+                    ping.WorldX,
+                    ping.WorldY,
+                    ping.WorldZ),
                 Time.realtimeSinceStartup);
-            LogReplicationInfo("[MP/NET] ping received sequence=" + ping.Sequence);
+            RelayReplicationPresenceFromClientIfNeeded(envelope);
+            LogReplicationInfo(
+                "[MP/NET] ping received peer="
+                + envelope.SenderId
+                + " sequence="
+                + ping.Sequence.ToString());
         }
 
-        private void HandleReplicationPlayerSelection(TransportEnvelope envelope)
+        private void HandleReplicationPlayerSelection(
+            TransportEnvelope envelope)
         {
-            if (!ReplicationPresencePayloadCodec.TryReadSelection(envelope, out var selection, out var error)
+            if (!ReplicationPresencePayloadCodec.TryReadSelection(
+                    envelope,
+                    out var selection,
+                    out var error)
                 || selection == null)
             {
-                LogReplicationWarning("[MP/NET] selection decode failed error=" + error);
+                LogReplicationWarning(
+                    "[MP/NET] selection decode failed error=" + error);
                 return;
             }
 
-            if (selection.Sequence <= replicationLastRemoteSelectionSequence)
+            if (!TryGetReplicationRemotePresenceState(
+                    envelope.SenderId,
+                    create: true,
+                    out var state)
+                || state == null
+                || selection.Sequence <= state.LastSelectionSequence)
             {
                 return;
             }
 
-            replicationLastRemoteSelectionSequence = selection.Sequence;
-            replicationRemoteSelectionReceivedRealtime = Time.realtimeSinceStartup;
-            ReplicationRemoteSelectedEntityIds.Clear();
+            state.LastSelectionSequence = selection.Sequence;
+            state.SelectionReceivedRealtime = Time.realtimeSinceStartup;
+            state.SelectedEntityIds.Clear();
             for (var i = 0; i < selection.EntityIds.Count; i++)
             {
-                ReplicationRemoteSelectedEntityIds.Add(selection.EntityIds[i]);
+                state.SelectedEntityIds.Add(selection.EntityIds[i]);
             }
 
-            ReplicationRemoteSelectionTransforms.Clear();
+            state.SelectionTransforms.Clear();
             replicationNextSelectionResolveRealtime = 0f;
+            RelayReplicationPresenceFromClientIfNeeded(envelope);
+        }
+
+        private void RelayReplicationPresenceFromClientIfNeeded(
+            TransportEnvelope envelope)
+        {
+            if (!replicationConfigHostMode
+                || replicationTransport == null
+                || !MultiplayerPeerIds.TryParseClientSlot(
+                    envelope.SenderId,
+                    out _)
+                || !ReplicationCompatiblePeerIds.Contains(
+                    envelope.SenderId))
+            {
+                return;
+            }
+
+            try
+            {
+                replicationTransport.SendToAllExcept(
+                    envelope.SenderId,
+                    envelope);
+            }
+            catch (Exception ex)
+            {
+                LogReplicationWarning(
+                    "[MP/PRESENCE] relay failed peer="
+                    + envelope.SenderId
+                    + " kind="
+                    + envelope.Kind
+                    + " error="
+                    + ex.GetType().Name
+                    + ":"
+                    + ex.Message);
+            }
         }
 
         private static List<string> CollectReplicationLocalSelectedEntityIds(out int unresolved)
         {
             unresolved = 0;
-            var result = new List<string>();
+            replicationLastLocalSelectionInspected = 0;
+            var result = new List<string>(ReplicationMaxSelectedEntities);
             if (!TryGetReplicationSelectableObjectManager(out var manager)
                 || !TryReadInstanceMemberValue(manager, "SelectedObjects", out var selectedObjects)
                 || selectedObjects is not IEnumerable enumerable)
@@ -265,9 +392,33 @@ namespace GoingCooperative.Plugin.BepInEx
                 return result;
             }
 
+            // Presence selection is cosmetic. Never let it turn a large vanilla
+            // box-selection into hundreds of reflection/component hierarchy probes.
+            // The previous loop stopped only after 16 *resolved* IDs, so selecting
+            // 100+ buildings/resources (which intentionally have no agent ID) walked
+            // every object at 10 Hz and could stall the Unity thread for seconds.
+            var budgetTicks = Math.Max(
+                1L,
+                (long)(Stopwatch.Frequency
+                    * (ReplicationSelectionResolveBudgetMs / 1000d)));
+            var started = Stopwatch.GetTimestamp();
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var selected in enumerable)
             {
+                if (replicationLastLocalSelectionInspected
+                    >= ReplicationSelectionResolveMaxInspected)
+                {
+                    replicationLocalSelectionResolveInspectionStops++;
+                    break;
+                }
+
+                if (Stopwatch.GetTimestamp() - started >= budgetTicks)
+                {
+                    replicationLocalSelectionResolveBudgetStops++;
+                    break;
+                }
+
+                replicationLastLocalSelectionInspected++;
                 if (selected == null)
                 {
                     continue;
@@ -382,9 +533,27 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            // Last-resort fallback for versions where SelectedObjects exposes
-            // an owner/data object rather than the actual AnimatedAgentView.
-            return TryGetReplicationStableEntityId(selected, out entityId);
+            // Last-resort reflection identity discovery is useful for actual agent
+            // owner/data objects, but is catastrophically expensive when a vanilla
+            // area selection contains hundreds of building/resource Selectables.
+            // Non-agent selection still works locally; it simply is not mirrored as
+            // the optional remote-selection presence overlay.
+            return IsReplicationPresenceAgentSelectionCandidate(selected)
+                && TryGetReplicationStableEntityId(selected, out entityId);
+        }
+
+        private static bool IsReplicationPresenceAgentSelectionCandidate(
+            object selected)
+        {
+            var typeName = selected.GetType().FullName
+                ?? selected.GetType().Name
+                ?? string.Empty;
+            return typeName.IndexOf("Agent", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Creature", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Humanoid", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Worker", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Animal", StringComparison.OrdinalIgnoreCase) >= 0
+                || typeName.IndexOf("Settler", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private static bool TryGetReplicationAnimatedAgentViewFromComponent(
@@ -400,9 +569,11 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
+                // Never descend through the selected object's hierarchy here.
+                // Buildings can own very large child trees and multi-selection used
+                // to repeat GetComponentInChildren for every selected cell.
                 view = component.GetComponent(type)
-                    ?? component.GetComponentInParent(type)
-                    ?? component.GetComponentInChildren(type);
+                    ?? component.GetComponentInParent(type);
                 return view != null;
             }
             catch
@@ -424,9 +595,10 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
+                // See component overload: remote selection presence is not allowed
+                // to recursively scan arbitrary building/resource hierarchies.
                 view = gameObject.GetComponent(type)
-                    ?? gameObject.GetComponentInParent(type)
-                    ?? gameObject.GetComponentInChildren(type);
+                    ?? gameObject.GetComponentInParent(type);
                 return view != null;
             }
             catch
@@ -648,52 +820,235 @@ namespace GoingCooperative.Plugin.BepInEx
             return replicationPresenceCamera;
         }
 
-        private static bool TryGetReplicationRemotePresenceWorldPoint(out Vector3 world)
+        private static void RemoveReplicationRemotePeerPresence(
+            string peerId)
         {
-            world = replicationRemotePresenceDisplayWorld;
-            if (!replicationRemotePresenceVisible
-                || Time.realtimeSinceStartup - replicationRemotePresenceReceivedRealtime
+            if (string.IsNullOrWhiteSpace(peerId))
+            {
+                return;
+            }
+
+            ReplicationRemotePresenceByPeerId.Remove(peerId);
+            for (var i = ReplicationPresencePings.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(
+                        ReplicationPresencePings[i].PeerId,
+                        peerId,
+                        StringComparison.Ordinal))
+                {
+                    ReplicationPresencePings.RemoveAt(i);
+                }
+            }
+        }
+
+        private static void SetReplicationRemotePeerDisplayName(
+            string peerId,
+            string displayName)
+        {
+            if (string.IsNullOrWhiteSpace(peerId)
+                || string.Equals(
+                    peerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!ReplicationRemotePresenceByPeerId.TryGetValue(
+                    peerId,
+                    out var state))
+            {
+                state = new ReplicationRemotePresenceState(peerId);
+                ReplicationRemotePresenceByPeerId.Add(peerId, state);
+            }
+
+            state.DisplayName =
+                MultiplayerNickname.Normalize(displayName);
+        }
+
+        private static string GetReplicationRemoteDisplayName(
+            string peerId)
+        {
+            return ReplicationRemotePresenceByPeerId.TryGetValue(
+                    peerId,
+                    out var state)
+                ? MultiplayerNickname.Normalize(state.DisplayName)
+                : peerId;
+        }
+
+        private static string GetReplicationRemoteDisplayName()
+        {
+            var preferredPeerId = replicationConfigHostMode
+                ? string.Empty
+                : ReplicationHostPeerId;
+            if (preferredPeerId.Length > 0
+                && ReplicationRemotePresenceByPeerId.TryGetValue(
+                    preferredPeerId,
+                    out var preferred))
+            {
+                return MultiplayerNickname.Normalize(
+                    preferred.DisplayName);
+            }
+
+            foreach (var state in ReplicationRemotePresenceByPeerId.Values)
+            {
+                return MultiplayerNickname.Normalize(state.DisplayName);
+            }
+
+            return MultiplayerNickname.DefaultNickname;
+        }
+
+        private static bool TryGetReplicationRemotePresenceState(
+            string peerId,
+            bool create,
+            out ReplicationRemotePresenceState? state)
+        {
+            state = null;
+            if (string.IsNullOrWhiteSpace(peerId)
+                || string.Equals(
+                    peerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var validPeer = string.Equals(
+                    peerId,
+                    ReplicationHostPeerId,
+                    StringComparison.Ordinal)
+                || MultiplayerPeerIds.TryParseClientSlot(
+                    peerId,
+                    out _);
+            if (!validPeer)
+            {
+                return false;
+            }
+
+            if (ReplicationRemotePresenceByPeerId.TryGetValue(
+                    peerId,
+                    out state))
+            {
+                return true;
+            }
+
+            if (!create)
+            {
+                return false;
+            }
+
+            state = new ReplicationRemotePresenceState(peerId);
+            ReplicationRemotePresenceByPeerId.Add(peerId, state);
+            return true;
+        }
+
+        private static List<ReplicationRemotePresenceState>
+            GetReplicationRemotePresenceStates()
+        {
+            var now = Time.realtimeSinceStartup;
+            var result = ReplicationRemotePresenceScratch;
+            result.Clear();
+            foreach (var state in ReplicationRemotePresenceByPeerId.Values)
+            {
+                if (string.Equals(
+                        state.PeerId,
+                        GetReplicationLocalPeerId(),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var hasCursor =
+                    now - state.PresenceReceivedRealtime
+                        <= ReplicationPresenceTimeoutSeconds;
+                var hasSelection =
+                    now - state.SelectionReceivedRealtime
+                        <= ReplicationSelectionTimeoutSeconds
+                    && state.SelectedEntityIds.Count > 0;
+                if (hasCursor || hasSelection)
+                {
+                    result.Add(state);
+                }
+            }
+
+            result.Sort(
+                (left, right) => string.Compare(
+                    left.PeerId,
+                    right.PeerId,
+                    StringComparison.Ordinal));
+            return result;
+        }
+
+        private static bool TryGetReplicationRemotePresenceWorldPoint(
+            string peerId,
+            out Vector3 world)
+        {
+            world = Vector3.zero;
+            if (!TryGetReplicationRemotePresenceState(
+                    peerId,
+                    create: false,
+                    out var state)
+                || state == null
+                || !state.CursorVisible
+                || Time.realtimeSinceStartup
+                    - state.PresenceReceivedRealtime
                     > ReplicationPresenceTimeoutSeconds)
             {
                 return false;
             }
 
-            if (!replicationRemotePresenceDisplayInitialized)
+            if (!state.CursorDisplayInitialized)
             {
-                replicationRemotePresenceDisplayWorld = replicationRemotePresenceWorld;
-                replicationRemotePresenceDisplayInitialized = true;
+                state.CursorDisplayWorld = state.CursorWorld;
+                state.CursorDisplayInitialized = true;
             }
             else
             {
-                var blend = 1f - Mathf.Exp(-18f * Mathf.Max(0f, Time.unscaledDeltaTime));
-                replicationRemotePresenceDisplayWorld = Vector3.Lerp(
-                    replicationRemotePresenceDisplayWorld,
-                    replicationRemotePresenceWorld,
+                var blend = 1f - Mathf.Exp(
+                    -18f * Mathf.Max(0f, Time.unscaledDeltaTime));
+                state.CursorDisplayWorld = Vector3.Lerp(
+                    state.CursorDisplayWorld,
+                    state.CursorWorld,
                     blend);
             }
 
-            world = replicationRemotePresenceDisplayWorld;
+            world = state.CursorDisplayWorld;
             return true;
         }
 
-        private static IReadOnlyList<string> GetReplicationRemoteSelectedEntityIds()
+        private static IReadOnlyList<string>
+            GetReplicationRemoteSelectedEntityIds(string peerId)
         {
-            if (Time.realtimeSinceStartup - replicationRemoteSelectionReceivedRealtime
-                > ReplicationSelectionTimeoutSeconds)
+            if (!TryGetReplicationRemotePresenceState(
+                    peerId,
+                    create: false,
+                    out var state)
+                || state == null
+                || Time.realtimeSinceStartup
+                    - state.SelectionReceivedRealtime
+                    > ReplicationSelectionTimeoutSeconds)
             {
                 return Array.Empty<string>();
             }
 
-            return ReplicationRemoteSelectedEntityIds;
+            return state.SelectedEntityIds;
         }
 
         private static bool TryGetReplicationRemoteSelectedEntityWorldPoint(
+            string peerId,
             string entityId,
             out Vector3 world)
         {
             world = Vector3.zero;
             RefreshReplicationRemoteSelectionTransformsIfDue();
-            if (!ReplicationRemoteSelectionTransforms.TryGetValue(entityId, out var transform)
+            if (!TryGetReplicationRemotePresenceState(
+                    peerId,
+                    create: false,
+                    out var state)
+                || state == null
+                || !state.SelectionTransforms.TryGetValue(
+                    entityId,
+                    out var transform)
                 || transform == null)
             {
                 return false;
@@ -711,28 +1066,67 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            replicationNextSelectionResolveRealtime = now + ReplicationSelectionResolveSeconds;
-            ReplicationRemoteSelectionTransforms.Clear();
-            var ids = GetReplicationRemoteSelectedEntityIds();
-            if (ids.Count == 0)
+            replicationNextSelectionResolveRealtime =
+                now + ReplicationSelectionResolveSeconds;
+            var wanted = ReplicationRemoteSelectionWantedScratch;
+            wanted.Clear();
+            foreach (var state in ReplicationRemotePresenceByPeerId.Values)
+            {
+                state.SelectionTransforms.Clear();
+                if (now - state.SelectionReceivedRealtime
+                    > ReplicationSelectionTimeoutSeconds)
+                {
+                    continue;
+                }
+
+                for (var i = 0;
+                    i < state.SelectedEntityIds.Count;
+                    i++)
+                {
+                    wanted.Add(state.SelectedEntityIds[i]);
+                }
+            }
+
+            if (wanted.Count == 0)
             {
                 return;
             }
 
-            var wanted = new HashSet<string>(ids, StringComparer.Ordinal);
+            var resolved = ReplicationRemoteSelectionResolvedScratch;
+            resolved.Clear();
             var views = FindReplicationAnimatedAgentViews();
-            for (var i = 0; i < views.Length && wanted.Count > 0; i++)
+            for (var i = 0;
+                i < views.Length && wanted.Count > 0;
+                i++)
             {
                 var view = views[i];
                 if (view == null
                     || view is not MonoBehaviour behaviour
-                    || !TryGetReplicationViewEntityId(view, out var entityId)
+                    || !TryGetReplicationViewEntityId(
+                        view,
+                        out var entityId)
                     || !wanted.Remove(entityId))
                 {
                     continue;
                 }
 
-                ReplicationRemoteSelectionTransforms[entityId] = behaviour.transform;
+                resolved[entityId] = behaviour.transform;
+            }
+
+            foreach (var state in ReplicationRemotePresenceByPeerId.Values)
+            {
+                for (var i = 0;
+                    i < state.SelectedEntityIds.Count;
+                    i++)
+                {
+                    var entityId = state.SelectedEntityIds[i];
+                    if (resolved.TryGetValue(
+                            entityId,
+                            out var transform))
+                    {
+                        state.SelectionTransforms[entityId] = transform;
+                    }
+                }
             }
         }
 
@@ -752,24 +1146,27 @@ namespace GoingCooperative.Plugin.BepInEx
         }
 
         private static void AddReplicationPresencePing(
+            string peerId,
             long sequence,
-            bool remote,
             Vector3 world,
             float now)
         {
-            while (ReplicationPresencePings.Count >= ReplicationMaxVisiblePings)
+            while (ReplicationPresencePings.Count
+                >= ReplicationMaxVisiblePings)
             {
                 ReplicationPresencePings.RemoveAt(0);
             }
 
-            ReplicationPresencePings.Add(new ReplicationPresencePingState
-            {
-                Sequence = sequence,
-                Remote = remote,
-                WorldPosition = world,
-                CreatedRealtime = now,
-                ExpiresRealtime = now + ReplicationPingLifetimeSeconds
-            });
+            ReplicationPresencePings.Add(
+                new ReplicationPresencePingState
+                {
+                    PeerId = peerId,
+                    Sequence = sequence,
+                    WorldPosition = world,
+                    CreatedRealtime = now,
+                    ExpiresRealtime =
+                        now + ReplicationPingLifetimeSeconds
+                });
         }
 
         private static void PruneReplicationPresencePings(float now)
@@ -792,35 +1189,66 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             replicationNextPresenceDiagnosticsRealtime = now + 10f;
-            LogReplicationInfo("[MP/PRESENCE]"
-                + " cursorSource=" + replicationPresenceCursorSource
-                + " cursorVisible=" + (replicationRemotePresenceVisible ? "yes" : "no")
-                + " localSelected=" + (replicationLastLocalSelectionSignature.Length == 0
+            var visibleCursors = 0;
+            var remoteSelected = 0;
+            var remoteResolved = 0;
+            foreach (var state in ReplicationRemotePresenceByPeerId.Values)
+            {
+                if (state.CursorVisible
+                    && now - state.PresenceReceivedRealtime
+                        <= ReplicationPresenceTimeoutSeconds)
+                {
+                    visibleCursors++;
+                }
+
+                if (now - state.SelectionReceivedRealtime
+                    <= ReplicationSelectionTimeoutSeconds)
+                {
+                    remoteSelected += state.SelectedEntityIds.Count;
+                    remoteResolved += state.SelectionTransforms.Count;
+                }
+            }
+
+            LogReplicationInfo(
+                "[MP/PRESENCE]"
+                + " cursorSource="
+                + replicationPresenceCursorSource
+                + " remotePeers="
+                + ReplicationRemotePresenceByPeerId.Count.ToString()
+                + " visibleCursors="
+                + visibleCursors.ToString()
+                + " localSelected="
+                + (replicationLastLocalSelectionSignature.Length == 0
                     ? "0"
-                    : replicationLastLocalSelectionSignature.Split('\n').Length.ToString())
-                + " localSelectionUnresolved=" + replicationLastLocalSelectionUnresolved.ToString()
-                + " remoteSelected=" + GetReplicationRemoteSelectedEntityIds().Count.ToString()
-                + " remoteResolved=" + ReplicationRemoteSelectionTransforms.Count.ToString());
+                    : replicationLastLocalSelectionSignature
+                        .Split(
+                            new[] { '\n' },
+                            StringSplitOptions.None)
+                        .Length.ToString())
+                + " localSelectionUnresolved="
+                + replicationLastLocalSelectionUnresolved.ToString()
+                + " localSelectionInspected="
+                + replicationLastLocalSelectionInspected.ToString()
+                + " localSelectionBudgetStops="
+                + replicationLocalSelectionResolveBudgetStops.ToString()
+                + " localSelectionInspectionStops="
+                + replicationLocalSelectionResolveInspectionStops.ToString()
+                + " remoteSelected="
+                + remoteSelected.ToString()
+                + " remoteResolved="
+                + remoteResolved.ToString());
         }
 
         private static void ResetReplicationPresence()
         {
             replicationNextPresenceSendRealtime = 0f;
+            replicationNextSelectionPollRealtime = 0f;
             replicationNextSelectionHeartbeatRealtime = 0f;
             replicationNextSelectionResolveRealtime = 0f;
             replicationNextPresenceDiagnosticsRealtime = 0f;
             replicationPresenceSequence = 0L;
             replicationPingSequence = 0L;
             replicationSelectionSequence = 0L;
-            replicationLastRemotePresenceSequence = 0L;
-            replicationLastRemotePingSequence = 0L;
-            replicationLastRemoteSelectionSequence = 0L;
-            replicationRemotePresenceVisible = false;
-            replicationRemotePresenceDisplayInitialized = false;
-            replicationRemotePresenceWorld = Vector3.zero;
-            replicationRemotePresenceDisplayWorld = Vector3.zero;
-            replicationRemotePresenceReceivedRealtime = 0f;
-            replicationRemoteSelectionReceivedRealtime = 0f;
             replicationPresenceCamera = null;
             replicationSelectableObjectManagerType = null;
             replicationRaycastUtilsType = null;
@@ -829,9 +1257,14 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationPresenceCursorSource = "none";
             replicationLastLocalSelectionSignature = string.Empty;
             replicationLastLocalSelectionUnresolved = 0;
-            ReplicationRemoteSelectedEntityIds.Clear();
-            ReplicationRemoteSelectionTransforms.Clear();
+            replicationLastLocalSelectionInspected = 0;
+            replicationLocalSelectionResolveBudgetStops = 0L;
+            replicationLocalSelectionResolveInspectionStops = 0L;
+            ReplicationRemotePresenceByPeerId.Clear();
             ReplicationPresencePings.Clear();
+            ReplicationRemotePresenceScratch.Clear();
+            ReplicationRemoteSelectionWantedScratch.Clear();
+            ReplicationRemoteSelectionResolvedScratch.Clear();
         }
     }
 }

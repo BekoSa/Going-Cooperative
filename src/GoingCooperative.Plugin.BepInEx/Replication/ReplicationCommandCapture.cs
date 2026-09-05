@@ -13,6 +13,7 @@ namespace GoingCooperative.Plugin.BepInEx
     {
         private static ulong replicationLastCapturedLocalCommandHash;
         private static float replicationLastCapturedLocalCommandRealtime;
+        private static int replicationAuthoritativeSpeedIndex = 1;
 
         private void TryInstallReplicationCommandCapture(Harmony harmonyInstance)
         {
@@ -142,6 +143,15 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationGameSpeedButtonPostfix(MethodBase __originalMethod, object __instance, int __0)
         {
             gameSpeedManagerInstance = __instance;
+            if (replicationEventApplicationDepth > 0)
+            {
+                return;
+            }
+
+            if (__0 >= 0 && __0 <= 3 && replicationConfigHostMode)
+            {
+                replicationAuthoritativeSpeedIndex = __0;
+            }
             SendReplicationLocalSpeedIntent(__0, "button:" + __0.ToString(CultureInfo.InvariantCulture));
         }
 
@@ -155,6 +165,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (replicationConfigHostMode)
             {
+                replicationAuthoritativeSpeedIndex = speedIndex;
                 return;
             }
             if (replicationEventApplicationDepth > 0)
@@ -167,11 +178,34 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ReplicationGameSpeedIndexPostfix(object __instance, object __0)
         {
             gameSpeedManagerInstance = __instance;
-            if (!replicationConfigHostMode || __0 == null) return;
+            if (__0 == null || replicationEventApplicationDepth > 0)
+            {
+                return;
+            }
+
             try
             {
-                SendHostReplicationEventSpeedStateIfEnabled(
-                    Convert.ToInt32(__0, CultureInfo.InvariantCulture),
+                var speedIndex = Convert.ToInt32(__0, CultureInfo.InvariantCulture);
+                if (speedIndex < 0 || speedIndex > 3)
+                {
+                    return;
+                }
+
+                if (replicationConfigHostMode)
+                {
+                    replicationAuthoritativeSpeedIndex = speedIndex;
+                    SendHostReplicationEventSpeedStateIfEnabled(
+                        speedIndex,
+                        "CurrentSpeedIndex");
+                    return;
+                }
+
+                // Keyboard shortcuts can assign CurrentSpeedIndex directly and never
+                // pass through OnUIButtonClicked/SetSpeed*. Treat the property setter
+                // as a first-class client intent source. The existing payload-hash
+                // duplicate window collapses the setter + button callback pair.
+                SendReplicationLocalSpeedIntent(
+                    speedIndex,
                     "CurrentSpeedIndex");
             }
             catch (Exception ex)
@@ -224,7 +258,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var command = new LockstepCommand(
-                ReplicationClientPeerId,
+                GetReplicationLocalPeerId(),
                 ++replicationIntentSequence,
                 0L,
                 CommandKind.Speed,
@@ -243,6 +277,16 @@ namespace GoingCooperative.Plugin.BepInEx
             SendReplicationLocalCommandIntent(command, source);
         }
 
+        private static bool IsReplicationLocalGameplayReady()
+        {
+            var current = instance;
+            return !ReferenceEquals(current, null)
+                && string.Equals(
+                    current.multiplayerSaveTransfer.Phase,
+                    "Playing",
+                    StringComparison.Ordinal);
+        }
+
         private static bool ShouldSendReplicationLocalCommandIntent()
         {
             return replicationConfigEnabled
@@ -250,8 +294,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRuntimeStarted
                 && replicationRemoteHelloReceived
                 && replicationTransport != null
-                && replicationSnapshotsReceived > 0
-                && replicationLastSnapshotEntities > 0;
+                && replicationLastAppliedSnapshotSequence >= 0
+                && replicationLastSnapshotEntities > 0
+                && IsReplicationLocalGameplayReady();
         }
 
         private static bool ShouldSkipDuplicateReplicationLocalCommand(LockstepCommand command)
@@ -329,6 +374,19 @@ namespace GoingCooperative.Plugin.BepInEx
                 ReplicationPendingCommandIntents[pendingDurableKey] = pendingDurable;
             }
 
+            if (pendingDurable != null
+                && IsReplicationBuildBatchCommand(command)
+                && !IsOldestPendingReplicationBuildBatch(
+                    command.Sequence))
+            {
+                instance?.LogReplicationInfo(
+                    "Going Cooperative replication build batch queued behind prior authoritative transaction key="
+                    + pendingDurableKey
+                    + " source="
+                    + source);
+                return;
+            }
+
             try
             {
                 if (replicationTransport == null)
@@ -336,7 +394,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     throw new InvalidOperationException("Replication transport is not connected.");
                 }
 
-                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(ReplicationClientPeerId, new ReplicationCommandIntent(command)));
+                replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(GetReplicationLocalPeerId(), new ReplicationCommandIntent(command)));
                 if (pendingDurable != null)
                 {
                     pendingDurable.LastSentRealtime = Time.realtimeSinceStartup;
@@ -375,7 +433,9 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void SendPendingReplicationCommandIntentsIfDue()
         {
-            if (ReplicationPendingCommandIntents.Count == 0 || replicationTransport == null)
+            if (ReplicationPendingCommandIntents.Count == 0
+                || replicationTransport == null
+                || !IsReplicationLocalGameplayReady())
             {
                 return;
             }
@@ -387,6 +447,14 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 var pending = pair.Value;
                 var storagePolicy = IsReplicationStoragePolicyUpdateCommand(pending.Command);
+                var buildBatch = IsReplicationBuildBatchCommand(pending.Command);
+                if (buildBatch
+                    && !IsOldestPendingReplicationBuildBatch(
+                        pending.Command.Sequence))
+                {
+                    continue;
+                }
+
                 var resultRequestWindowExpired = pending.HostResponded
                     && !storagePolicy
                     && now - pending.AwaitingResultStartedRealtime >= ReplicationBuildBatchResultRequestWindowSeconds;
@@ -396,7 +464,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         : resultRequestWindowExpired
                         ? ReplicationBuildBatchResultDormantRetrySeconds
                         : ReplicationBuildBatchResultRequestRetrySeconds
-                    : ReplicationCommandIntentRetrySeconds;
+                    : buildBatch
+                        ? ReplicationBuildBatchIntentRetrySeconds
+                        : ReplicationCommandIntentRetrySeconds;
                 if (resultRequestWindowExpired)
                 {
                     if (!pending.ResultRequestWindowExpiredLogged)
@@ -422,9 +492,12 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
+                var maxIntentSends = buildBatch
+                    ? ReplicationBuildBatchIntentMaxSends
+                    : ReplicationCommandIntentMaxSends;
                 if (!storagePolicy
                     && !pending.HostResponded
-                    && pending.SendCount >= ReplicationCommandIntentMaxSends)
+                    && pending.SendCount >= maxIntentSends)
                 {
                     var rolledBack = RollbackReplicationProvisionalBuildViews(
                         pending.Command,
@@ -459,7 +532,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 try
                 {
                     replicationTransport.Send(ReplicationPayloadCodec.ForCommandIntent(
-                        ReplicationClientPeerId,
+                        GetReplicationLocalPeerId(),
                         new ReplicationCommandIntent(pending.Command)));
                     pending.LastSentRealtime = now;
                     if (pending.HostResponded)
@@ -511,10 +584,40 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private const float ReplicationCommandIntentRetrySeconds = 0.5f;
         private const int ReplicationCommandIntentMaxSends = 12;
+        // Native building placement can stall the host for multiple frames while
+        // pathing/roof/support state is rebuilt. Retrying a whole batch every 500 ms
+        // multiplies that load precisely while the host is already saturated.
+        private const float ReplicationBuildBatchIntentRetrySeconds = 2.5f;
+        private const int ReplicationBuildBatchIntentMaxSends = 24;
         private const float ReplicationBuildBatchResultRequestRetrySeconds = 2f;
         private const float ReplicationBuildBatchResultRequestWindowSeconds = 120f;
         private const float ReplicationBuildBatchResultDormantRetrySeconds = 15f;
         private const float ReplicationStoragePolicyStateProofRetrySeconds = 2f;
+
+        private static bool IsOldestPendingReplicationBuildBatch(
+            long commandSequence)
+        {
+            // A BuildBatch is not complete when its command ACK arrives. The exact
+            // authoritative BuildBatchResult owns commit/reject truth and clears the
+            // pending receipt only after reconciliation. Keep later chunks parked
+            // until that result has been applied so one drag cannot accumulate many
+            // protected host manifests and trip durable backpressure for every peer.
+            foreach (var pair in ReplicationPendingCommandIntents)
+            {
+                var candidate = pair.Value;
+                if (!IsReplicationBuildBatchCommand(candidate.Command))
+                {
+                    continue;
+                }
+
+                if (candidate.Command.Sequence < commandSequence)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         private static bool IsReplicationBuildBatchCommand(LockstepCommand command)
         {
@@ -528,31 +631,35 @@ namespace GoingCooperative.Plugin.BepInEx
                     out _);
         }
 
-        private static bool CompleteReplicationBuildBatchPendingIntent(string playerId, long commandSequence)
+        private static bool CompleteReplicationBuildBatchPendingIntent(
+            string playerId,
+            long commandSequence)
         {
-            var commandKey = playerId + ":" + commandSequence.ToString(CultureInfo.InvariantCulture);
-            if (ReplicationPendingCommandIntents.TryGetValue(commandKey, out var exact)
+            // BuildBatch command sequences are only unique inside one player lane.
+            // Every client observes authoritative results for every peer, so only the
+            // exact local owner may clear this process's pending/provisional receipt.
+            if (!string.Equals(
+                    playerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var commandKey =
+                playerId
+                + ":"
+                + commandSequence.ToString(CultureInfo.InvariantCulture);
+            if (ReplicationPendingCommandIntents.TryGetValue(
+                    commandKey,
+                    out var exact)
                 && IsReplicationBuildBatchCommand(exact.Command))
             {
                 ReplicationPendingCommandIntents.Remove(commandKey);
                 return true;
             }
 
-            // Player identifiers are formatted as detail tokens on the wire. Sequence is
-            // unique for this two-player client lane, so retain a safe fallback for any
-            // identifier whose whitespace was normalized in the diagnostic detail format.
-            var fallbackKey = string.Empty;
-            foreach (var pair in ReplicationPendingCommandIntents)
-            {
-                if (pair.Value.Command.Sequence == commandSequence
-                    && IsReplicationBuildBatchCommand(pair.Value.Command))
-                {
-                    fallbackKey = pair.Key;
-                    break;
-                }
-            }
-
-            return fallbackKey.Length > 0 && ReplicationPendingCommandIntents.Remove(fallbackKey);
+            return false;
         }
 
         private sealed class PendingReplicationCommandIntent

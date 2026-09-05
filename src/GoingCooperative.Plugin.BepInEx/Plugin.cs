@@ -25,10 +25,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private const float PluginLogFlushSeconds = 0.5f;
 
         private static object? gameSpeedManagerInstance;
-        private static object? groundManagerInstance;
-        private static object? buildingPlacementManagerInstance;
-        private static object? buildingsPoolInstance;
-        private static object? plantResourceManagerInstance;
+        private static object? groundManagerInstance = null;
+        private static object? buildingPlacementManagerInstance = null;
+        private static object? buildingsPoolInstance = null;
+        private static object? plantResourceManagerInstance = null;
 
         private void Awake()
         {
@@ -46,6 +46,7 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 TryInstallReplicationCommandCapture(harmony);
                 TryInstallReplicationHostRuntimePump(harmony);
+                TryInstallReplicationTransformViewCacheInvalidation(harmony);
                 TryInstallReplicationClientSimulationSuppression(harmony);
                 TryInstallReplicationHostMovementAuthority(harmony);
                 TryInstallReplicationGoapActionProbe(harmony);

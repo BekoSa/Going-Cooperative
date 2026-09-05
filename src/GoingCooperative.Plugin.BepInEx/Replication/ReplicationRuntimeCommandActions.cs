@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -23,15 +24,39 @@ namespace GoingCooperative.Plugin.BepInEx
     {
         bool IRuntimeCommandActions.ApplyPause(bool paused, out string detail)
         {
-            return TryInvokeStoredGameSpeedManagerMethod(paused ? "SetSpeedPause" : "SetSpeedNormal", out detail);
+            var speedIndex = paused ? 0 : 1;
+            var applied = TryApplyStoredGameSpeedIndexFromReplication(
+                speedIndex,
+                out detail);
+            if (applied && replicationConfigHostMode)
+            {
+                replicationAuthoritativeSpeedIndex = speedIndex;
+            }
+            return applied;
         }
+
         bool IRuntimeCommandActions.ApplySpeedIndex(int speedIndex, string action, out string detail)
         {
-            if (string.Equals(action, LockstepCommandPayloads.SetSpeedNormalAction, StringComparison.Ordinal))
+            var requestedSpeedIndex = string.Equals(
+                    action,
+                    LockstepCommandPayloads.SetSpeedNormalAction,
+                    StringComparison.Ordinal)
+                ? 1
+                : speedIndex;
+            var applied = TryApplyStoredGameSpeedIndexFromReplication(
+                requestedSpeedIndex,
+                out detail);
+            if (applied && replicationConfigHostMode)
             {
-                return TryInvokeStoredGameSpeedManagerMethod("SetSpeedNormal", out detail);
+                replicationAuthoritativeSpeedIndex = requestedSpeedIndex;
             }
+            return applied;
+        }
 
+        private static bool TryApplyStoredGameSpeedIndex(
+            int speedIndex,
+            out string detail)
+        {
             switch (speedIndex)
             {
                 case 0:
@@ -43,9 +68,84 @@ namespace GoingCooperative.Plugin.BepInEx
                 case 3:
                     return TryInvokeStoredGameSpeedManagerMethod("SetSpeedFaster", out detail);
                 default:
-                    detail = "unsupported-speed-index=" + speedIndex.ToString(CultureInfo.InvariantCulture);
+                    detail = "unsupported-speed-index="
+                        + speedIndex.ToString(CultureInfo.InvariantCulture);
                     return false;
             }
+        }
+
+        private static bool TryApplyStoredGameSpeedIndexFromReplication(
+            int speedIndex,
+            out string detail)
+        {
+            if (speedIndex < 0 || speedIndex > 3)
+            {
+                detail = "unsupported-speed-index="
+                    + speedIndex.ToString(CultureInfo.InvariantCulture);
+                return false;
+            }
+
+            // OnUIButtonClicked updates both native game speed and the selected
+            // speed-button presentation. Calling SetSpeed* alone changes simulation
+            // state but leaves a remote client's speed buttons visually stale.
+            replicationEventApplicationDepth++;
+            try
+            {
+                var target = gameSpeedManagerInstance;
+                if (target == null)
+                {
+                    TryCaptureGameSpeedManagerInstance(
+                        "replicated-speed-ui-apply");
+                    target = gameSpeedManagerInstance;
+                }
+
+                if (target != null)
+                {
+                    var buttonMethod = AccessTools.Method(
+                        target.GetType(),
+                        "OnUIButtonClicked",
+                        new[] { typeof(int) });
+                    if (buttonMethod != null)
+                    {
+                        try
+                        {
+                            buttonMethod.Invoke(
+                                target,
+                                new object[] { speedIndex });
+                            detail = "ok ui-button";
+                            return true;
+                        }
+                        catch
+                        {
+                            // Some game builds expose the button callback but reject
+                            // reflective invocation. Fall back to the proven SetSpeed*
+                            // surface while capture remains suppressed.
+                        }
+                    }
+                }
+
+                return TryApplyStoredGameSpeedIndex(
+                    speedIndex,
+                    out detail);
+            }
+            finally
+            {
+                replicationEventApplicationDepth = Math.Max(
+                    0,
+                    replicationEventApplicationDepth - 1);
+            }
+        }
+
+        private static bool RestoreReplicationAuthoritativeSpeed(
+            int speedIndex,
+            out string detail)
+        {
+            var applied = TryApplyStoredGameSpeedIndex(speedIndex, out detail);
+            if (applied)
+            {
+                replicationAuthoritativeSpeedIndex = speedIndex;
+            }
+            return applied;
         }
         bool IRuntimeCommandActions.ApplyDig(int startX, int startY, int startZ, int endX, int endY, int endZ, out string detail)
         {
@@ -167,7 +267,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var vec3IntType = position.GetType();
+                var vec3IntType = position!.GetType();
                 var forceOrder = AccessTools.Method(managerType, "OnForceOrderOnResource", new[] { vec3IntType });
                 if (forceOrder == null)
                 {
@@ -726,6 +826,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 var previousStart = startField.GetValue(selectionManager);
                 var previousEnd = endField.GetValue(selectionManager);
+                var actionStarted = Stopwatch.GetTimestamp();
                 try
                 {
                     startField.SetValue(selectionManager, start);
@@ -760,7 +861,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     + endY.ToString(CultureInfo.InvariantCulture)
                     + ","
                     + endZ.ToString(CultureInfo.InvariantCulture)
-                    + ")";
+                    + ") actionMs="
+                    + ((Stopwatch.GetTimestamp() - actionStarted)
+                        * 1000.0 / Stopwatch.Frequency)
+                        .ToString("0.###", CultureInfo.InvariantCulture);
                 return true;
             }
             catch (Exception ex)
@@ -808,7 +912,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 var shrinking = string.Equals(orderType, "ShrinkZone", StringComparison.Ordinal);
                 var validName = shrinking ? "GetShrinkValidPositions" : "GetExpandValidPositions";
                 var mutateName = shrinking ? "ShrinkStockpile" : "ExpandStockpile";
-                var getValid = AccessTools.Method(stockpileManagerType, validName, new[] { start.GetType(), end.GetType() });
+                var getValid = AccessTools.Method(stockpileManagerType, validName, new[] { start!.GetType(), end!.GetType() });
                 var validPositions = getValid?.Invoke(stockpileManager, new[] { start, end });
                 MethodInfo? mutate = null;
                 foreach (var candidate in stockpileManagerType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
@@ -1122,7 +1226,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var vec3IntType = min.GetType();
+                var vec3IntType = min!.GetType();
                 var forbiddenEdge = AccessTools.Method(gridDataIndexToolsType, "IsForbiddenEdge", new[] { vec3IntType });
                 if (forbiddenEdge == null)
                 {
@@ -1154,6 +1258,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 clamp.Invoke(null, clampMaxArgs);
                 min = clampMinArgs[0];
                 max = clampMaxArgs[0];
+                if (min == null || max == null)
+                {
+                    detail = "stockpile-rejected reason=clamped-position-null";
+                    return false;
+                }
+
                 if (!TryReadReplicationVec3Int(min, out var clampedMinX, out var clampedMinY, out var clampedMinZ)
                     || !TryReadReplicationVec3Int(max, out var clampedMaxX, out var clampedMaxY, out var clampedMaxZ))
                 {
@@ -1298,7 +1408,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
                 }
 
-                var method = AccessTools.Method(managerType, "SpawnStockpile", new[] { stockpileType, start.GetType(), end.GetType() });
+                var method = AccessTools.Method(managerType, "SpawnStockpile", new[] { stockpileType, start!.GetType(), end!.GetType() });
                 if (method == null)
                 {
                     detail = "spawn-stockpile-method-missing";

@@ -360,6 +360,21 @@ namespace GoingCooperative.Plugin.BepInEx
                 && IsReplicationCaptureModeSendEnabled(replicationConfigCommandCaptureMode);
         }
 
+        private static bool EventSpeedLaneEnabled()
+        {
+            // Game speed is global multiplayer state and must not depend on the
+            // still fail-closed full event-graph authority gate. Otherwise host
+            // pause/normal/fast changes never reach clients while
+            // eventSchedulerAuthority is intentionally disabled.
+            return replicationConfigEventReplication
+                && replicationConfigEventSpeedReplication
+                && replicationEventSpeedHookReady
+                && string.Equals(
+                    replicationConfigWorldObjectDeltaMode,
+                    "apply",
+                    StringComparison.OrdinalIgnoreCase);
+        }
+
         private static bool ReplicationEventExternalAgentLifecycleImplemented()
         {
             return false;
@@ -2413,7 +2428,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 state.DialogIndex,
                 optionIndex,
                 requestId);
-            var command = new LockstepCommand(ReplicationClientPeerId, ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
+            var command = new LockstepCommand(GetReplicationLocalPeerId(), ++replicationIntentSequence, 0L, CommandKind.Custom, payload);
             replicationPendingEventChoice = new PendingReplicationEventChoice
             {
                 Command = command,
@@ -2640,9 +2655,11 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             replicationHostEventSpeedIndex = speedIndex;
             var current = instance;
-            if (current == null
+            // The retained static multiplayer runtime can outlive Unity's plugin object.
+            // Use CLR null semantics; Unity fake-null must not suppress host speed state.
+            if (ReferenceEquals(current, null)
                 || !replicationConfigHostMode
-                || !FullEventGraphAuthorityEnabled()
+                || !EventSpeedLaneEnabled()
                 || !replicationRuntimeStarted
                 || !replicationRemoteHelloReceived
                 || speedIndex < 0
@@ -2711,23 +2728,17 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 replicationEventApplicationDepth++;
                 if (gameSpeedManagerInstance == null) TryCaptureGameSpeedManagerInstance("event-speed-apply");
-                if (gameSpeedManagerInstance != null
-                    && TryReadInstanceMemberValue(gameSpeedManagerInstance, "CurrentSpeedIndex", out var currentSpeedValue)
-                    && currentSpeedValue != null
-                    && Convert.ToInt32(currentSpeedValue, CultureInfo.InvariantCulture) == speedIndex)
-                {
-                    lock (ReplicationEventLock) replicationLastEventSpeedAppliedSequence = delta.Sequence;
-                    detail = "ok event-speed-already-current index=" + speedIndex.ToString(CultureInfo.InvariantCulture);
-                    return true;
-                }
+                // Do not short-circuit when CurrentSpeedIndex already matches.
+                // The numeric speed may have changed through a non-UI native path while
+                // the speed-button selection is still stale. Applying through
+                // TryApplyStoredGameSpeedIndexFromReplication refreshes both simulation
+                // state and the native button presentation under capture suppression.
                 bool applied;
                 if (speedIndex <= 3)
                 {
-                    var methodName = speedIndex == 0 ? "SetSpeedPause"
-                        : speedIndex == 1 ? "SetSpeedNormal"
-                        : speedIndex == 2 ? "SetSpeedFast"
-                        : "SetSpeedFaster";
-                    applied = TryInvokeStoredGameSpeedManagerMethod(methodName, out detail);
+                    applied = TryApplyStoredGameSpeedIndexFromReplication(
+                        speedIndex,
+                        out detail);
                 }
                 else
                 {

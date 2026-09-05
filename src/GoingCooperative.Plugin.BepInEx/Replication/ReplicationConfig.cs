@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using BepInEx;
+using GoingCooperative.Core;
 
 namespace GoingCooperative.Plugin.BepInEx
 {
@@ -11,6 +12,29 @@ namespace GoingCooperative.Plugin.BepInEx
         private const string DiagnosticsConfigRelativePath = @"GoingCooperative\diagnostics.cfg";
         private const string ReplicationHostPeerId = "host";
         private const string ReplicationClientPeerId = "client";
+        private static string replicationAssignedClientPeerId = ReplicationClientPeerId;
+
+        private static string GetReplicationLocalPeerId()
+        {
+            if (replicationConfigHostMode)
+            {
+                return ReplicationHostPeerId;
+            }
+
+            return MultiplayerPeerIds.TryParseClientSlot(
+                    replicationAssignedClientPeerId,
+                    out _)
+                ? replicationAssignedClientPeerId
+                : ReplicationClientPeerId;
+        }
+
+        private static void SetReplicationLocalPeerId(string peerId)
+        {
+            replicationAssignedClientPeerId =
+                MultiplayerPeerIds.TryParseClientSlot(peerId, out _)
+                    ? peerId
+                    : ReplicationClientPeerId;
+        }
 
         private static bool replicationConfigLoadAttempted;
         private static bool replicationConfigEnabled;
@@ -185,16 +209,21 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationConfigRegionCommandMode = "shadow";
         private static string replicationConfigGoapActionProbeEntityId = string.Empty;
         private static string replicationConfigWorldObjectDeltaMode = "shadow";
+        private static UnityEngine.KeyCode replicationConfigPingKey = UnityEngine.KeyCode.F9;
         private static int replicationConfigPort = 47692;
-        private static int replicationConfigSnapshotHz = 12;
+        private static int replicationConfigSnapshotHz = 10;
         private static int replicationConfigFullResyncSeconds = 45;
         private static int replicationConfigInterpolationMs = 150;
         private static int replicationConfigMaxSnapshotEntities = 128;
         private static int replicationConfigSnapshotValidationSeconds = 10;
         private static int replicationConfigProofIntentDelaySeconds = 5;
-        private static int replicationConfigWorldObjectDeltaApplyBudgetPerFrame = 12;
+        private static int replicationConfigWorldObjectDeltaApplyBudgetPerFrame = 8;
         private static int replicationConfigWorldObjectDeltaApplyQueueMax = 2048;
-        private static float replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = 8f;
+        private static float replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame = 2f;
+        private static float replicationConfigRuntimeMainThreadBudgetMsPerFrame = 4f;
+        private static float replicationConfigPresentationApplyBudgetMsPerFrame = 1.25f;
+        private static int replicationConfigPresentationApplyMaxEntitiesPerFrame = 48;
+        private static float replicationConfigSnapshotViewCacheSafetyRefreshSeconds = 0f;
 
         private static void TryLoadReplicationConfig(GoingCooperativePlugin current)
         {
@@ -233,6 +262,8 @@ namespace GoingCooperative.Plugin.BepInEx
                     var value = line.Substring(separator + 1).Trim();
                     ApplyReplicationConfigValue(current, key, value, i + 1);
                 }
+
+                ApplyReplicationPerformanceSafetyLimits(current);
 
                 current.Logger.LogInfo("Going Cooperative replication config loaded enabled="
                     + replicationConfigEnabled
@@ -454,6 +485,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     + replicationConfigWorldObjectDeltaApplyQueueMax.ToString(CultureInfo.InvariantCulture)
                     + " worldObjectDeltaApplyBudgetMsPerFrame="
                     + replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " runtimeMainThreadBudgetMsPerFrame="
+                    + replicationConfigRuntimeMainThreadBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationApplyBudgetMsPerFrame="
+                    + replicationConfigPresentationApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationApplyMaxEntitiesPerFrame="
+                    + replicationConfigPresentationApplyMaxEntitiesPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + " snapshotViewCacheSafetyRefreshSeconds="
+                    + replicationConfigSnapshotViewCacheSafetyRefreshSeconds.ToString("0.###", CultureInfo.InvariantCulture)
                     + " maxSnapshotEntities="
                     + replicationConfigMaxSnapshotEntities.ToString(CultureInfo.InvariantCulture));
                 LogReplicationInventoryAuthority(current);
@@ -617,6 +656,61 @@ namespace GoingCooperative.Plugin.BepInEx
             }
         }
 
+        private static void ApplyReplicationPerformanceSafetyLimits(GoingCooperativePlugin current)
+        {
+            var originalSnapshotHz = replicationConfigSnapshotHz;
+            var originalWorldBudgetPerFrame = replicationConfigWorldObjectDeltaApplyBudgetPerFrame;
+            var originalWorldBudgetMs = replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame;
+            var originalRuntimeBudgetMs = replicationConfigRuntimeMainThreadBudgetMsPerFrame;
+            var originalPresentationBudgetMs = replicationConfigPresentationApplyBudgetMsPerFrame;
+            var originalPresentationMaxEntities = replicationConfigPresentationApplyMaxEntitiesPerFrame;
+
+            // Treat zero/negative time budgets as "unsafe unlimited", not as an
+            // escape hatch. These limits protect old hand-edited configs too, so
+            // installing a new DLL is enough to get the current frame safeguards.
+            replicationConfigSnapshotHz = Math.Max(1, Math.Min(replicationConfigSnapshotHz, 10));
+            replicationConfigWorldObjectDeltaApplyBudgetPerFrame =
+                replicationConfigWorldObjectDeltaApplyBudgetPerFrame <= 0
+                    ? 8
+                    : Math.Min(replicationConfigWorldObjectDeltaApplyBudgetPerFrame, 8);
+            replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame =
+                replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame <= 0f
+                    ? 2f
+                    : Math.Min(replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame, 2f);
+            replicationConfigRuntimeMainThreadBudgetMsPerFrame =
+                replicationConfigRuntimeMainThreadBudgetMsPerFrame <= 0f
+                    ? 4f
+                    : Math.Min(replicationConfigRuntimeMainThreadBudgetMsPerFrame, 4f);
+            replicationConfigPresentationApplyBudgetMsPerFrame =
+                replicationConfigPresentationApplyBudgetMsPerFrame <= 0f
+                    ? 1.25f
+                    : Math.Min(replicationConfigPresentationApplyBudgetMsPerFrame, 1.25f);
+            replicationConfigPresentationApplyMaxEntitiesPerFrame =
+                Math.Max(1, Math.Min(replicationConfigPresentationApplyMaxEntitiesPerFrame, 48));
+
+            if (originalSnapshotHz != replicationConfigSnapshotHz
+                || originalWorldBudgetPerFrame != replicationConfigWorldObjectDeltaApplyBudgetPerFrame
+                || Math.Abs(originalWorldBudgetMs - replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame) > 0.0001f
+                || Math.Abs(originalRuntimeBudgetMs - replicationConfigRuntimeMainThreadBudgetMsPerFrame) > 0.0001f
+                || Math.Abs(originalPresentationBudgetMs - replicationConfigPresentationApplyBudgetMsPerFrame) > 0.0001f
+                || originalPresentationMaxEntities != replicationConfigPresentationApplyMaxEntitiesPerFrame)
+            {
+                current.Logger.LogWarning("Going Cooperative replication performance safety limits applied"
+                    + " snapshotHz=" + originalSnapshotHz.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigSnapshotHz.ToString(CultureInfo.InvariantCulture)
+                    + " worldCount=" + originalWorldBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigWorldObjectDeltaApplyBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
+                    + " worldMs=" + originalWorldBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " runtimeMs=" + originalRuntimeBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigRuntimeMainThreadBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationMs=" + originalPresentationBudgetMs.ToString("0.###", CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigPresentationApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " presentationMax=" + originalPresentationMaxEntities.ToString(CultureInfo.InvariantCulture)
+                    + "->" + replicationConfigPresentationApplyMaxEntitiesPerFrame.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+
         private static void ApplyReplicationConfigValue(GoingCooperativePlugin current, string key, string value, int lineNumber)
         {
             switch (key)
@@ -663,6 +757,18 @@ namespace GoingCooperative.Plugin.BepInEx
                     if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) && port > 0 && port <= 65535)
                     {
                         replicationConfigPort = port;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "pingkey":
+                case "playerpingkey":
+                    if (TryParseReplicationKeyCode(value, out var pingKey))
+                    {
+                        replicationConfigPingKey = pingKey;
                     }
                     else
                     {
@@ -1646,6 +1752,62 @@ namespace GoingCooperative.Plugin.BepInEx
                     }
 
                     break;
+                case "runtimemainthreadbudgetmsperframe":
+                case "multiplayermainthreadbudgetmsperframe":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var runtimeBudgetMs)
+                        && runtimeBudgetMs >= 0f
+                        && runtimeBudgetMs <= 16f)
+                    {
+                        replicationConfigRuntimeMainThreadBudgetMsPerFrame = runtimeBudgetMs;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "presentationapplybudgetmsperframe":
+                case "presentationbudgetmsperframe":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var presentationBudgetMs)
+                        && presentationBudgetMs >= 0f
+                        && presentationBudgetMs <= 8f)
+                    {
+                        replicationConfigPresentationApplyBudgetMsPerFrame = presentationBudgetMs;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "presentationapplymaxentitiesperframe":
+                case "presentationmaxentitiesperframe":
+                    if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var presentationMaxEntities)
+                        && presentationMaxEntities >= 1
+                        && presentationMaxEntities <= 512)
+                    {
+                        replicationConfigPresentationApplyMaxEntitiesPerFrame = presentationMaxEntities;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
+                case "snapshotviewcachesafetyrefreshseconds":
+                case "snapshotviewcacherefreshseconds":
+                    if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var cacheRefreshSeconds)
+                        && cacheRefreshSeconds >= 0f
+                        && cacheRefreshSeconds <= 600f)
+                    {
+                        replicationConfigSnapshotViewCacheSafetyRefreshSeconds = cacheRefreshSeconds;
+                    }
+                    else
+                    {
+                        LogReplicationConfigInvalidValue(current, lineNumber, key, value);
+                    }
+
+                    break;
                 case "proofintent":
                     if (!string.IsNullOrWhiteSpace(value))
                     {
@@ -1804,6 +1966,34 @@ namespace GoingCooperative.Plugin.BepInEx
                 + key
                 + " value="
                 + value);
+        }
+
+        private static bool TryParseReplicationKeyCode(string value, out UnityEngine.KeyCode keyCode)
+        {
+            keyCode = UnityEngine.KeyCode.None;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            try
+            {
+                var parsed = (UnityEngine.KeyCode)Enum.Parse(
+                    typeof(UnityEngine.KeyCode),
+                    value.Trim(),
+                    true);
+                if (!Enum.IsDefined(typeof(UnityEngine.KeyCode), parsed))
+                {
+                    return false;
+                }
+
+                keyCode = parsed;
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
         }
 
         private static bool TryParseReplicationCaptureMode(string value, out string mode)

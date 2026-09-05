@@ -133,20 +133,26 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private string GetMultiplayerConnectionLabel()
         {
-            if (!multiplayerSaveTransfer.TransferComplete
-                && !string.Equals(multiplayerSaveTransfer.Phase, "Idle", StringComparison.Ordinal))
+            if (replicationConfigHostMode && replicationRuntimeStarted)
+            {
+                return "Hosting "
+                    + multiplayerSaveTransfer.ConnectedPeerCount.ToString(
+                        CultureInfo.InvariantCulture)
+                    + "/"
+                    + multiplayerSaveTransfer.MaxPlayers.ToString(
+                        CultureInfo.InvariantCulture);
+            }
+
+            if (!string.Equals(
+                    multiplayerSaveTransfer.Phase,
+                    "Idle",
+                    StringComparison.Ordinal)
+                && !string.Equals(
+                    multiplayerSaveTransfer.Phase,
+                    "Playing",
+                    StringComparison.Ordinal))
             {
                 return multiplayerSaveTransfer.Phase;
-            }
-
-            if (multiplayerSaveTransfer.TransferComplete && !replicationRuntimeStarted)
-            {
-                return "Connected - ready to load";
-            }
-
-            if (!replicationRuntimeStarted)
-            {
-                return "Disconnected";
             }
 
             if (replicationRemoteCompatibilityRefused)
@@ -154,12 +160,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 return "Compatibility refused";
             }
 
-            if (replicationRemoteHelloReceived)
+            if (replicationRuntimeStarted && replicationRemoteHelloReceived)
             {
-                return "Connected";
+                return "Playing";
             }
 
-            return replicationConfigHostMode ? "Waiting for player" : "Connecting";
+            if (replicationRuntimeStarted)
+            {
+                return replicationConfigHostMode
+                    ? "Hosting"
+                    : "Joining replication";
+            }
+
+            return string.Equals(
+                    multiplayerSaveTransfer.Phase,
+                    "Playing",
+                    StringComparison.Ordinal)
+                ? "Playing"
+                : "Disconnected";
         }
 
         private static string GetMultiplayerProtocolLabel()

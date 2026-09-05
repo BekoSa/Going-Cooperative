@@ -27,6 +27,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private static long replicationPerfLastWorldDeltaRetriesSent;
         private static long replicationPerfLastWorldDeltasCoalesced;
         private static long replicationPerfLastWorldDeltaApplyBudgetStops;
+        private static long replicationPerfLastMainThreadBudgetStops;
         private static long replicationPerfLastIntentsSent;
         private static long replicationPerfLastIntentsReceived;
         private static long replicationPerfLastCommandAcksSent;
@@ -130,6 +131,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var worldDeltaRetries = replicationWorldObjectDeltaRetriesSent - replicationPerfLastWorldDeltaRetriesSent;
             var worldDeltasCoalesced = replicationWorldObjectDeltasCoalesced - replicationPerfLastWorldDeltasCoalesced;
             var worldDeltaApplyBudgetStops = replicationWorldObjectDeltaApplyBudgetStops - replicationPerfLastWorldDeltaApplyBudgetStops;
+            var mainThreadBudgetStops = replicationMainThreadBudgetStops - replicationPerfLastMainThreadBudgetStops;
             var worldDeltaQueue = GetPendingReplicationWorldObjectDeltaApplyCount();
             var worldDeltaCoalescableQueue = GetCoalescableReplicationWorldObjectDeltaApplyCount();
             var intentsSent = replicationIntentsSent - replicationPerfLastIntentsSent;
@@ -189,10 +191,22 @@ namespace GoingCooperative.Plugin.BepInEx
                 + worldDeltaQueue.ToString(CultureInfo.InvariantCulture)
                 + " worldDeltaCoalescableQueue="
                 + worldDeltaCoalescableQueue.ToString(CultureInfo.InvariantCulture)
+                + " pileIndexNext="
+                + replicationResourcePileLocationIndexNextIndex.ToString(CultureInfo.InvariantCulture)
+                + " pileIndexComplete="
+                + replicationResourcePileLocationIndexComplete
                 + " worldDeltaApplyBudgetPerFrame="
                 + replicationConfigWorldObjectDeltaApplyBudgetPerFrame.ToString(CultureInfo.InvariantCulture)
                 + " worldDeltaApplyBudgetMsPerFrame="
                 + replicationConfigWorldObjectDeltaApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                + " runtimeBudgetStops="
+                + mainThreadBudgetStops.ToString(CultureInfo.InvariantCulture)
+                + " runtimeMainThreadBudgetMsPerFrame="
+                + replicationConfigRuntimeMainThreadBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                + " presentationApplyBudgetMsPerFrame="
+                + replicationConfigPresentationApplyBudgetMsPerFrame.ToString("0.###", CultureInfo.InvariantCulture)
+                + " presentationApplyMaxEntitiesPerFrame="
+                + replicationConfigPresentationApplyMaxEntitiesPerFrame.ToString(CultureInfo.InvariantCulture)
                 + " intentsSent="
                 + intentsSent.ToString(CultureInfo.InvariantCulture)
                 + " intentsReceived="
@@ -231,6 +245,7 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationPerfLastWorldDeltaRetriesSent = replicationWorldObjectDeltaRetriesSent;
             replicationPerfLastWorldDeltasCoalesced = replicationWorldObjectDeltasCoalesced;
             replicationPerfLastWorldDeltaApplyBudgetStops = replicationWorldObjectDeltaApplyBudgetStops;
+            replicationPerfLastMainThreadBudgetStops = replicationMainThreadBudgetStops;
             replicationPerfLastIntentsSent = replicationIntentsSent;
             replicationPerfLastIntentsReceived = replicationIntentsReceived;
             replicationPerfLastCommandAcksSent = replicationCommandAcksSent;

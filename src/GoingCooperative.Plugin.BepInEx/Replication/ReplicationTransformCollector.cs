@@ -31,29 +31,6 @@ namespace GoingCooperative.Plugin.BepInEx
                 var views = FindReplicationAnimatedAgentViews();
                 CollectReplicationViewTransforms(
                     views,
-                    "worker",
-                    maxEntities,
-                    seen,
-                    seenEntityIds,
-                    entities,
-                    ref stableCount,
-                    ref fallbackCount,
-                    fallbackSample,
-                    positionSample);
-                CollectReplicationViewTransforms(
-                    views,
-                    "npc",
-                    maxEntities,
-                    seen,
-                    seenEntityIds,
-                    entities,
-                    ref stableCount,
-                    ref fallbackCount,
-                    fallbackSample,
-                    positionSample);
-                CollectReplicationViewTransforms(
-                    views,
-                    "animal",
                     maxEntities,
                     seen,
                     seenEntityIds,
@@ -74,7 +51,6 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void CollectReplicationViewTransforms(
             UnityEngine.Object[] views,
-            string wantedKind,
             int maxEntities,
             HashSet<int> seen,
             HashSet<string> seenEntityIds,
@@ -88,7 +64,6 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 CollectReplicationViewTransform(
                     views[i],
-                    wantedKind,
                     maxEntities,
                     seen,
                     seenEntityIds,
@@ -102,7 +77,6 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void CollectReplicationViewTransform(
             UnityEngine.Object view,
-            string wantedKind,
             int maxEntities,
             HashSet<int> seen,
             HashSet<string> seenEntityIds,
@@ -122,8 +96,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var gameObject = behaviour.gameObject;
-            if (!TryClassifyReplicationView(view, out var kind)
-                || !string.Equals(kind, wantedKind, StringComparison.Ordinal))
+            if (!TryClassifyReplicationView(view, out var kind))
             {
                 return;
             }
@@ -134,7 +107,25 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var identityStarted = BeginReplicationPathingPerfSample();
-            var hasStableEntityId = TryGetReplicationViewEntityId(view, seenEntityIds, out var entityId);
+            var viewInstanceId = view.GetInstanceID();
+            var hasStableEntityId = false;
+            string entityId;
+            if (ReplicationSnapshotIdentityByViewId.TryGetValue(viewInstanceId, out var cachedIdentity)
+                && ReferenceEquals(cachedIdentity.View, view)
+                && seenEntityIds.Add(cachedIdentity.EntityId))
+            {
+                entityId = cachedIdentity.EntityId;
+                hasStableEntityId = true;
+            }
+            else
+            {
+                hasStableEntityId = TryGetReplicationViewEntityId(view, seenEntityIds, out entityId);
+                if (hasStableEntityId)
+                {
+                    ReplicationSnapshotIdentityByViewId[viewInstanceId] =
+                        new ReplicationSnapshotIdentityCacheEntry(view, entityId);
+                }
+            }
             RecordReplicationPathingIdentity(identityStarted, hasStableEntityId);
             if (hasStableEntityId)
             {
@@ -274,7 +265,20 @@ namespace GoingCooperative.Plugin.BepInEx
         private static Type? replicationAnimatedAgentViewType;
         private static UnityEngine.Object[] replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
         private static float replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
-        private const float ReplicationSemanticAnimatedAgentViewCacheSeconds = 0.75f;
+        private static bool replicationSemanticAnimatedAgentViewCacheInitialized;
+        private static bool replicationSemanticAnimatedAgentViewCacheDirty = true;
+        private static bool replicationTransformViewCacheInvalidationReady;
+        private static float replicationTransformViewCacheFollowupRefreshRealtime;
+        private static Type? replicationTransformAnimatedAgentViewType;
+        private static long replicationTransformViewCacheScans;
+        private static long replicationTransformViewCacheInvalidations;
+        private const float ReplicationTransformViewCacheFallbackRefreshSeconds = 10f;
+        // FindObjectsOfType is a global Unity scene walk and showed ~28 ms spikes in live
+        // perf logs. Prefer AnimatedAgentView lifecycle invalidation; if this game build
+        // exposes no patchable lifecycle method, keep correctness with a rare 30 s scan
+        // rather than the old mandatory scan every 3 seconds.
+        private static readonly Dictionary<int, ReplicationSnapshotIdentityCacheEntry> ReplicationSnapshotIdentityByViewId =
+            new Dictionary<int, ReplicationSnapshotIdentityCacheEntry>();
 
         private static UnityEngine.Object[] FindReplicationAnimatedAgentViews()
         {
@@ -284,20 +288,181 @@ namespace GoingCooperative.Plugin.BepInEx
                 return Array.Empty<UnityEngine.Object>();
             }
 
-            if (!replicationConfigSemanticAgentPresentation)
+            var now = Time.realtimeSinceStartup;
+            var safetyRefreshSeconds = replicationTransformViewCacheInvalidationReady
+                ? replicationConfigSnapshotViewCacheSafetyRefreshSeconds
+                : ReplicationTransformViewCacheFallbackRefreshSeconds;
+            var safetyRefreshDue = safetyRefreshSeconds > 0f
+                && now - replicationSemanticAnimatedAgentViewCacheRealtime >= safetyRefreshSeconds;
+            var lifecycleFollowupDue = replicationTransformViewCacheFollowupRefreshRealtime > 0f
+                && now >= replicationTransformViewCacheFollowupRefreshRealtime;
+            if (replicationSemanticAnimatedAgentViewCacheInitialized
+                && !replicationSemanticAnimatedAgentViewCacheDirty
+                && !safetyRefreshDue
+                && !lifecycleFollowupDue)
             {
-                return UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
+                return replicationSemanticAnimatedAgentViewCache;
             }
 
-            var now = Time.realtimeSinceStartup;
-            if (now - replicationSemanticAnimatedAgentViewCacheRealtime < ReplicationSemanticAnimatedAgentViewCacheSeconds)
+            // Lifecycle callbacks can burst during load, mass construction and
+            // destruction. Coalesce them into one delayed refresh instead of turning
+            // every callback into an immediate global FindObjectsOfType scene walk.
+            if (replicationSemanticAnimatedAgentViewCacheInitialized
+                && replicationSemanticAnimatedAgentViewCacheDirty
+                && replicationTransformViewCacheFollowupRefreshRealtime > now)
+            {
+                return replicationSemanticAnimatedAgentViewCache;
+            }
+
+            // Never trigger the expensive global scene scan while the player is
+            // dragging/selecting/committing a placement. A slightly stale actor list
+            // is harmless for presentation and refreshes immediately after interaction.
+            if (IsReplicationInteractiveQoSActive()
+                && replicationSemanticAnimatedAgentViewCacheInitialized)
             {
                 return replicationSemanticAnimatedAgentViewCache;
             }
 
             replicationSemanticAnimatedAgentViewCache = UnityEngine.Object.FindObjectsOfType(type) ?? Array.Empty<UnityEngine.Object>();
+            replicationTransformViewCacheScans++;
             replicationSemanticAnimatedAgentViewCacheRealtime = now;
+            replicationSemanticAnimatedAgentViewCacheInitialized = true;
+            replicationSemanticAnimatedAgentViewCacheDirty = false;
+            if (lifecycleFollowupDue)
+            {
+                replicationTransformViewCacheFollowupRefreshRealtime = 0f;
+            }
+            if (ReplicationSnapshotIdentityByViewId.Count > 1024)
+            {
+                ReplicationSnapshotIdentityByViewId.Clear();
+            }
             return replicationSemanticAnimatedAgentViewCache;
+        }
+
+        private void TryInstallReplicationTransformViewCacheInvalidation(Harmony harmonyInstance)
+        {
+            var animatedAgentViewType = AccessTools.TypeByName("NSMedieval.View.AnimatedAgentView");
+            replicationTransformAnimatedAgentViewType = animatedAgentViewType;
+            if (animatedAgentViewType == null)
+            {
+                AppendPluginLog("Going Cooperative transform-view cache invalidation hooks unavailable: AnimatedAgentView missing");
+                return;
+            }
+
+            var postfix = new HarmonyMethod(
+                typeof(GoingCooperativePlugin),
+                nameof(ReplicationAnimatedAgentViewLifecyclePostfix));
+            var patchedMethods = new HashSet<MethodBase>();
+            var creationPatched = false;
+            var removalPatched = false;
+            var patched = 0;
+            var creationLifecycleNames = new[]
+            {
+                "Awake",
+                "OnEnable",
+                "Start"
+            };
+            var removalLifecycleNames = new[]
+            {
+                "OnDisable",
+                "OnDestroy"
+            };
+
+            for (var currentType = animatedAgentViewType;
+                 currentType != null && currentType != typeof(MonoBehaviour);
+                 currentType = currentType.BaseType)
+            {
+                MethodInfo[] methods;
+                try
+                {
+                    methods = currentType.GetMethods(
+                        BindingFlags.Instance
+                        | BindingFlags.Public
+                        | BindingFlags.NonPublic
+                        | BindingFlags.DeclaredOnly);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < methods.Length; i++)
+                {
+                    var method = methods[i];
+                    var isCreationLifecycle =
+                        Array.IndexOf(creationLifecycleNames, method.Name) >= 0;
+                    var isRemovalLifecycle =
+                        Array.IndexOf(removalLifecycleNames, method.Name) >= 0;
+                    if (method.IsAbstract
+                        || method.IsGenericMethod
+                        || method.GetParameters().Length != 0
+                        || (!isCreationLifecycle && !isRemovalLifecycle)
+                        || !patchedMethods.Add(method))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        harmonyInstance.Patch(method, postfix: postfix);
+                        patched++;
+                        creationPatched |= isCreationLifecycle;
+                        removalPatched |= isRemovalLifecycle;
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendPluginLog("Going Cooperative transform-view cache invalidation patch failed method="
+                            + (method.DeclaringType?.FullName ?? "<unknown>")
+                            + "."
+                            + method.Name
+                            + " error="
+                            + ex.GetType().Name
+                            + ":"
+                            + ex.Message);
+                    }
+                }
+            }
+
+            // A creation hook is the correctness-critical half: new views become visible
+            // immediately. Removal-only misses are harmless because Unity destroyed-object
+            // null semantics already keep dead cached views from being applied.
+            replicationTransformViewCacheInvalidationReady = creationPatched;
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
+            AppendPluginLog("Going Cooperative transform-view cache invalidation hooks="
+                + patched.ToString(CultureInfo.InvariantCulture)
+                + " create="
+                + creationPatched
+                + " remove="
+                + removalPatched
+                + " eventDriven="
+                + replicationTransformViewCacheInvalidationReady
+                + " fallbackSeconds="
+                + (replicationTransformViewCacheInvalidationReady
+                    ? replicationConfigSnapshotViewCacheSafetyRefreshSeconds
+                    : ReplicationTransformViewCacheFallbackRefreshSeconds)
+                    .ToString("0.###", CultureInfo.InvariantCulture));
+        }
+
+        private static void ReplicationAnimatedAgentViewLifecyclePostfix(object __instance)
+        {
+            // Some AnimatedAgentView lifecycle methods are inherited from a shared
+            // BaseView component. Harmony patches the declaring base method, so the
+            // postfix also runs for buildings and other views unless we filter the
+            // actual runtime instance. A 120-tile floor previously produced exactly
+            // 120 false actor-cache invalidations and reintroduced global scene scans.
+            var animatedAgentViewType = replicationTransformAnimatedAgentViewType;
+            if (__instance == null
+                || animatedAgentViewType == null
+                || !animatedAgentViewType.IsInstanceOfType(__instance))
+            {
+                return;
+            }
+
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheFollowupRefreshRealtime = Mathf.Max(
+                replicationTransformViewCacheFollowupRefreshRealtime,
+                Time.realtimeSinceStartup + 0.5f);
+            replicationTransformViewCacheInvalidations++;
         }
 
         private static bool TryClassifyReplicationView(object view, out string kind)
@@ -736,6 +901,30 @@ namespace GoingCooperative.Plugin.BepInEx
             "Data",
             "data"
         };
+
+        private static void ResetReplicationTransformCollectorCaches()
+        {
+            replicationSemanticAnimatedAgentViewCache = Array.Empty<UnityEngine.Object>();
+            replicationSemanticAnimatedAgentViewCacheRealtime = -10f;
+            replicationSemanticAnimatedAgentViewCacheInitialized = false;
+            replicationSemanticAnimatedAgentViewCacheDirty = true;
+            replicationTransformViewCacheFollowupRefreshRealtime = 0f;
+            replicationTransformViewCacheScans = 0L;
+            replicationTransformViewCacheInvalidations = 0L;
+            ReplicationSnapshotIdentityByViewId.Clear();
+        }
+
+        private sealed class ReplicationSnapshotIdentityCacheEntry
+        {
+            public ReplicationSnapshotIdentityCacheEntry(UnityEngine.Object view, string entityId)
+            {
+                View = view;
+                EntityId = entityId;
+            }
+
+            public UnityEngine.Object View { get; }
+            public string EntityId { get; }
+        }
 
         private static bool TryReadSimpleReplicationIdentity(object owner, out string entityId)
         {

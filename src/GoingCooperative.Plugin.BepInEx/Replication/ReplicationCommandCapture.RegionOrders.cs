@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using GoingCooperative.Core;
+using GoingCooperative.Core.Replication;
 using HarmonyLib;
 using UnityEngine;
 
@@ -32,6 +34,30 @@ namespace GoingCooperative.Plugin.BepInEx
         private static string replicationLastAreaOrderSubType = string.Empty;
         private static float replicationLastAreaOrderRealtime;
         private static float replicationNextRegionSelectionLogRealtime;
+        private static int replicationRegionSelectionActionFrame = -1;
+        private static int replicationRegionSelectionActionDepth;
+        private static bool replicationHostLocalSemanticRegionArmed;
+        private static int replicationHostLocalSemanticRegionFrame = -1;
+        private static string replicationHostLocalSemanticRegionOrderType = string.Empty;
+        private static string replicationHostLocalSemanticRegionAllowType = "All";
+        private static int replicationHostLocalSemanticRegionStartX;
+        private static int replicationHostLocalSemanticRegionStartY;
+        private static int replicationHostLocalSemanticRegionStartZ;
+        private static int replicationHostLocalSemanticRegionEndX;
+        private static int replicationHostLocalSemanticRegionEndY;
+        private static int replicationHostLocalSemanticRegionEndZ;
+        private static long replicationLocalRegionNativeActionStartedTimestamp;
+        private static int replicationLocalRegionNativeActionFrame = -1;
+        private static string replicationLocalRegionNativeActionType = string.Empty;
+        private const int ReplicationClientMassBuildingRegionBaseTileSpan = 6;
+        private const int ReplicationClientMassBuildingRegionMaxInitialTiles = 2048;
+        private static readonly Queue<ReplicationPendingMassBuildingRegionTile>
+            ReplicationPendingClientMassBuildingRegionTiles =
+                new Queue<ReplicationPendingMassBuildingRegionTile>();
+        private const int ReplicationClientMassBuildingRegionTombstoneMax = 64;
+        private static readonly List<ReplicationMassBuildingRegionTombstone>
+            ReplicationClientMassBuildingRegionTombstones =
+                new List<ReplicationMassBuildingRegionTombstone>();
         private static string replicationZoneModifyOperation = string.Empty;
         private static string replicationZoneModifyId = string.Empty;
         private static float replicationZoneModifyRealtime;
@@ -178,6 +204,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationRegionSelectionPostfix(MethodBase __originalMethod, object __0, object __1)
         {
+            MarkReplicationInteractiveQoS(0.45f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return;
@@ -206,6 +233,100 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static void ReplicationRegionSelectionEventPostfix(MethodBase __originalMethod)
         {
+            var methodName = __originalMethod?.Name ?? string.Empty;
+            var semanticOrderType = string.Equals(
+                    methodName,
+                    "OnOrderCancel",
+                    StringComparison.Ordinal)
+                ? "Cancel"
+                : string.Equals(
+                    methodName,
+                    "OnOrderDeconstruction",
+                    StringComparison.Ordinal)
+                    ? "Deconstruct"
+                    : string.Empty;
+            var hostSemanticRemoval = replicationConfigHostMode
+                && applyingRuntimeCommandDepth <= 0
+                && replicationHostLocalSemanticRegionArmed
+                && replicationHostLocalSemanticRegionFrame == Time.frameCount
+                && string.Equals(
+                    replicationHostLocalSemanticRegionOrderType,
+                    semanticOrderType,
+                    StringComparison.Ordinal)
+                && IsReplicationMassBuildingRegionOrder(semanticOrderType);
+
+            // This postfix runs after the native SelectionManager operation. For a
+            // host-local Cancel/Deconstruct, publish the one authoritative region
+            // operation now (not from the prefix) so the client can use the game's
+            // own batched area path instead of waiting for hundreds of per-cell
+            // BuildingLifecycleV2 terminal rows.
+            if (hostSemanticRemoval
+                && replicationConfigEnabled
+                && replicationRuntimeStarted
+                && replicationRemoteHelloReceived)
+            {
+                SupersedePendingReplicationHostBuildReplayChunksInRegion(
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndZ);
+                CollapseReplicationBuildingTerminalsForSemanticRegionV2(
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndZ,
+                    semanticOrderType);
+                MarkReplicationBuildingSemanticRegionReplayV2();
+                instance?.SendReplicationRegionOrderState(
+                    semanticOrderType,
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartY,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndY,
+                    replicationHostLocalSemanticRegionEndZ,
+                    replicationHostLocalSemanticRegionAllowType,
+                    "None",
+                    "None",
+                    "host-local source=selection:" + methodName);
+            }
+
+            if (replicationConfigHostMode
+                && replicationHostLocalSemanticRegionFrame == Time.frameCount
+                && IsReplicationMassBuildingRegionOrder(semanticOrderType))
+            {
+                replicationHostLocalSemanticRegionArmed = false;
+            }
+
+            if (replicationLocalRegionNativeActionStartedTimestamp > 0L
+                && replicationLocalRegionNativeActionFrame == Time.frameCount
+                && string.Equals(
+                    replicationLocalRegionNativeActionType,
+                    semanticOrderType,
+                    StringComparison.Ordinal))
+            {
+                var nativeActionMs =
+                    (Stopwatch.GetTimestamp()
+                        - replicationLocalRegionNativeActionStartedTimestamp)
+                    * 1000.0 / Stopwatch.Frequency;
+                instance?.LogReplicationInfo(
+                    "[MP/REGION] local native area action orderType="
+                    + semanticOrderType
+                    + " actionMs="
+                    + nativeActionMs.ToString(
+                        "0.###",
+                        CultureInfo.InvariantCulture));
+                replicationLocalRegionNativeActionStartedTimestamp = 0L;
+                replicationLocalRegionNativeActionFrame = -1;
+                replicationLocalRegionNativeActionType = string.Empty;
+            }
+
+            if (replicationRegionSelectionActionDepth > 0
+                && replicationRegionSelectionActionFrame == Time.frameCount)
+            {
+                replicationRegionSelectionActionDepth--;
+            }
+
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return;
@@ -214,7 +335,7 @@ namespace GoingCooperative.Plugin.BepInEx
             instance?.LogReplicationInfo("Going Cooperative replication region selection event mode="
                 + replicationConfigRegionCommandMode
                 + " method="
-                + __originalMethod.Name
+                + methodName
                 + " orderType="
                 + (string.IsNullOrEmpty(replicationLastRegionOrderType) ? "<unknown>" : replicationLastRegionOrderType)
                 + FormatReplicationLastRegionSelection());
@@ -222,6 +343,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ReplicationRegionSelectionActionPrefix(MethodBase __originalMethod, object __instance)
         {
+            MarkReplicationInteractiveQoS(0.45f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return true;
@@ -229,6 +351,27 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var methodName = __originalMethod?.Name ?? string.Empty;
             var orderType = ResolveReplicationSelectionOrderType(__instance, methodName);
+            if (IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                // Suppress passive resource callbacks generated as a side-effect of
+                // this same vanilla area action. Without this, Cancel emitted an
+                // additional full-region Harvesting command in the same frame.
+                if (replicationRegionSelectionActionFrame != Time.frameCount)
+                {
+                    replicationRegionSelectionActionDepth = 0;
+                    replicationRegionSelectionActionFrame = Time.frameCount;
+                }
+
+                replicationRegionSelectionActionDepth++;
+                if (replicationConfigHostMode
+                    && applyingRuntimeCommandDepth <= 0)
+                {
+                    // Disarm before resolving this drag. A failed resolution must
+                    // never let a later postfix reuse the previous area's bounds.
+                    replicationHostLocalSemanticRegionArmed = false;
+                    replicationHostLocalSemanticRegionFrame = Time.frameCount;
+                }
+            }
             if (!TryResolveReplicationSelectionRegion(
                     __instance,
                     out var startX,
@@ -249,6 +392,23 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var allowType = ResolveReplicationRegionAllowType(__instance, orderType);
+            if (replicationConfigHostMode
+                && applyingRuntimeCommandDepth <= 0
+                && IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                replicationHostLocalSemanticRegionArmed = true;
+                replicationHostLocalSemanticRegionFrame = Time.frameCount;
+                replicationHostLocalSemanticRegionOrderType = orderType;
+                replicationHostLocalSemanticRegionAllowType =
+                    string.IsNullOrWhiteSpace(allowType) ? "All" : allowType;
+                replicationHostLocalSemanticRegionStartX = startX;
+                replicationHostLocalSemanticRegionStartY = startY;
+                replicationHostLocalSemanticRegionStartZ = startZ;
+                replicationHostLocalSemanticRegionEndX = endX;
+                replicationHostLocalSemanticRegionEndY = endY;
+                replicationHostLocalSemanticRegionEndZ = endZ;
+            }
+
             instance?.LogReplicationInfo("Going Cooperative replication region selection action mode="
                 + replicationConfigRegionCommandMode
                 + " method="
@@ -260,7 +420,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 + " "
                 + selectionDetail);
 
-            return !CaptureReplicationRegionOrderIntent(
+            var suppressNative = CaptureReplicationRegionOrderIntent(
                 orderType,
                 startX,
                 startY,
@@ -272,6 +432,20 @@ namespace GoingCooperative.Plugin.BepInEx
                 "None",
                 "None",
                 "selection:" + methodName);
+            if (!suppressNative
+                && IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                // Starts immediately before vanilla SelectionManager receives the
+                // area action. The postfix reports the native wall-clock cost, which
+                // lets perf logs distinguish a Going Medieval mass-delete stall from
+                // replication capture/presentation overhead.
+                replicationLocalRegionNativeActionStartedTimestamp =
+                    Stopwatch.GetTimestamp();
+                replicationLocalRegionNativeActionFrame = Time.frameCount;
+                replicationLocalRegionNativeActionType = orderType;
+            }
+
+            return !suppressNative;
         }
 
         private static void ReplicationRegionAreaOrderSetterPrefix(MethodBase __originalMethod, object __0)
@@ -294,6 +468,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static bool ReplicationRegionAreaOrderPrefix(MethodBase __originalMethod, object __instance, object[] __args)
         {
+            MarkReplicationInteractiveQoS(0.55f);
             if (!ShouldObserveReplicationRegionCommands())
             {
                 return true;
@@ -330,6 +505,17 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var orderType = ResolveReplicationAreaOrderCommandType(methodName, areaType);
+            if (string.Equals(methodName, "ZoneSelectionFinished", StringComparison.Ordinal)
+                && (string.Equals(orderType, "None", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(areaType, "None", StringComparison.OrdinalIgnoreCase))
+                && (string.Equals(replicationLastRegionOrderType, "Cancel", StringComparison.Ordinal)
+                    || string.Equals(replicationLastRegionOrderType, "Deconstruct", StringComparison.Ordinal)))
+            {
+                // SelectionManager raises ZoneSelectionFinished after ordinary
+                // Cancel/Deconstruct drags too. It is not an area-zone mutation and
+                // must not become a second RegionOrder with orderType=None.
+                return true;
+            }
             if (string.Equals(orderType, "Crops", StringComparison.Ordinal)
                 && !string.Equals(methodName, "OnAssignCropsArea", StringComparison.Ordinal))
             {
@@ -1219,6 +1405,12 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
+            if (replicationRegionSelectionActionDepth > 0
+                && replicationRegionSelectionActionFrame == Time.frameCount)
+            {
+                return;
+            }
+
             if (IsReplicationZoneModifyActive())
             {
                 return;
@@ -1351,7 +1543,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var command = new LockstepCommand(
-                ReplicationClientPeerId,
+                GetReplicationLocalPeerId(),
                 replicationIntentSequence + 1,
                 0L,
                 CommandKind.RegionOrder,
@@ -1549,6 +1741,436 @@ namespace GoingCooperative.Plugin.BepInEx
         private static bool IsReplicationRegionOrderAuthoritativeSupported(string orderType)
         {
             return IsReplicationRegionOrderStateSupported(orderType);
+        }
+
+        private static bool IsReplicationMassBuildingRegionOrder(string orderType)
+        {
+            return string.Equals(orderType, "Cancel", StringComparison.Ordinal)
+                || string.Equals(orderType, "Deconstruct", StringComparison.Ordinal);
+        }
+
+        private static void RememberReplicationClientMassBuildingRegionTombstone(
+            ReplicationRegionOrderState state)
+        {
+            if (replicationConfigHostMode
+                || !IsReplicationMassBuildingRegionOrder(state.OrderType))
+            {
+                return;
+            }
+
+            ReplicationClientMassBuildingRegionTombstones.Add(
+                new ReplicationMassBuildingRegionTombstone(
+                    Math.Min(state.StartX, state.EndX),
+                    Math.Max(state.StartX, state.EndX),
+                    Math.Min(state.StartZ, state.EndZ),
+                    Math.Max(state.StartZ, state.EndZ),
+                    state.SentRealtime,
+                    state.Sequence));
+            while (ReplicationClientMassBuildingRegionTombstones.Count
+                > ReplicationClientMassBuildingRegionTombstoneMax)
+            {
+                ReplicationClientMassBuildingRegionTombstones.RemoveAt(0);
+            }
+        }
+
+        private static bool IsReplicationBuildPlacementSupersededByClientMassBuildingRegion(
+            ReplicationBuildPlacementRecord record,
+            float buildSentRealtime,
+            out string detail)
+        {
+            detail = string.Empty;
+            for (var i = ReplicationClientMassBuildingRegionTombstones.Count - 1; i >= 0; i--)
+            {
+                var tombstone = ReplicationClientMassBuildingRegionTombstones[i];
+                if (!ReplicationOrderingPolicy.IsBuildSupersededByRemoval(
+                        buildSentRealtime,
+                        tombstone.SentRealtime)
+                    || !DoesReplicationBuildPlacementOverlapRegionXZ(
+                        record,
+                        tombstone.MinX,
+                        tombstone.MinZ,
+                        tombstone.MaxX,
+                        tombstone.MaxZ))
+                {
+                    continue;
+                }
+
+                detail = "superseded-by-region-removal sequence="
+                    + tombstone.Sequence.ToString(CultureInfo.InvariantCulture)
+                    + " removalSentRealtime="
+                    + tombstone.SentRealtime.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " buildSentRealtime="
+                    + buildSentRealtime.ToString("0.###", CultureInfo.InvariantCulture);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool DoesReplicationBuildPlacementOverlapRegionXZ(
+            ReplicationBuildPlacementRecord record,
+            int startX,
+            int startZ,
+            int endX,
+            int endZ)
+        {
+            var minX = Math.Min(startX, endX);
+            var maxX = Math.Max(startX, endX);
+            var minZ = Math.Min(startZ, endZ);
+            var maxZ = Math.Max(startZ, endZ);
+            if (record.X >= minX && record.X <= maxX
+                && record.Z >= minZ && record.Z <= maxZ)
+            {
+                return true;
+            }
+
+            for (var i = 0; i < record.Positions.Count; i++)
+            {
+                var position = record.Positions[i];
+                if (position.X >= minX && position.X <= maxX
+                    && position.Z >= minZ && position.Z <= maxZ)
+                {
+                    return true;
+                }
+            }
+
+            if (record.Kind == ReplicationBuildPlacementKind.BeamX
+                || record.Kind == ReplicationBuildPlacementKind.BeamZ
+                || record.Kind == ReplicationBuildPlacementKind.Socketable)
+            {
+                return (record.Start.X >= minX && record.Start.X <= maxX
+                        && record.Start.Z >= minZ && record.Start.Z <= maxZ)
+                    || (record.End.X >= minX && record.End.X <= maxX
+                        && record.End.Z >= minZ && record.End.Z <= maxZ);
+            }
+
+            return false;
+        }
+
+        private static bool ScheduleReplicationClientMassBuildingRegionReplay(
+            ReplicationRegionOrderState state,
+            out string detail)
+        {
+            detail = string.Empty;
+            if (replicationConfigHostMode
+                || !IsReplicationMassBuildingRegionOrder(state.OrderType))
+            {
+                detail = "not-client-mass-building-region";
+                return false;
+            }
+
+            var minX = Math.Min(state.StartX, state.EndX);
+            var maxX = Math.Max(state.StartX, state.EndX);
+            var minZ = Math.Min(state.StartZ, state.EndZ);
+            var maxZ = Math.Max(state.StartZ, state.EndZ);
+            var width = checked(maxX - minX + 1);
+            var depth = checked(maxZ - minZ + 1);
+            var tileSpan = ReplicationClientMassBuildingRegionBaseTileSpan;
+            while ((long)((width + tileSpan - 1) / tileSpan)
+                    * ((depth + tileSpan - 1) / tileSpan)
+                > ReplicationClientMassBuildingRegionMaxInitialTiles)
+            {
+                tileSpan = checked(tileSpan * 2);
+            }
+
+            var tilesX = (width + tileSpan - 1) / tileSpan;
+            var tilesZ = (depth + tileSpan - 1) / tileSpan;
+            var initialTileCount = checked(tilesX * tilesZ);
+            var replay = new ReplicationPendingMassBuildingRegionReplay(
+                state.Sequence,
+                state.OrderType,
+                initialTileCount);
+
+            for (var z = minZ; z <= maxZ; z = checked(z + tileSpan))
+            {
+                var tileEndZ = Math.Min(maxZ, checked(z + tileSpan - 1));
+                for (var x = minX; x <= maxX; x = checked(x + tileSpan))
+                {
+                    var tileEndX = Math.Min(maxX, checked(x + tileSpan - 1));
+                    ReplicationPendingClientMassBuildingRegionTiles.Enqueue(
+                        new ReplicationPendingMassBuildingRegionTile(
+                            replay,
+                            x,
+                            Math.Min(state.StartY, state.EndY),
+                            z,
+                            tileEndX,
+                            Math.Max(state.StartY, state.EndY),
+                            tileEndZ));
+                }
+            }
+
+            detail = "scheduled tiles="
+                + initialTileCount.ToString(CultureInfo.InvariantCulture)
+                + " tileSpan="
+                + tileSpan.ToString(CultureInfo.InvariantCulture)
+                + " region="
+                + width.ToString(CultureInfo.InvariantCulture)
+                + "x"
+                + depth.ToString(CultureInfo.InvariantCulture);
+            return true;
+        }
+
+        private static void ProcessPendingReplicationClientMassBuildingRegionReplay()
+        {
+            if (replicationConfigHostMode
+                || ReplicationPendingClientMassBuildingRegionTiles.Count == 0
+                || !replicationConfigEnabled
+                || !replicationRuntimeStarted
+                || !replicationRemoteHelloReceived)
+            {
+                return;
+            }
+
+            var tile = ReplicationPendingClientMassBuildingRegionTiles.Dequeue();
+            var replay = tile.Replay;
+            var started = Stopwatch.GetTimestamp();
+            BeginReplicationRegionOrderStateCaptureSuppression();
+            applyingRuntimeCommandDepth++;
+            bool applied;
+            string applyDetail;
+            try
+            {
+                applied = TryInvokeSelectionManagerRegionAction(
+                    replay.OrderType,
+                    tile.StartX,
+                    tile.StartY,
+                    tile.StartZ,
+                    tile.EndX,
+                    tile.EndY,
+                    tile.EndZ,
+                    out applyDetail);
+            }
+            finally
+            {
+                applyingRuntimeCommandDepth--;
+                EndReplicationRegionOrderStateCaptureSuppression();
+            }
+
+            var actionMs =
+                (Stopwatch.GetTimestamp() - started)
+                * 1000.0 / Stopwatch.Frequency;
+            replay.TotalActionMs += actionMs;
+            replay.MaxActionMs = Math.Max(replay.MaxActionMs, actionMs);
+
+            if (applied)
+            {
+                replay.SucceededTiles++;
+                replay.OutstandingTiles--;
+            }
+            else if (TrySplitReplicationClientMassBuildingRegionTile(
+                tile,
+                out var first,
+                out var second))
+            {
+                replay.SplitCount++;
+                // The current outstanding tile is replaced by two children.
+                replay.OutstandingTiles++;
+                ReplicationPendingClientMassBuildingRegionTiles.Enqueue(first);
+                ReplicationPendingClientMassBuildingRegionTiles.Enqueue(second);
+            }
+            else
+            {
+                replay.FailedLeafTiles++;
+                replay.OutstandingTiles--;
+                instance?.LogReplicationWarning(
+                    "[MP/REGION] client mass building replay leaf failed sequence="
+                    + replay.Sequence.ToString(CultureInfo.InvariantCulture)
+                    + " orderType="
+                    + replay.OrderType
+                    + " grid=Vec3Int("
+                    + tile.StartX.ToString(CultureInfo.InvariantCulture)
+                    + ","
+                    + tile.StartY.ToString(CultureInfo.InvariantCulture)
+                    + ","
+                    + tile.StartZ.ToString(CultureInfo.InvariantCulture)
+                    + ") detail="
+                    + applyDetail);
+            }
+
+            if (replay.OutstandingTiles > 0)
+            {
+                return;
+            }
+
+            if (replay.FailedLeafTiles == 0)
+            {
+                replicationRegionOrderStatesApplied++;
+            }
+
+            replicationLastRegionOrderStateSummary =
+                "client-tiled-replay complete sequence="
+                + replay.Sequence.ToString(CultureInfo.InvariantCulture)
+                + " orderType="
+                + replay.OrderType
+                + " succeededTiles="
+                + replay.SucceededTiles.ToString(CultureInfo.InvariantCulture)
+                + " splitCount="
+                + replay.SplitCount.ToString(CultureInfo.InvariantCulture)
+                + " failedLeafTiles="
+                + replay.FailedLeafTiles.ToString(CultureInfo.InvariantCulture)
+                + " totalActionMs="
+                + replay.TotalActionMs.ToString("0.###", CultureInfo.InvariantCulture)
+                + " maxActionMs="
+                + replay.MaxActionMs.ToString("0.###", CultureInfo.InvariantCulture);
+            instance?.LogReplicationInfo(
+                "[MP/REGION] "
+                + replicationLastRegionOrderStateSummary
+                + (replay.FailedLeafTiles > 0
+                    ? " safetyNet=BuildingLifecycleV2"
+                    : string.Empty));
+        }
+
+        private static bool TrySplitReplicationClientMassBuildingRegionTile(
+            ReplicationPendingMassBuildingRegionTile tile,
+            out ReplicationPendingMassBuildingRegionTile first,
+            out ReplicationPendingMassBuildingRegionTile second)
+        {
+            first = null!;
+            second = null!;
+            var spanX = tile.EndX - tile.StartX + 1;
+            var spanZ = tile.EndZ - tile.StartZ + 1;
+            if (spanX <= 1 && spanZ <= 1)
+            {
+                return false;
+            }
+
+            if (spanX >= spanZ && spanX > 1)
+            {
+                var firstEndX = tile.StartX + (spanX / 2) - 1;
+                first = tile.WithBounds(
+                    tile.StartX,
+                    tile.StartY,
+                    tile.StartZ,
+                    firstEndX,
+                    tile.EndY,
+                    tile.EndZ);
+                second = tile.WithBounds(
+                    firstEndX + 1,
+                    tile.StartY,
+                    tile.StartZ,
+                    tile.EndX,
+                    tile.EndY,
+                    tile.EndZ);
+                return true;
+            }
+
+            var firstEndZ = tile.StartZ + (spanZ / 2) - 1;
+            first = tile.WithBounds(
+                tile.StartX,
+                tile.StartY,
+                tile.StartZ,
+                tile.EndX,
+                tile.EndY,
+                firstEndZ);
+            second = tile.WithBounds(
+                tile.StartX,
+                tile.StartY,
+                firstEndZ + 1,
+                tile.EndX,
+                tile.EndY,
+                tile.EndZ);
+            return true;
+        }
+
+        private static void ResetReplicationClientMassBuildingRegionReplay()
+        {
+            ReplicationPendingClientMassBuildingRegionTiles.Clear();
+            ReplicationClientMassBuildingRegionTombstones.Clear();
+        }
+
+        private sealed class ReplicationMassBuildingRegionTombstone
+        {
+            public ReplicationMassBuildingRegionTombstone(
+                int minX,
+                int maxX,
+                int minZ,
+                int maxZ,
+                float sentRealtime,
+                long sequence)
+            {
+                MinX = minX;
+                MaxX = maxX;
+                MinZ = minZ;
+                MaxZ = maxZ;
+                SentRealtime = sentRealtime;
+                Sequence = sequence;
+            }
+
+            public int MinX { get; }
+            public int MaxX { get; }
+            public int MinZ { get; }
+            public int MaxZ { get; }
+            public float SentRealtime { get; }
+            public long Sequence { get; }
+        }
+
+        private sealed class ReplicationPendingMassBuildingRegionReplay
+        {
+            public ReplicationPendingMassBuildingRegionReplay(
+                long sequence,
+                string orderType,
+                int outstandingTiles)
+            {
+                Sequence = sequence;
+                OrderType = orderType ?? string.Empty;
+                OutstandingTiles = outstandingTiles;
+            }
+
+            public long Sequence { get; }
+            public string OrderType { get; }
+            public int OutstandingTiles { get; set; }
+            public int SucceededTiles { get; set; }
+            public int SplitCount { get; set; }
+            public int FailedLeafTiles { get; set; }
+            public double TotalActionMs { get; set; }
+            public double MaxActionMs { get; set; }
+        }
+
+        private sealed class ReplicationPendingMassBuildingRegionTile
+        {
+            public ReplicationPendingMassBuildingRegionTile(
+                ReplicationPendingMassBuildingRegionReplay replay,
+                int startX,
+                int startY,
+                int startZ,
+                int endX,
+                int endY,
+                int endZ)
+            {
+                Replay = replay;
+                StartX = startX;
+                StartY = startY;
+                StartZ = startZ;
+                EndX = endX;
+                EndY = endY;
+                EndZ = endZ;
+            }
+
+            public ReplicationPendingMassBuildingRegionReplay Replay { get; }
+            public int StartX { get; }
+            public int StartY { get; }
+            public int StartZ { get; }
+            public int EndX { get; }
+            public int EndY { get; }
+            public int EndZ { get; }
+
+            public ReplicationPendingMassBuildingRegionTile WithBounds(
+                int startX,
+                int startY,
+                int startZ,
+                int endX,
+                int endY,
+                int endZ)
+            {
+                return new ReplicationPendingMassBuildingRegionTile(
+                    Replay,
+                    startX,
+                    startY,
+                    startZ,
+                    endX,
+                    endY,
+                    endZ);
+            }
         }
 
         private static string ResolveReplicationSelectionOrderType(object instance, string methodName)

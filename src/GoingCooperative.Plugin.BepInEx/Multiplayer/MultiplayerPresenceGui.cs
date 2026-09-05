@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using GoingCooperative.Core;
 using TMPro;
 using UnityEngine;
 
@@ -6,12 +8,35 @@ namespace GoingCooperative.Plugin.BepInEx
 {
     public sealed partial class GoingCooperativePlugin
     {
-        private GameObject? multiplayerPresenceCursorRoot;
-        private TextMeshProUGUI? multiplayerPresenceCursorText;
-        private readonly List<GameObject> multiplayerPresencePingRoots = new List<GameObject>();
-        private readonly List<TextMeshProUGUI> multiplayerPresencePingTexts = new List<TextMeshProUGUI>();
-        private readonly List<GameObject> multiplayerPresenceSelectionRoots = new List<GameObject>();
-        private readonly List<TextMeshProUGUI> multiplayerPresenceSelectionTexts = new List<TextMeshProUGUI>();
+        private readonly Dictionary<string, GameObject>
+            multiplayerPresenceCursorRoots =
+                new Dictionary<string, GameObject>(StringComparer.Ordinal);
+        private readonly Dictionary<string, TextMeshProUGUI>
+            multiplayerPresenceCursorTexts =
+                new Dictionary<string, TextMeshProUGUI>(StringComparer.Ordinal);
+        private readonly Dictionary<string, RectTransform>
+            multiplayerPresenceCursorRects =
+                new Dictionary<string, RectTransform>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<GameObject>>
+            multiplayerPresenceSelectionRoots =
+                new Dictionary<string, List<GameObject>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<TextMeshProUGUI>>
+            multiplayerPresenceSelectionTexts =
+                new Dictionary<string, List<TextMeshProUGUI>>(StringComparer.Ordinal);
+        private readonly Dictionary<string, List<RectTransform>>
+            multiplayerPresenceSelectionRects =
+                new Dictionary<string, List<RectTransform>>(StringComparer.Ordinal);
+        private readonly List<GameObject> multiplayerPresencePingRoots =
+            new List<GameObject>();
+        private readonly List<TextMeshProUGUI> multiplayerPresencePingTexts =
+            new List<TextMeshProUGUI>();
+        private readonly List<RectTransform> multiplayerPresencePingRects =
+            new List<RectTransform>();
+        private readonly HashSet<string> multiplayerPresenceVisiblePeerIdsScratch =
+            new HashSet<string>(StringComparer.Ordinal);
+        private RectTransform? multiplayerPresenceCanvasRect;
+        private float multiplayerNextSelectionGuiRefreshRealtime;
+        private const float MultiplayerSelectionGuiRefreshSeconds = 1f / 15f;
 
         private void UpdateMultiplayerPresenceGui()
         {
@@ -22,53 +47,113 @@ namespace GoingCooperative.Plugin.BepInEx
 
             var gameplayVisible = replicationRuntimeStarted
                 && !multiplayerMainMenuActive
-                && (multiplayerCanvasPanel == null || !multiplayerCanvasPanel.activeSelf)
-                && (multiplayerResyncOverlay == null || !multiplayerResyncOverlay.activeSelf);
+                && (multiplayerCanvasPanel == null
+                    || !multiplayerCanvasPanel.activeSelf)
+                && (multiplayerResyncOverlay == null
+                    || !multiplayerResyncOverlay.activeSelf);
             if (!gameplayVisible)
             {
                 HideMultiplayerPresenceVisuals();
                 return;
             }
 
-            UpdateMultiplayerRemoteCursorGui();
-            UpdateMultiplayerRemoteSelectionGui();
+            var now = Time.realtimeSinceStartup;
+            var refreshSelection =
+                now >= multiplayerNextSelectionGuiRefreshRealtime;
+            if (refreshSelection)
+            {
+                multiplayerNextSelectionGuiRefreshRealtime =
+                    now + MultiplayerSelectionGuiRefreshSeconds;
+            }
+
+            var remoteStates = GetReplicationRemotePresenceStates();
+            var visiblePeerIds = multiplayerPresenceVisiblePeerIdsScratch;
+            visiblePeerIds.Clear();
+            for (var i = 0; i < remoteStates.Count; i++)
+            {
+                var state = remoteStates[i];
+                visiblePeerIds.Add(state.PeerId);
+                UpdateMultiplayerRemoteCursorGui(state);
+                if (refreshSelection)
+                {
+                    UpdateMultiplayerRemoteSelectionGui(state);
+                }
+            }
+
+            HideInactiveMultiplayerRemotePeerVisuals(visiblePeerIds);
             UpdateMultiplayerPingGui();
         }
 
-        private void UpdateMultiplayerRemoteCursorGui()
+        private void UpdateMultiplayerRemoteCursorGui(
+            ReplicationRemotePresenceState state)
         {
-            EnsureMultiplayerPresenceCursorGui();
-            if (multiplayerPresenceCursorRoot == null)
+            EnsureMultiplayerPresenceCursorGui(state.PeerId);
+            if (!multiplayerPresenceCursorRoots.TryGetValue(
+                    state.PeerId,
+                    out var root))
             {
                 return;
             }
 
-            if (TryGetReplicationRemotePresenceWorldPoint(out var cursorWorld)
-                && TryProjectReplicationPresenceToCanvas(cursorWorld, out var cursorPosition))
+            if (TryGetReplicationRemotePresenceWorldPoint(
+                    state.PeerId,
+                    out var cursorWorld)
+                && TryProjectReplicationPresenceToCanvas(
+                    cursorWorld,
+                    out var cursorPosition))
             {
-                multiplayerPresenceCursorRoot.SetActive(true);
-                multiplayerPresenceCursorRoot.transform.SetAsLastSibling();
-                multiplayerPresenceCursorRoot.GetComponent<RectTransform>().anchoredPosition =
-                    cursorPosition + new Vector2(0f, 18f);
-                if (multiplayerPresenceCursorText != null)
+                if (!root.activeSelf)
                 {
-                    multiplayerPresenceCursorText.text =
-                        (replicationConfigHostMode ? "CLIENT" : "HOST") + "\n+";
+                    root.SetActive(true);
+                    root.transform.SetAsLastSibling();
+                }
+
+                if (multiplayerPresenceCursorRects.TryGetValue(
+                        state.PeerId,
+                        out var cursorRect))
+                {
+                    cursorRect.anchoredPosition =
+                        cursorPosition + new Vector2(0f, 18f);
+                }
+                if (multiplayerPresenceCursorTexts.TryGetValue(
+                        state.PeerId,
+                        out var text))
+                {
+                    text.text =
+                        GetReplicationRemoteDisplayName(state.PeerId)
+                        + "\n+";
+                    text.color =
+                        GetMultiplayerPeerPresenceColor(state.PeerId);
                 }
             }
             else
             {
-                multiplayerPresenceCursorRoot.SetActive(false);
+                root.SetActive(false);
             }
         }
 
-        private void UpdateMultiplayerRemoteSelectionGui()
+        private void UpdateMultiplayerRemoteSelectionGui(
+            ReplicationRemotePresenceState state)
         {
-            var selectedEntityIds = GetReplicationRemoteSelectedEntityIds();
-            EnsureMultiplayerPresenceSelectionVisualCount(selectedEntityIds.Count);
-            for (var i = 0; i < multiplayerPresenceSelectionRoots.Count; i++)
+            var selectedEntityIds =
+                GetReplicationRemoteSelectedEntityIds(state.PeerId);
+            EnsureMultiplayerPresenceSelectionVisualCount(
+                state.PeerId,
+                selectedEntityIds.Count);
+
+            if (!multiplayerPresenceSelectionRoots.TryGetValue(
+                    state.PeerId,
+                    out var roots)
+                || !multiplayerPresenceSelectionRects.TryGetValue(
+                    state.PeerId,
+                    out var rects))
             {
-                var root = multiplayerPresenceSelectionRoots[i];
+                return;
+            }
+
+            for (var i = 0; i < roots.Count; i++)
+            {
+                var root = roots[i];
                 if (i >= selectedEntityIds.Count)
                 {
                     root.SetActive(false);
@@ -76,26 +161,33 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 if (!TryGetReplicationRemoteSelectedEntityWorldPoint(
+                        state.PeerId,
                         selectedEntityIds[i],
                         out var world)
-                    || !TryProjectReplicationPresenceToCanvas(world, out var position))
+                    || !TryProjectReplicationPresenceToCanvas(
+                        world,
+                        out var position))
                 {
                     root.SetActive(false);
                     continue;
                 }
 
-                root.SetActive(true);
-                root.transform.SetAsLastSibling();
-                root.GetComponent<RectTransform>().anchoredPosition = position;
-                var text = multiplayerPresenceSelectionTexts[i];
-                text.text = "[OTHER PLAYER]";
+                if (!root.activeSelf)
+                {
+                    root.SetActive(true);
+                    root.transform.SetAsLastSibling();
+                }
+
+                rects[i].anchoredPosition = position;
             }
         }
 
         private void UpdateMultiplayerPingGui()
         {
-            EnsureMultiplayerPresencePingVisualCount(ReplicationPresencePings.Count);
+            EnsureMultiplayerPresencePingVisualCount(
+                ReplicationPresencePings.Count);
             var now = Time.realtimeSinceStartup;
+            var localPeerId = GetReplicationLocalPeerId();
             for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
             {
                 var root = multiplayerPresencePingRoots[i];
@@ -106,7 +198,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
 
                 var ping = ReplicationPresencePings[i];
-                if (!TryProjectReplicationPresenceToCanvas(ping.WorldPosition, out var position))
+                if (!TryProjectReplicationPresenceToCanvas(
+                        ping.WorldPosition,
+                        out var position))
                 {
                     root.SetActive(false);
                     continue;
@@ -114,81 +208,136 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 root.SetActive(true);
                 root.transform.SetAsLastSibling();
-                var rect = root.GetComponent<RectTransform>();
+                var rect = multiplayerPresencePingRects[i];
                 rect.anchoredPosition = position;
-                var age = Mathf.Max(0f, now - ping.CreatedRealtime);
-                var alpha = Mathf.Clamp01(ping.ExpiresRealtime - now);
-                var pulse = 1f + Mathf.Sin(age * 8f) * 0.12f;
-                rect.localScale = new Vector3(pulse, pulse, 1f);
+                var age = Mathf.Max(
+                    0f,
+                    now - ping.CreatedRealtime);
+                var alpha = Mathf.Clamp01(
+                    ping.ExpiresRealtime - now);
+                var pulse =
+                    1f + Mathf.Sin(age * 8f) * 0.12f;
+                rect.localScale =
+                    new Vector3(pulse, pulse, 1f);
 
                 var text = multiplayerPresencePingTexts[i];
-                var baseColor = ping.Remote
-                    ? new Color(0.28f, 0.82f, 1f, 1f)
-                    : MultiplayerCanvasAccent;
-                text.color = new Color(baseColor.r, baseColor.g, baseColor.b, alpha);
-                text.text = ping.Remote ? "PING +" : "PING";
+                var local = string.Equals(
+                    ping.PeerId,
+                    localPeerId,
+                    StringComparison.Ordinal);
+                var baseColor = local
+                    ? MultiplayerCanvasAccent
+                    : GetMultiplayerPeerPresenceColor(ping.PeerId);
+                text.color = new Color(
+                    baseColor.r,
+                    baseColor.g,
+                    baseColor.b,
+                    alpha);
+                text.text = local
+                    ? "PING"
+                    : GetReplicationRemoteDisplayName(ping.PeerId)
+                        + "  PING";
             }
         }
 
-        private void EnsureMultiplayerPresenceCursorGui()
+        private void EnsureMultiplayerPresenceCursorGui(string peerId)
         {
-            if (multiplayerCanvasRoot == null || multiplayerPresenceCursorRoot != null)
+            if (multiplayerCanvasRoot == null
+                || multiplayerPresenceCursorRoots.ContainsKey(peerId))
             {
                 return;
             }
 
-            multiplayerPresenceCursorRoot = new GameObject(
-                "Remote Player Cursor",
+            var root = new GameObject(
+                "Remote Player Cursor " + peerId,
                 typeof(RectTransform));
-            multiplayerPresenceCursorRoot.transform.SetParent(multiplayerCanvasRoot.transform, false);
-            var rect = multiplayerPresenceCursorRoot.GetComponent<RectTransform>();
-            rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+            root.transform.SetParent(
+                multiplayerCanvasRoot.transform,
+                false);
+            var rect = root.GetComponent<RectTransform>();
+            rect.anchorMin =
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(140f, 52f);
+            rect.sizeDelta = new Vector2(180f, 52f);
 
-            multiplayerPresenceCursorText = CreateMultiplayerGameText(
-                multiplayerPresenceCursorRoot.transform,
+            var text = CreateMultiplayerGameText(
+                root.transform,
                 "Label",
-                "PLAYER\n+",
+                GetReplicationRemoteDisplayName(peerId) + "\n+",
                 16f,
                 TextAlignmentOptions.Center,
-                new Color(0.28f, 0.82f, 1f, 0.98f));
-            multiplayerPresenceCursorText.fontStyle = FontStyles.Bold;
-            multiplayerPresenceCursorText.raycastTarget = false;
+                GetMultiplayerPeerPresenceColor(peerId));
+            text.fontStyle = FontStyles.Bold;
+            text.raycastTarget = false;
             SetMultiplayerCanvasRect(
-                multiplayerPresenceCursorText.rectTransform,
+                text.rectTransform,
                 Vector2.zero,
                 Vector2.one,
                 Vector2.zero,
                 Vector2.zero);
-            multiplayerPresenceCursorRoot.SetActive(false);
+            root.SetActive(false);
+            multiplayerPresenceCursorRoots.Add(peerId, root);
+            multiplayerPresenceCursorTexts.Add(peerId, text);
+            multiplayerPresenceCursorRects.Add(peerId, rect);
         }
 
-        private void EnsureMultiplayerPresenceSelectionVisualCount(int count)
+        private void EnsureMultiplayerPresenceSelectionVisualCount(
+            string peerId,
+            int count)
         {
             if (multiplayerCanvasRoot == null)
             {
                 return;
             }
 
-            while (multiplayerPresenceSelectionRoots.Count < count)
+            if (!multiplayerPresenceSelectionRoots.TryGetValue(
+                    peerId,
+                    out var roots))
+            {
+                roots = new List<GameObject>();
+                multiplayerPresenceSelectionRoots.Add(peerId, roots);
+            }
+
+            if (!multiplayerPresenceSelectionTexts.TryGetValue(
+                    peerId,
+                    out var texts))
+            {
+                texts = new List<TextMeshProUGUI>();
+                multiplayerPresenceSelectionTexts.Add(peerId, texts);
+            }
+
+            if (!multiplayerPresenceSelectionRects.TryGetValue(
+                    peerId,
+                    out var rects))
+            {
+                rects = new List<RectTransform>();
+                multiplayerPresenceSelectionRects.Add(peerId, rects);
+            }
+
+            while (roots.Count < count)
             {
                 var root = new GameObject(
-                    "Remote Player Selection",
+                    "Remote Player Selection "
+                        + peerId
+                        + " "
+                        + roots.Count.ToString(),
                     typeof(RectTransform));
-                root.transform.SetParent(multiplayerCanvasRoot.transform, false);
+                root.transform.SetParent(
+                    multiplayerCanvasRoot.transform,
+                    false);
                 var rect = root.GetComponent<RectTransform>();
-                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.anchorMin =
+                    rect.anchorMax = new Vector2(0.5f, 0.5f);
                 rect.pivot = new Vector2(0.5f, 0.5f);
-                rect.sizeDelta = new Vector2(180f, 30f);
+                rect.sizeDelta = new Vector2(200f, 30f);
 
                 var text = CreateMultiplayerGameText(
                     root.transform,
                     "Label",
-                    "◆ OTHER PLAYER",
+                    "[" + GetReplicationRemoteDisplayName(peerId) + "]",
                     14f,
                     TextAlignmentOptions.Center,
-                    new Color(0.28f, 0.82f, 1f, 0.95f));
+                    GetMultiplayerPeerPresenceColor(peerId));
                 text.fontStyle = FontStyles.Bold;
                 text.raycastTarget = false;
                 SetMultiplayerCanvasRect(
@@ -197,8 +346,9 @@ namespace GoingCooperative.Plugin.BepInEx
                     Vector2.one,
                     Vector2.zero,
                     Vector2.zero);
-                multiplayerPresenceSelectionRoots.Add(root);
-                multiplayerPresenceSelectionTexts.Add(text);
+                roots.Add(root);
+                texts.Add(text);
+                rects.Add(rect);
             }
         }
 
@@ -211,12 +361,17 @@ namespace GoingCooperative.Plugin.BepInEx
 
             while (multiplayerPresencePingRoots.Count < count)
             {
-                var root = new GameObject("Player Ping", typeof(RectTransform));
-                root.transform.SetParent(multiplayerCanvasRoot.transform, false);
+                var root = new GameObject(
+                    "Player Ping",
+                    typeof(RectTransform));
+                root.transform.SetParent(
+                    multiplayerCanvasRoot.transform,
+                    false);
                 var rect = root.GetComponent<RectTransform>();
-                rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.anchorMin =
+                    rect.anchorMax = new Vector2(0.5f, 0.5f);
                 rect.pivot = new Vector2(0.5f, 0.5f);
-                rect.sizeDelta = new Vector2(110f, 34f);
+                rect.sizeDelta = new Vector2(180f, 34f);
 
                 var text = CreateMultiplayerGameText(
                     root.transform,
@@ -235,6 +390,37 @@ namespace GoingCooperative.Plugin.BepInEx
                     Vector2.zero);
                 multiplayerPresencePingRoots.Add(root);
                 multiplayerPresencePingTexts.Add(text);
+                multiplayerPresencePingRects.Add(rect);
+            }
+        }
+
+        private static Color GetMultiplayerPeerPresenceColor(string peerId)
+        {
+            var slot = 0;
+            if (string.Equals(
+                    peerId,
+                    ReplicationHostPeerId,
+                    StringComparison.Ordinal))
+            {
+                slot = 0;
+            }
+            else if (MultiplayerPeerIds.TryParseClientSlot(
+                peerId,
+                out var clientSlot))
+            {
+                slot = clientSlot;
+            }
+
+            switch (slot % 8)
+            {
+                case 0: return new Color(0.28f, 0.82f, 1f, 0.98f);
+                case 1: return new Color(1f, 0.72f, 0.28f, 0.98f);
+                case 2: return new Color(0.52f, 1f, 0.46f, 0.98f);
+                case 3: return new Color(0.96f, 0.48f, 0.92f, 0.98f);
+                case 4: return new Color(1f, 0.48f, 0.42f, 0.98f);
+                case 5: return new Color(0.68f, 0.62f, 1f, 0.98f);
+                case 6: return new Color(0.36f, 1f, 0.84f, 0.98f);
+                default: return new Color(1f, 0.9f, 0.42f, 0.98f);
             }
         }
 
@@ -264,36 +450,81 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            return RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                multiplayerCanvasRoot.GetComponent<RectTransform>(),
-                new Vector2(screen.x, screen.y),
-                null,
-                out canvasPosition);
+            multiplayerPresenceCanvasRect ??=
+                multiplayerCanvasRoot.GetComponent<RectTransform>();
+            return multiplayerPresenceCanvasRect != null
+                && RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    multiplayerPresenceCanvasRect,
+                    new Vector2(screen.x, screen.y),
+                    null,
+                    out canvasPosition);
+        }
+
+        private void HideInactiveMultiplayerRemotePeerVisuals(
+            HashSet<string> activePeerIds)
+        {
+            foreach (var pair in multiplayerPresenceCursorRoots)
+            {
+                if (!activePeerIds.Contains(pair.Key))
+                {
+                    pair.Value.SetActive(false);
+                }
+            }
+
+            foreach (var pair in multiplayerPresenceSelectionRoots)
+            {
+                if (activePeerIds.Contains(pair.Key))
+                {
+                    continue;
+                }
+
+                for (var i = 0; i < pair.Value.Count; i++)
+                {
+                    pair.Value[i].SetActive(false);
+                }
+            }
         }
 
         private void HideMultiplayerPresenceVisuals()
         {
-            if (multiplayerPresenceCursorRoot != null)
+            foreach (var root in multiplayerPresenceCursorRoots.Values)
             {
-                multiplayerPresenceCursorRoot.SetActive(false);
+                root.SetActive(false);
+            }
+
+            foreach (var roots in multiplayerPresenceSelectionRoots.Values)
+            {
+                for (var i = 0; i < roots.Count; i++)
+                {
+                    roots[i].SetActive(false);
+                }
             }
 
             for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
             {
                 multiplayerPresencePingRoots[i].SetActive(false);
             }
-
-            for (var i = 0; i < multiplayerPresenceSelectionRoots.Count; i++)
-            {
-                multiplayerPresenceSelectionRoots[i].SetActive(false);
-            }
         }
 
         private void DestroyMultiplayerPresenceGui()
         {
-            if (multiplayerPresenceCursorRoot != null)
+            foreach (var root in multiplayerPresenceCursorRoots.Values)
             {
-                Destroy(multiplayerPresenceCursorRoot);
+                if (root != null)
+                {
+                    Destroy(root);
+                }
+            }
+
+            foreach (var roots in multiplayerPresenceSelectionRoots.Values)
+            {
+                for (var i = 0; i < roots.Count; i++)
+                {
+                    if (roots[i] != null)
+                    {
+                        Destroy(roots[i]);
+                    }
+                }
             }
 
             for (var i = 0; i < multiplayerPresencePingRoots.Count; i++)
@@ -304,20 +535,18 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            for (var i = 0; i < multiplayerPresenceSelectionRoots.Count; i++)
-            {
-                if (multiplayerPresenceSelectionRoots[i] != null)
-                {
-                    Destroy(multiplayerPresenceSelectionRoots[i]);
-                }
-            }
-
-            multiplayerPresenceCursorRoot = null;
-            multiplayerPresenceCursorText = null;
-            multiplayerPresencePingRoots.Clear();
-            multiplayerPresencePingTexts.Clear();
+            multiplayerPresenceCursorRoots.Clear();
+            multiplayerPresenceCursorTexts.Clear();
+            multiplayerPresenceCursorRects.Clear();
             multiplayerPresenceSelectionRoots.Clear();
             multiplayerPresenceSelectionTexts.Clear();
+            multiplayerPresenceSelectionRects.Clear();
+            multiplayerPresencePingRoots.Clear();
+            multiplayerPresencePingTexts.Clear();
+            multiplayerPresencePingRects.Clear();
+            multiplayerPresenceVisiblePeerIdsScratch.Clear();
+            multiplayerPresenceCanvasRect = null;
+            multiplayerNextSelectionGuiRefreshRealtime = 0f;
         }
     }
 }
