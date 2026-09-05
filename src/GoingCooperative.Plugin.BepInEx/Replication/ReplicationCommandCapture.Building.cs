@@ -1055,6 +1055,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 ReplicationPendingHostBuildReplayChunks.Enqueue(
                     new ReplicationPendingHostBuildReplayChunk(
                         manifest,
+                        chunk,
                         transactionId,
                         groupIndex,
                         chunkIndex,
@@ -1132,6 +1133,123 @@ namespace GoingCooperative.Plugin.BepInEx
                 + durablePending.ToString(CultureInfo.InvariantCulture)
                 + " queueRemaining="
                 + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private static int SupersedePendingReplicationHostBuildReplayChunksInRegion(
+            int startX,
+            int startZ,
+            int endX,
+            int endZ)
+        {
+            if (ReplicationPendingHostBuildReplayChunks.Count == 0)
+            {
+                return 0;
+            }
+
+            var retained = new Queue<ReplicationPendingHostBuildReplayChunk>();
+            var supersededPlacements = 0;
+            var droppedChunks = 0;
+            var rewrittenChunks = 0;
+            while (ReplicationPendingHostBuildReplayChunks.Count > 0)
+            {
+                var pending = ReplicationPendingHostBuildReplayChunks.Dequeue();
+                var keptPlacements = new List<ReplicationCapturedBuildPlacement>(pending.Placements.Count);
+                for (var i = 0; i < pending.Placements.Count; i++)
+                {
+                    var placement = pending.Placements[i];
+                    if (DoesReplicationBuildPlacementOverlapRegionXZ(
+                            placement.Record,
+                            startX,
+                            startZ,
+                            endX,
+                            endZ))
+                    {
+                        supersededPlacements++;
+                    }
+                    else
+                    {
+                        keptPlacements.Add(placement);
+                    }
+                }
+
+                if (keptPlacements.Count == pending.Placements.Count)
+                {
+                    retained.Enqueue(pending);
+                }
+                else if (keptPlacements.Count == 0)
+                {
+                    droppedChunks++;
+                }
+                else
+                {
+                    retained.Enqueue(RebuildPendingReplicationHostBuildReplayChunk(pending, keptPlacements));
+                    rewrittenChunks++;
+                }
+            }
+
+            while (retained.Count > 0)
+            {
+                ReplicationPendingHostBuildReplayChunks.Enqueue(retained.Dequeue());
+            }
+
+            if (supersededPlacements > 0)
+            {
+                instance?.LogReplicationInfo(
+                    "[MP/BUILD] host-local replay superseded by region removal placements="
+                    + supersededPlacements.ToString(CultureInfo.InvariantCulture)
+                    + " droppedChunks="
+                    + droppedChunks.ToString(CultureInfo.InvariantCulture)
+                    + " rewrittenChunks="
+                    + rewrittenChunks.ToString(CultureInfo.InvariantCulture)
+                    + " queueRemaining="
+                    + ReplicationPendingHostBuildReplayChunks.Count.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return supersededPlacements;
+        }
+
+        private static ReplicationPendingHostBuildReplayChunk RebuildPendingReplicationHostBuildReplayChunk(
+            ReplicationPendingHostBuildReplayChunk pending,
+            List<ReplicationCapturedBuildPlacement> placements)
+        {
+            var first = placements[0];
+            var payload = CreateReplicationBuildBatchWirePayload(
+                first.BlueprintId,
+                first.BuildingType,
+                first.Faction,
+                placements);
+            var semanticGroup = checked(pending.GroupIndex * 1024 + pending.ChunkIndex);
+            var manifest = new ReplicationBuildBatchCommitManifest(
+                ReplicationHostPeerId,
+                pending.Manifest.CommandSequence,
+                payload,
+                first.BlueprintId,
+                first.BuildingType,
+                first.Faction,
+                afterLoading: false,
+                first.Record.X,
+                first.Record.Y,
+                first.Record.Z,
+                FormatReplicationBuildBatchIds(placements),
+                new string('1', placements.Count),
+                placements.Count,
+                "host-local-batch transaction="
+                    + pending.TransactionId.ToString(CultureInfo.InvariantCulture)
+                    + " group="
+                    + pending.GroupIndex.ToString(CultureInfo.InvariantCulture)
+                    + " chunk="
+                    + pending.ChunkIndex.ToString(CultureInfo.InvariantCulture),
+                semanticTransactionId: pending.TransactionId,
+                semanticGroup: semanticGroup);
+            return new ReplicationPendingHostBuildReplayChunk(
+                manifest,
+                placements,
+                pending.TransactionId,
+                pending.GroupIndex,
+                pending.ChunkIndex,
+                pending.Offset,
+                placements.Count,
+                pending.TotalCount);
         }
 
         private static void ClearPendingReplicationHostBuildReplayChunks()
@@ -1971,6 +2089,7 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             public ReplicationPendingHostBuildReplayChunk(
                 ReplicationBuildBatchCommitManifest manifest,
+                List<ReplicationCapturedBuildPlacement> placements,
                 long transactionId,
                 int groupIndex,
                 int chunkIndex,
@@ -1979,6 +2098,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 int totalCount)
             {
                 Manifest = manifest;
+                Placements = placements;
                 TransactionId = transactionId;
                 GroupIndex = groupIndex;
                 ChunkIndex = chunkIndex;
@@ -1988,6 +2108,7 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             public ReplicationBuildBatchCommitManifest Manifest { get; }
+            public List<ReplicationCapturedBuildPlacement> Placements { get; }
             public long TransactionId { get; }
             public int GroupIndex { get; }
             public int ChunkIndex { get; }
