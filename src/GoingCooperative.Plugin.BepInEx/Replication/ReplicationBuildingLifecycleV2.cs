@@ -1447,7 +1447,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 || !ReplicationClientBuildingRemovalSentRealtimeV2.TryGetValue(
                     hostId,
                     out var removalSentRealtime)
-                || buildSentRealtime > removalSentRealtime + 0.001f)
+                || !ReplicationOrderingPolicy.IsBuildSupersededByRemoval(
+                    buildSentRealtime,
+                    removalSentRealtime))
             {
                 return false;
             }
