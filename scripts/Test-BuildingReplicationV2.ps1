@@ -102,6 +102,8 @@ Require-SourcePattern $sources.BuildBatch 'TryResolveReplicationBuildBatchNative
     "BuildBatch native reflection metadata is not cached across remote chunks."
 Require-SourcePattern $sources.BuildBatch 'TryApplyReplicationBuildBatchAuthoritative\(.*?TryResolveReplicationBuildBatchNativeApi\(.*?nativeApi\.SpawnFromPool.*?nativeApi\.MouseUpSpawn' `
     "BuildBatch apply still resolves native placement methods on every remote chunk."
+Require-SourcePattern $sources.BuildBatch 'MouseUpSpawnInitializeBuildings.*?ObjectPlacedOnMap.*?catch\s*\(TargetInvocationException\s+ex\).*?ex\.InnerException\s+is\s+NullReferenceException.*?resultCapture\.CommittedCount\s*==\s*committedBeforeFinalize.*?objectPlacedOnMap\.Invoke.*?directCommitted\s*!=\s*groupSpawned' `
+    "Remote BuildBatch has no fail-closed ObjectPlacedOnMap fallback when native drag finalization dereferences missing host raycast state."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchPlaced\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchPlacedCore\(.*?CommitReplicationBuildTransaction\(' `
     "Host-placement batch replay is not begin/apply/commit transactional."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchResult\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchResultCore\(.*?CommitReplicationBuildTransaction\(' `
@@ -168,6 +170,8 @@ Require-SourcePattern $sources.WorldDeltas 'if\s*\(!localPlayerResult\).*?ClearR
     "Foreign rejected BuildBatch results can still mutate local provisional objects."
 Require-SourcePattern $sources.WorldDeltas 'receiptCleared\s*=\s*reconciled\s*&&\s*localPlayerResult\s*&&\s*CompleteReplicationBuildBatchPendingIntent' `
     "Foreign BuildBatchResult can still clear a local pending receipt."
+Require-SourcePattern $sources.WorldDeltas 'ResendReplicationBuildBatchResult\(.*?pending\.Delta\.UniqueId\s*==\s*command\.Sequence.*?"player".*?pendingPlayerId.*?command\.PlayerId' `
+    "BuildBatch retry lookup can resend another player's same-sequence commit manifest."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintPlaced\(.*?IsReplicationClientOriginBuildingDelta\(delta\).*?TryGetReplicationProvisionalBuildView' `
     "Legacy placed-result reconciliation can still consume another player's provisional sequence."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintRejected\(.*?"player".*?!string\.Equals\(\s*commandPlayerId,\s*GetReplicationLocalPeerId\(\).*?return\s+true\s*;' `
