@@ -2774,6 +2774,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     || string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingBlueprintBatchResultDeltaKind,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingTerminalBatchV2DeltaKind,
                         StringComparison.Ordinal));
             if (deferBuildingInitialSend)
             {
@@ -3719,6 +3723,10 @@ namespace GoingCooperative.Plugin.BepInEx
                         || string.Equals(
                             pending.Delta.DeltaKind,
                             ReplicationBuildingBlueprintBatchResultDeltaKind,
+                            StringComparison.Ordinal)
+                        || string.Equals(
+                            pending.Delta.DeltaKind,
+                            ReplicationBuildingTerminalBatchV2DeltaKind,
                             StringComparison.Ordinal))
                     {
                         pendingCount++;
@@ -3922,7 +3930,11 @@ namespace GoingCooperative.Plugin.BepInEx
                 return ReplicationBuildingStateSnapshotRetrySeconds;
             }
 
-            if (IsReplicationBuildingRemovedLifecycleDelta(delta))
+            if (IsReplicationBuildingRemovedLifecycleDelta(delta)
+                || string.Equals(
+                    delta.DeltaKind,
+                    ReplicationBuildingTerminalBatchV2DeltaKind,
+                    StringComparison.Ordinal))
             {
                 // Removed rows are a durable safety net behind the semantic
                 // Cancel/Deconstruct operation. Their first send is immediate, but
@@ -3941,6 +3953,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 if ((string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchPlacedDeltaKind, StringComparison.Ordinal)
                         || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
                         || string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
+                        || string.Equals(delta.DeltaKind, ReplicationBuildingTerminalBatchV2DeltaKind, StringComparison.Ordinal)
                         || string.Equals(delta.DeltaKind, ReplicationBuildingRecoveryRequiredV2DeltaKind, StringComparison.Ordinal))
                     && durablePending.SendCount >= durableThreshold)
                 {
@@ -4104,6 +4117,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
                     || string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
                     || string.Equals(delta.DeltaKind, ReplicationBuildingRepairV2DeltaKind, StringComparison.Ordinal)
+                    || string.Equals(delta.DeltaKind, ReplicationBuildingTerminalBatchV2DeltaKind, StringComparison.Ordinal)
                     || string.Equals(delta.DeltaKind, ReplicationBuildingRecoveryRequiredV2DeltaKind, StringComparison.Ordinal)
                     ? ReplicationBuildBatchWorldObjectDeltaMaxSends
                     : ReplicationWorldObjectDeltaMaxSends;
@@ -4127,6 +4141,10 @@ namespace GoingCooperative.Plugin.BepInEx
                     || string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingRecoveryRequiredV2DeltaKind,
+                        StringComparison.Ordinal)
+                    || string.Equals(
+                        delta.DeltaKind,
+                        ReplicationBuildingTerminalBatchV2DeltaKind,
                         StringComparison.Ordinal)
                     || IsReplicationStoragePolicyStateDelta(delta);
                 if (durableTransaction)
@@ -5289,6 +5307,11 @@ namespace GoingCooperative.Plugin.BepInEx
             if (string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal))
             {
                 return TryApplyReplicationBuildingLifecycleV2(delta, out detail);
+            }
+
+            if (string.Equals(delta.DeltaKind, ReplicationBuildingTerminalBatchV2DeltaKind, StringComparison.Ordinal))
+            {
+                return TryApplyReplicationBuildingTerminalBatchV2(delta, out detail);
             }
 
             if (string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal))
@@ -10428,6 +10451,28 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 if (accepted)
                 {
+                    if (IsReplicationBuildPlacementSupersededByClientMassBuildingRegion(
+                            record,
+                            delta.SentRealtime,
+                            out var supersededDetail))
+                    {
+                        ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
+                        if (localPlayerResult)
+                        {
+                            RemoveReplicationProvisionalBuildView(commandSequence, i);
+                        }
+
+                        resolved++;
+                        instance?.LogReplicationInfo(
+                            "[MP/BUILD] stale result suppressed commandSequence="
+                            + commandSequence.ToString(CultureInfo.InvariantCulture)
+                            + " itemIndex="
+                            + i.ToString(CultureInfo.InvariantCulture)
+                            + " "
+                            + supersededDetail);
+                        continue;
+                    }
+
                     if (hostIds[i] <= 0L)
                     {
                         detail = "building-batch-result-accepted-id-invalid index=" + i.ToString(CultureInfo.InvariantCulture);
