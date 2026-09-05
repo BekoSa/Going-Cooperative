@@ -13,6 +13,7 @@ namespace GoingCooperative.Plugin.BepInEx
     public sealed partial class GoingCooperativePlugin
     {
         private const string ReplicationBuildingLifecycleV2DeltaKind = "BuildingLifecycleV2";
+        private const string ReplicationBuildingTerminalBatchV2DeltaKind = "BuildingTerminalBatchV2";
         private const string ReplicationBuildingProgressV2DeltaKind = "BuildingProgressV2";
         private const string ReplicationBuildingRepairV2DeltaKind = "BuildingRepairV2";
         private const string ReplicationBuildingRecoveryRequiredV2DeltaKind = "BuildingRecoveryRequiredV2";
@@ -23,6 +24,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const int ReplicationBuildingPresentationApplyBudgetV2 = 16;
         private const int ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4;
         private const int ReplicationBuildingTerminalMaxInFlightV2 = 16;
+        private const int ReplicationBuildingTerminalBatchMaxItemsV2 = 32;
         private const float ReplicationBuildingSemanticRegionTerminalGraceSecondsV2 = 1.25f;
         private static float replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2;
 
@@ -52,6 +54,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private static long replicationBuildingLifecycleDeltasAppliedV2;
         private static long replicationBuildingLifecycleFastTerminalAcksV2;
         private static long replicationBuildingLifecycleNativeEventsV2;
+        private static long replicationBuildingTerminalBatchDeltasSentV2;
+        private static long replicationBuildingTerminalBatchDeltasAppliedV2;
+        private static long replicationBuildingTerminalBatchItemsSentV2;
+        private static long replicationBuildingTerminalBatchItemsAppliedV2;
         private static long replicationBuildingRepairDeltasSentV2;
         private static long replicationBuildingRepairDeltasAppliedV2;
         private static long replicationClientSelectedBuildingHostIdV2;
@@ -738,6 +744,225 @@ namespace GoingCooperative.Plugin.BepInEx
                 new ReplicationPendingBuildingTerminalV2(
                     tracked,
                     lifecycle));
+        }
+
+        private static int CollapseReplicationBuildingTerminalsForSemanticRegionV2(
+            int startX,
+            int startZ,
+            int endX,
+            int endZ,
+            string reason)
+        {
+            if (!replicationConfigHostMode
+                || ReplicationPendingBuildingTerminalsV2.Count == 0
+                || ReferenceEquals(instance, null))
+            {
+                return 0;
+            }
+
+            var retained = new Queue<ReplicationPendingBuildingTerminalV2>();
+            var batched = new List<ReplicationTrackedBuildingV2>();
+            var minX = Math.Min(startX, endX);
+            var maxX = Math.Max(startX, endX);
+            var minZ = Math.Min(startZ, endZ);
+            var maxZ = Math.Max(startZ, endZ);
+            while (ReplicationPendingBuildingTerminalsV2.Count > 0)
+            {
+                var pending = ReplicationPendingBuildingTerminalsV2.Dequeue();
+                var tracked = pending.Tracked;
+                if (!tracked.TerminalSent
+                    && tracked.TerminalQueued
+                    && tracked.GridX >= minX
+                    && tracked.GridX <= maxX
+                    && tracked.GridZ >= minZ
+                    && tracked.GridZ <= maxZ)
+                {
+                    tracked.TerminalQueued = false;
+                    batched.Add(tracked);
+                }
+                else
+                {
+                    retained.Enqueue(pending);
+                }
+            }
+
+            while (retained.Count > 0)
+            {
+                ReplicationPendingBuildingTerminalsV2.Enqueue(retained.Dequeue());
+            }
+
+            var queuedItems = 0;
+            var queuedBatches = 0;
+            for (var offset = 0;
+                 offset < batched.Count;
+                 offset += ReplicationBuildingTerminalBatchMaxItemsV2)
+            {
+                var count = Math.Min(
+                    ReplicationBuildingTerminalBatchMaxItemsV2,
+                    batched.Count - offset);
+                var ids = new string[count];
+                for (var i = 0; i < count; i++)
+                {
+                    ids[i] = batched[offset + i].HostId.ToString(CultureInfo.InvariantCulture);
+                }
+
+                var delta = new ReplicationWorldObjectDelta(
+                    ++replicationWorldObjectDeltaSequence,
+                    Time.realtimeSinceStartup,
+                    ReplicationBuildingTerminalBatchV2DeltaKind,
+                    0L,
+                    "building-terminal-batch-v2",
+                    minX,
+                    0,
+                    minZ,
+                    "epoch="
+                        + GetReplicationBuildBatchEpoch().ToString(CultureInfo.InvariantCulture)
+                        + " count="
+                        + count.ToString(CultureInfo.InvariantCulture)
+                        + " ids="
+                        + string.Join(",", ids)
+                        + " reason="
+                        + FormatReplicationWorldObjectDetailToken(reason));
+                if (!instance!.SendReplicationWorldObjectDelta(delta))
+                {
+                    for (var i = 0; i < count; i++)
+                    {
+                        var tracked = batched[offset + i];
+                        if (!tracked.TerminalSent && !tracked.TerminalQueued)
+                        {
+                            tracked.TerminalQueued = true;
+                            ReplicationPendingBuildingTerminalsV2.Enqueue(
+                                new ReplicationPendingBuildingTerminalV2(tracked, reason));
+                        }
+                    }
+
+                    continue;
+                }
+
+                queuedBatches++;
+                queuedItems += count;
+                replicationBuildingTerminalBatchDeltasSentV2++;
+                replicationBuildingTerminalBatchItemsSentV2 += count;
+                for (var i = 0; i < count; i++)
+                {
+                    var tracked = batched[offset + i];
+                    tracked.Progressing = false;
+                    tracked.TerminalSent = true;
+                    tracked.LastSentState = ReplicationBuildingAbsoluteStateV2.Removed;
+                    tracked.HasLastSentState = true;
+                    tracked.Revision++;
+                    var terminalInstance = tracked.BuildingInstance.Target;
+                    if (terminalInstance != null)
+                    {
+                        ReplicationTrackedHostBuildingsByInstanceV2.Remove(terminalInstance);
+                    }
+
+                    ReplicationTrackedHostBuildingsV2.Remove(tracked.HostId);
+                    RetireReplicationBuildingConstructionMaterialsV2(tracked.HostId);
+                    ReplicationBuildingRepairLastSentRealtimeV2.Remove(tracked.HostId);
+                    RemoveReplicationHostIdentity(
+                        tracked.HostId,
+                        tracked.View.Target ?? terminalInstance,
+                        "building-terminal-batch-v2");
+                }
+            }
+
+            if (queuedItems > 0)
+            {
+                instance?.LogReplicationInfo(
+                    "[MP/BUILD] terminal safety-net batched reason="
+                    + reason
+                    + " items="
+                    + queuedItems.ToString(CultureInfo.InvariantCulture)
+                    + " batches="
+                    + queuedBatches.ToString(CultureInfo.InvariantCulture)
+                    + " terminalQueueRemaining="
+                    + ReplicationPendingBuildingTerminalsV2.Count.ToString(CultureInfo.InvariantCulture));
+            }
+
+            return queuedItems;
+        }
+
+        private static bool TryApplyReplicationBuildingTerminalBatchV2(
+            ReplicationWorldObjectDelta delta,
+            out string detail)
+        {
+            if (!TryReadReplicationWorldObjectDetailLong(delta.Detail, "epoch", out var epoch)
+                || epoch != GetReplicationBuildBatchEpoch()
+                || !TryReadReplicationWorldObjectDetailInt(delta.Detail, "count", out var count)
+                || count <= 0
+                || count > ReplicationBuildingTerminalBatchMaxItemsV2
+                || !TryReadReplicationWorldObjectDetailToken(delta.Detail, "ids", out var idsToken))
+            {
+                detail = "building-terminal-batch-v2-malformed-or-epoch-mismatch";
+                return false;
+            }
+
+            var values = idsToken.Split(new[] { ',' }, StringSplitOptions.None);
+            if (values.Length != count)
+            {
+                detail = "building-terminal-batch-v2-count-mismatch";
+                return false;
+            }
+
+            var applied = 0;
+            for (var i = 0; i < values.Length; i++)
+            {
+                if (!long.TryParse(
+                        values[i],
+                        NumberStyles.Integer,
+                        CultureInfo.InvariantCulture,
+                        out var hostId)
+                    || hostId <= 0L)
+                {
+                    detail = "building-terminal-batch-v2-id-invalid index="
+                        + i.ToString(CultureInfo.InvariantCulture);
+                    return false;
+                }
+
+                var itemDelta = new ReplicationWorldObjectDelta(
+                    delta.Sequence,
+                    delta.SentRealtime,
+                    ReplicationBuildingLifecycleV2DeltaKind,
+                    hostId,
+                    string.Empty,
+                    0,
+                    0,
+                    0,
+                    string.Empty);
+                if (!TryApplyReplicationBuildingNativeStateV2(
+                        itemDelta,
+                        "removed",
+                        string.Empty,
+                        0,
+                        progressing: false,
+                        forbidden: false,
+                        markedForDestruction: false,
+                        allowExactRepairSeed: false,
+                        out var itemDetail))
+                {
+                    detail = "building-terminal-batch-v2-apply-failed index="
+                        + i.ToString(CultureInfo.InvariantCulture)
+                        + " hostId="
+                        + hostId.ToString(CultureInfo.InvariantCulture)
+                        + " "
+                        + itemDetail;
+                    return false;
+                }
+
+                ReplicationClientBuildingProgressingV2.Remove(hostId);
+                ReplicationClientBuildingTerminalRevisionV2.Remove(hostId);
+                RemoveReplicationClientBuildingPresentationV2(hostId);
+                applied++;
+            }
+
+            replicationBuildingTerminalBatchDeltasAppliedV2++;
+            replicationBuildingTerminalBatchItemsAppliedV2 += applied;
+            detail = "ok building-terminal-batch-v2 applied="
+                + applied.ToString(CultureInfo.InvariantCulture)
+                + "/"
+                + count.ToString(CultureInfo.InvariantCulture);
+            return true;
         }
 
         private static void MarkReplicationBuildingSemanticRegionReplayV2()
@@ -2983,6 +3208,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationBuildingLifecycleDeltasAppliedV2 = 0L;
             replicationBuildingLifecycleFastTerminalAcksV2 = 0L;
             replicationBuildingLifecycleNativeEventsV2 = 0L;
+            replicationBuildingTerminalBatchDeltasSentV2 = 0L;
+            replicationBuildingTerminalBatchDeltasAppliedV2 = 0L;
+            replicationBuildingTerminalBatchItemsSentV2 = 0L;
+            replicationBuildingTerminalBatchItemsAppliedV2 = 0L;
             replicationBuildingRepairDeltasSentV2 = 0L;
             replicationBuildingRepairDeltasAppliedV2 = 0L;
             replicationClientSelectedBuildingHostIdV2 = 0L;
@@ -3021,6 +3250,14 @@ namespace GoingCooperative.Plugin.BepInEx
                 + replicationBuildingLifecycleFastTerminalAcksV2.ToString(CultureInfo.InvariantCulture)
                 + " terminalQueue="
                 + ReplicationPendingBuildingTerminalsV2.Count.ToString(CultureInfo.InvariantCulture)
+                + " terminalBatchSent="
+                + replicationBuildingTerminalBatchDeltasSentV2.ToString(CultureInfo.InvariantCulture)
+                + " terminalBatchApplied="
+                + replicationBuildingTerminalBatchDeltasAppliedV2.ToString(CultureInfo.InvariantCulture)
+                + " terminalBatchItemsSent="
+                + replicationBuildingTerminalBatchItemsSentV2.ToString(CultureInfo.InvariantCulture)
+                + " terminalBatchItemsApplied="
+                + replicationBuildingTerminalBatchItemsAppliedV2.ToString(CultureInfo.InvariantCulture)
                 + " terminalSemanticGraceMs="
                 + Math.Max(
                     0,
