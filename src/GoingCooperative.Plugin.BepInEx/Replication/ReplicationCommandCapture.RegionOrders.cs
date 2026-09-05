@@ -1753,7 +1753,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var width = checked(maxX - minX + 1);
             var depth = checked(maxZ - minZ + 1);
             var tileSpan = ReplicationClientMassBuildingRegionBaseTileSpan;
-            while (((width + tileSpan - 1) / tileSpan)
+            while ((long)((width + tileSpan - 1) / tileSpan)
                     * ((depth + tileSpan - 1) / tileSpan)
                 > ReplicationClientMassBuildingRegionMaxInitialTiles)
             {
