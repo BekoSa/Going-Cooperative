@@ -4726,6 +4726,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchPlacedDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingBlueprintBatchResultDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingLifecycleV2DeltaKind, StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, ReplicationBuildingTerminalBatchV2DeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingProgressV2DeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingRepairV2DeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, ReplicationBuildingRecoveryRequiredV2DeltaKind, StringComparison.Ordinal)
@@ -10451,10 +10452,14 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 if (accepted)
                 {
-                    if (IsReplicationBuildPlacementSupersededByClientMassBuildingRegion(
+                    if (IsReplicationBuildResultSupersededByClientBuildingRemovalV2(
+                            hostIds[i],
+                            delta.SentRealtime,
+                            out var supersededDetail)
+                        || IsReplicationBuildPlacementSupersededByClientMassBuildingRegion(
                             record,
                             delta.SentRealtime,
-                            out var supersededDetail))
+                            out supersededDetail))
                     {
                         ClearReplicationBuildBatchReplayFailure(playerId, commandSequence, i);
                         if (localPlayerResult)
