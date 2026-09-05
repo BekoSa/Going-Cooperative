@@ -631,31 +631,35 @@ namespace GoingCooperative.Plugin.BepInEx
                     out _);
         }
 
-        private static bool CompleteReplicationBuildBatchPendingIntent(string playerId, long commandSequence)
+        private static bool CompleteReplicationBuildBatchPendingIntent(
+            string playerId,
+            long commandSequence)
         {
-            var commandKey = playerId + ":" + commandSequence.ToString(CultureInfo.InvariantCulture);
-            if (ReplicationPendingCommandIntents.TryGetValue(commandKey, out var exact)
+            // BuildBatch command sequences are only unique inside one player lane.
+            // Every client observes authoritative results for every peer, so only the
+            // exact local owner may clear this process's pending/provisional receipt.
+            if (!string.Equals(
+                    playerId,
+                    GetReplicationLocalPeerId(),
+                    StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var commandKey =
+                playerId
+                + ":"
+                + commandSequence.ToString(CultureInfo.InvariantCulture);
+            if (ReplicationPendingCommandIntents.TryGetValue(
+                    commandKey,
+                    out var exact)
                 && IsReplicationBuildBatchCommand(exact.Command))
             {
                 ReplicationPendingCommandIntents.Remove(commandKey);
                 return true;
             }
 
-            // Player identifiers are formatted as detail tokens on the wire. Sequence is
-            // unique for this two-player client lane, so retain a safe fallback for any
-            // identifier whose whitespace was normalized in the diagnostic detail format.
-            var fallbackKey = string.Empty;
-            foreach (var pair in ReplicationPendingCommandIntents)
-            {
-                if (pair.Value.Command.Sequence == commandSequence
-                    && IsReplicationBuildBatchCommand(pair.Value.Command))
-                {
-                    fallbackKey = pair.Key;
-                    break;
-                }
-            }
-
-            return fallbackKey.Length > 0 && ReplicationPendingCommandIntents.Remove(fallbackKey);
+            return false;
         }
 
         private sealed class PendingReplicationCommandIntent
