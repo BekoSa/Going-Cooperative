@@ -54,6 +54,10 @@ namespace GoingCooperative.Plugin.BepInEx
         private static readonly Queue<ReplicationPendingMassBuildingRegionTile>
             ReplicationPendingClientMassBuildingRegionTiles =
                 new Queue<ReplicationPendingMassBuildingRegionTile>();
+        private const int ReplicationClientMassBuildingRegionTombstoneMax = 64;
+        private static readonly List<ReplicationMassBuildingRegionTombstone>
+            ReplicationClientMassBuildingRegionTombstones =
+                new List<ReplicationMassBuildingRegionTombstone>();
         private static string replicationZoneModifyOperation = string.Empty;
         private static string replicationZoneModifyId = string.Empty;
         private static float replicationZoneModifyRealtime;
@@ -261,6 +265,17 @@ namespace GoingCooperative.Plugin.BepInEx
                 && replicationRuntimeStarted
                 && replicationRemoteHelloReceived)
             {
+                SupersedePendingReplicationHostBuildReplayChunksInRegion(
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndZ);
+                CollapseReplicationBuildingTerminalsForSemanticRegionV2(
+                    replicationHostLocalSemanticRegionStartX,
+                    replicationHostLocalSemanticRegionStartZ,
+                    replicationHostLocalSemanticRegionEndX,
+                    replicationHostLocalSemanticRegionEndZ,
+                    semanticOrderType);
                 MarkReplicationBuildingSemanticRegionReplayV2();
                 instance?.SendReplicationRegionOrderState(
                     semanticOrderType,
@@ -1734,6 +1749,102 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(orderType, "Deconstruct", StringComparison.Ordinal);
         }
 
+        private static void RememberReplicationClientMassBuildingRegionTombstone(
+            ReplicationRegionOrderState state)
+        {
+            if (replicationConfigHostMode
+                || !IsReplicationMassBuildingRegionOrder(state.OrderType))
+            {
+                return;
+            }
+
+            ReplicationClientMassBuildingRegionTombstones.Add(
+                new ReplicationMassBuildingRegionTombstone(
+                    Math.Min(state.StartX, state.EndX),
+                    Math.Max(state.StartX, state.EndX),
+                    Math.Min(state.StartZ, state.EndZ),
+                    Math.Max(state.StartZ, state.EndZ),
+                    state.SentRealtime,
+                    state.Sequence));
+            while (ReplicationClientMassBuildingRegionTombstones.Count
+                > ReplicationClientMassBuildingRegionTombstoneMax)
+            {
+                ReplicationClientMassBuildingRegionTombstones.RemoveAt(0);
+            }
+        }
+
+        private static bool IsReplicationBuildPlacementSupersededByClientMassBuildingRegion(
+            ReplicationBuildPlacementRecord record,
+            float buildSentRealtime,
+            out string detail)
+        {
+            detail = string.Empty;
+            for (var i = ReplicationClientMassBuildingRegionTombstones.Count - 1; i >= 0; i--)
+            {
+                var tombstone = ReplicationClientMassBuildingRegionTombstones[i];
+                if (buildSentRealtime > tombstone.SentRealtime + 0.001f
+                    || !DoesReplicationBuildPlacementOverlapRegionXZ(
+                        record,
+                        tombstone.MinX,
+                        tombstone.MinZ,
+                        tombstone.MaxX,
+                        tombstone.MaxZ))
+                {
+                    continue;
+                }
+
+                detail = "superseded-by-region-removal sequence="
+                    + tombstone.Sequence.ToString(CultureInfo.InvariantCulture)
+                    + " removalSentRealtime="
+                    + tombstone.SentRealtime.ToString("0.###", CultureInfo.InvariantCulture)
+                    + " buildSentRealtime="
+                    + buildSentRealtime.ToString("0.###", CultureInfo.InvariantCulture);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool DoesReplicationBuildPlacementOverlapRegionXZ(
+            ReplicationBuildPlacementRecord record,
+            int startX,
+            int startZ,
+            int endX,
+            int endZ)
+        {
+            var minX = Math.Min(startX, endX);
+            var maxX = Math.Max(startX, endX);
+            var minZ = Math.Min(startZ, endZ);
+            var maxZ = Math.Max(startZ, endZ);
+            if (record.X >= minX && record.X <= maxX
+                && record.Z >= minZ && record.Z <= maxZ)
+            {
+                return true;
+            }
+
+            for (var i = 0; i < record.Positions.Count; i++)
+            {
+                var position = record.Positions[i];
+                if (position.X >= minX && position.X <= maxX
+                    && position.Z >= minZ && position.Z <= maxZ)
+                {
+                    return true;
+                }
+            }
+
+            if (record.Kind == ReplicationBuildPlacementKind.BeamX
+                || record.Kind == ReplicationBuildPlacementKind.BeamZ
+                || record.Kind == ReplicationBuildPlacementKind.Socketable)
+            {
+                return (record.Start.X >= minX && record.Start.X <= maxX
+                        && record.Start.Z >= minZ && record.Start.Z <= maxZ)
+                    || (record.End.X >= minX && record.End.X <= maxX
+                        && record.End.Z >= minZ && record.End.Z <= maxZ);
+            }
+
+            return false;
+        }
+
         private static bool ScheduleReplicationClientMassBuildingRegionReplay(
             ReplicationRegionOrderState state,
             out string detail)
@@ -1962,6 +2073,33 @@ namespace GoingCooperative.Plugin.BepInEx
         private static void ResetReplicationClientMassBuildingRegionReplay()
         {
             ReplicationPendingClientMassBuildingRegionTiles.Clear();
+            ReplicationClientMassBuildingRegionTombstones.Clear();
+        }
+
+        private sealed class ReplicationMassBuildingRegionTombstone
+        {
+            public ReplicationMassBuildingRegionTombstone(
+                int minX,
+                int maxX,
+                int minZ,
+                int maxZ,
+                float sentRealtime,
+                long sequence)
+            {
+                MinX = minX;
+                MaxX = maxX;
+                MinZ = minZ;
+                MaxZ = maxZ;
+                SentRealtime = sentRealtime;
+                Sequence = sequence;
+            }
+
+            public int MinX { get; }
+            public int MaxX { get; }
+            public int MinZ { get; }
+            public int MaxZ { get; }
+            public float SentRealtime { get; }
+            public long Sequence { get; }
         }
 
         private sealed class ReplicationPendingMassBuildingRegionReplay
