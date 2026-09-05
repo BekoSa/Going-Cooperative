@@ -38,8 +38,13 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             try
             {
-                GlobalSaveController.Instance.SynchronizeWithFiles();
-                return GlobalSaveController.Instance.SavesList ?? new List<VillageSaveInfo>();
+                // The main menu has already populated GlobalSaveController.SavesList.
+                // SynchronizeWithFiles performs synchronous disk/catalog work and this
+                // helper is called while constructing the Host UI. Forcing a rescan
+                // here can freeze the Unity main thread before the host session even
+                // starts. Client checkpoint import has its own explicit catalog import.
+                return GlobalSaveController.Instance.SavesList
+                    ?? new List<VillageSaveInfo>();
             }
             catch (Exception ex)
             {
