@@ -39,6 +39,15 @@ namespace GoingCooperative.Core
                 && seenCount == expectedCount;
         }
 
+        public static bool IsBuildSupersededByRemoval(
+            float buildSentRealtime,
+            float removalSentRealtime)
+        {
+            return buildSentRealtime >= 0f
+                && removalSentRealtime >= 0f
+                && buildSentRealtime <= removalSentRealtime + 0.001f;
+        }
+
         public static bool ShouldAcceptBuildBatch(int committedCount, int requestedCount)
         {
             return requestedCount > 0 && committedCount == requestedCount;
