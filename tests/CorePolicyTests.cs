@@ -542,6 +542,11 @@ internal static class CorePolicyTests
         Equal(false, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 1), "snapshot End before final row remains pending");
         Equal(true, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 2), "snapshot final row after End completes checkpoint");
         Equal(false, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 3), "snapshot over-count does not falsely complete");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(10f, 11f), "building result older than removal is superseded");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11f, 11f), "building result at removal boundary is superseded");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11.0005f, 11f), "building result inside ordering tolerance is superseded");
+        Equal(false, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11.01f, 11f), "building result created after removal remains valid");
+        Equal(false, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(-1f, 11f), "invalid building timestamp never becomes a removal tombstone match");
         Equal(false, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(1, 128), "build batch 1/128 partial commit is rejected");
         Equal(false, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(127, 128), "build batch 127/128 partial commit is rejected");
         Equal(true, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(128, 128), "build batch 128/128 exact commits remain accepted after a post-commit throw");
