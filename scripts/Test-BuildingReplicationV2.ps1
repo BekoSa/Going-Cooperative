@@ -291,8 +291,8 @@ Require-SourcePattern $sources.RegionOrders 'replicationRegionSelectionActionDep
     "Cancel/Deconstruct side-effect resource callbacks can still emit a duplicate region command."
 Require-SourcePattern $sources.RegionOrders 'ZoneSelectionFinished.*?orderType.*?None.*?replicationLastRegionOrderType.*?Cancel.*?Deconstruct.*?return\s+true\s*;' `
     "Cancel/Deconstruct can still emit a second orderType=None ZoneSelectionFinished command."
-Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTerminalGraceSecondsV2\s*=\s*0\.4f.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2' `
-    "Building terminals do not give semantic area replay a bounded head start."
+Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTerminalGraceSecondsV2\s*=\s*1\.25f.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2' `
+    "Building terminals do not give tiled semantic area replay enough bounded head start."
 Require-SourcePattern $sources.Lifecycle 'ProcessPendingReplicationBuildingTerminalsV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2.*?return\s*;' `
     "Reliable terminal replay can race the semantic area operation in the same frame."
 Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingTerminalMaxInFlightV2\s*=\s*16.*?CountReplicationBuildingTerminalInFlightV2\(\).*?IsReplicationBuildingRemovedLifecycleDelta.*?inFlight\s*>=\s*ReplicationBuildingTerminalMaxInFlightV2' `
