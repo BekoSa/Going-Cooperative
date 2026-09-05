@@ -23,7 +23,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const int ReplicationBuildingPresentationApplyBudgetV2 = 16;
         private const int ReplicationBuildingTerminalEmitBudgetPerFrameV2 = 4;
         private const int ReplicationBuildingTerminalMaxInFlightV2 = 16;
-        private const float ReplicationBuildingSemanticRegionTerminalGraceSecondsV2 = 0.4f;
+        private const float ReplicationBuildingSemanticRegionTerminalGraceSecondsV2 = 1.25f;
         private static float replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2;
 
         private static readonly Dictionary<long, ReplicationTrackedBuildingV2> ReplicationTrackedHostBuildingsV2 =
