@@ -36,6 +36,11 @@ namespace GoingCooperative.Plugin.BepInEx
         private static MethodInfo? replicationDestroyBuildingMethodV2;
         private static readonly Dictionary<long, bool> ReplicationClientBuildingProgressingV2 =
             new Dictionary<long, bool>();
+        private const int ReplicationClientBuildingRemovalTombstoneRetentionV2 = 65536;
+        private static readonly Dictionary<long, float> ReplicationClientBuildingRemovalSentRealtimeV2 =
+            new Dictionary<long, float>();
+        private static readonly Queue<long> ReplicationClientBuildingRemovalTombstoneOrderV2 =
+            new Queue<long>();
         private static readonly Queue<ReplicationPendingBuildingTerminalV2> ReplicationPendingBuildingTerminalsV2 =
             new Queue<ReplicationPendingBuildingTerminalV2>();
         private static readonly Dictionary<long, long> ReplicationClientBuildingTerminalRevisionV2 =
@@ -1399,6 +1404,63 @@ namespace GoingCooperative.Plugin.BepInEx
             return true;
         }
 
+        private static void RecordReplicationClientBuildingRemovalTombstoneV2(
+            long hostId,
+            float removalSentRealtime)
+        {
+            if (hostId <= 0L || replicationConfigHostMode)
+            {
+                return;
+            }
+
+            if (ReplicationClientBuildingRemovalSentRealtimeV2.TryGetValue(
+                    hostId,
+                    out var existing))
+            {
+                if (removalSentRealtime > existing)
+                {
+                    ReplicationClientBuildingRemovalSentRealtimeV2[hostId] =
+                        removalSentRealtime;
+                }
+
+                return;
+            }
+
+            ReplicationClientBuildingRemovalSentRealtimeV2[hostId] =
+                removalSentRealtime;
+            ReplicationClientBuildingRemovalTombstoneOrderV2.Enqueue(hostId);
+            while (ReplicationClientBuildingRemovalTombstoneOrderV2.Count
+                > ReplicationClientBuildingRemovalTombstoneRetentionV2)
+            {
+                var expired = ReplicationClientBuildingRemovalTombstoneOrderV2.Dequeue();
+                ReplicationClientBuildingRemovalSentRealtimeV2.Remove(expired);
+            }
+        }
+
+        private static bool IsReplicationBuildResultSupersededByClientBuildingRemovalV2(
+            long hostId,
+            float buildSentRealtime,
+            out string detail)
+        {
+            detail = string.Empty;
+            if (hostId <= 0L
+                || !ReplicationClientBuildingRemovalSentRealtimeV2.TryGetValue(
+                    hostId,
+                    out var removalSentRealtime)
+                || buildSentRealtime > removalSentRealtime + 0.001f)
+            {
+                return false;
+            }
+
+            detail = "superseded-by-exact-removal hostId="
+                + hostId.ToString(CultureInfo.InvariantCulture)
+                + " removalSentRealtime="
+                + removalSentRealtime.ToString("0.###", CultureInfo.InvariantCulture)
+                + " buildSentRealtime="
+                + buildSentRealtime.ToString("0.###", CultureInfo.InvariantCulture);
+            return true;
+        }
+
         private static bool TryApplyReplicationBuildingNativeStateV2(
             ReplicationWorldObjectDelta delta,
             string state,
@@ -1427,6 +1489,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
                 else if (string.Equals(state, "removed", StringComparison.Ordinal))
                 {
+                    RecordReplicationClientBuildingRemovalTombstoneV2(
+                        delta.UniqueId,
+                        delta.SentRealtime);
                     RemoveReplicationHostIdentity(
                         delta.UniqueId,
                         null,
@@ -1463,6 +1528,9 @@ namespace GoingCooperative.Plugin.BepInEx
                         return false;
                     }
 
+                    RecordReplicationClientBuildingRemovalTombstoneV2(
+                        delta.UniqueId,
+                        delta.SentRealtime);
                     RemoveReplicationHostIdentity(
                         delta.UniqueId,
                         candidate,
@@ -3198,6 +3266,8 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationDestroyBuildingManagerTypeV2 = null;
             replicationDestroyBuildingMethodV2 = null;
             ReplicationClientBuildingProgressingV2.Clear();
+            ReplicationClientBuildingRemovalSentRealtimeV2.Clear();
+            ReplicationClientBuildingRemovalTombstoneOrderV2.Clear();
             ReplicationClientBuildingTerminalRevisionV2.Clear();
             ReplicationClientBuildingPresentationByHostIdV2.Clear();
             ReplicationClientBuildingPresentationOrderV2.Clear();
