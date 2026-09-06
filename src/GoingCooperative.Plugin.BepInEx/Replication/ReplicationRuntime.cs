@@ -30,6 +30,9 @@ namespace GoingCooperative.Plugin.BepInEx
         private static float replicationNextHelloLogRealtime;
         private static float replicationNextBuildHashMismatchWarnRealtime;
         private static float replicationNextPumpExceptionWarnRealtime;
+        private static float replicationNextSlowPumpHandlerWarnRealtime;
+        private static long replicationSlowPumpHandlers;
+        private static double replicationSlowPumpHandlerMaxMs;
         private static float replicationNextTransportDropWarnRealtime;
         private static long replicationPumpHandlerExceptions;
         private static long replicationLastTransportDecodeFailures;
@@ -604,6 +607,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     continue;
                 }
 
+                var handlerStarted = Stopwatch.GetTimestamp();
                 try
                 {
                     switch (envelope.Kind)
@@ -660,6 +664,37 @@ namespace GoingCooperative.Plugin.BepInEx
                             + ex.GetType().Name
                             + ":"
                             + ex.Message);
+                    }
+                }
+
+                var handlerMs =
+                    (Stopwatch.GetTimestamp() - handlerStarted)
+                    * 1000.0 / Stopwatch.Frequency;
+                if (handlerMs >= 4.0)
+                {
+                    replicationSlowPumpHandlers++;
+                    replicationSlowPumpHandlerMaxMs =
+                        Math.Max(replicationSlowPumpHandlerMaxMs, handlerMs);
+                    if (Time.realtimeSinceStartup
+                        >= replicationNextSlowPumpHandlerWarnRealtime)
+                    {
+                        replicationNextSlowPumpHandlerWarnRealtime =
+                            Time.realtimeSinceStartup + 1f;
+                        LogReplicationWarning(
+                            "[MP/PERF] slow pump handler kind="
+                            + envelope.Kind
+                            + " elapsedMs="
+                            + handlerMs.ToString("0.###", CultureInfo.InvariantCulture)
+                            + " total="
+                            + replicationSlowPumpHandlers.ToString(CultureInfo.InvariantCulture)
+                            + " maxMs="
+                            + replicationSlowPumpHandlerMaxMs.ToString("0.###", CultureInfo.InvariantCulture)
+                            + (envelope.Kind == TransportMessageKind.ReplicationWorldObjectDelta
+                                ? " lastWorldDelta="
+                                    + TrimFingerprintText(
+                                        replicationLastWorldObjectDeltaSummary,
+                                        360)
+                                : string.Empty));
                     }
                 }
             }
@@ -2808,9 +2843,15 @@ namespace GoingCooperative.Plugin.BepInEx
                 return;
             }
 
-            if (IsReplicationMassBuildingRegionOrder(state.OrderType))
+            if (IsReplicationClientTiledRegionOrder(state))
             {
-                RememberReplicationClientMassBuildingRegionTombstone(state);
+                var massBuildingRegion =
+                    IsReplicationMassBuildingRegionOrder(state.OrderType);
+                if (massBuildingRegion)
+                {
+                    RememberReplicationClientMassBuildingRegionTombstone(state);
+                }
+
                 if (ScheduleReplicationClientMassBuildingRegionReplay(
                         state,
                         out var scheduleDetail))
@@ -2823,14 +2864,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     LogReplicationInfo(
                         "Going Cooperative replication region order state scheduled "
                         + replicationLastRegionOrderStateSummary);
+                    return;
                 }
-                else
+
+                if (massBuildingRegion)
                 {
                     // Never fall back to one giant SelectionManager.OnOrderCancel /
-                    // OnOrderDeconstruction call on a client. A malformed/stale native
-                    // selection array can throw and strand the entire authoritative
-                    // area. Durable BuildingLifecycleV2 rows remain the fail-closed
-                    // safety net if scheduling itself cannot be established.
+                    // OnOrderDeconstruction call on a client. Durable lifecycle rows
+                    // remain the fail-closed safety net.
                     replicationLastRegionOrderStateSummary =
                         "client-tiled-replay-not-scheduled "
                         + scheduleDetail
@@ -2839,8 +2880,16 @@ namespace GoingCooperative.Plugin.BepInEx
                     LogReplicationWarning(
                         "Going Cooperative replication region order state "
                         + replicationLastRegionOrderStateSummary);
+                    return;
                 }
-                return;
+
+                // Chopping has no durable per-cell terminal safety net. Scheduling is
+                // expected to succeed for valid regions; on an unexpected scheduler
+                // failure preserve gameplay correctness by using the legacy one-shot
+                // path below.
+                LogReplicationWarning(
+                    "[MP/REGION] tiled chopping scheduler fallback detail="
+                    + scheduleDetail);
             }
 
             var command = new LockstepCommand(
