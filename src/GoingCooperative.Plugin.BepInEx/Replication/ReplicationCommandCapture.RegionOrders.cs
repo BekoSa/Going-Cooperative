@@ -1749,6 +1749,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(orderType, "Deconstruct", StringComparison.Ordinal);
         }
 
+        private static bool IsReplicationClientTiledRegionOrder(
+            ReplicationRegionOrderState state)
+        {
+            if (IsReplicationMassBuildingRegionOrder(state.OrderType))
+            {
+                return true;
+            }
+
+            if (!string.Equals(state.OrderType, "Chopping", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var width = (long)Math.Abs(state.EndX - state.StartX) + 1L;
+            var depth = (long)Math.Abs(state.EndZ - state.StartZ) + 1L;
+            return width * depth >= 64L;
+        }
+
         private static void RememberReplicationClientMassBuildingRegionTombstone(
             ReplicationRegionOrderState state)
         {
@@ -1853,9 +1871,9 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             detail = string.Empty;
             if (replicationConfigHostMode
-                || !IsReplicationMassBuildingRegionOrder(state.OrderType))
+                || !IsReplicationClientTiledRegionOrder(state))
             {
-                detail = "not-client-mass-building-region";
+                detail = "not-client-tiled-region";
                 return false;
             }
 
@@ -1973,7 +1991,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 replay.FailedLeafTiles++;
                 replay.OutstandingTiles--;
                 instance?.LogReplicationWarning(
-                    "[MP/REGION] client mass building replay leaf failed sequence="
+                    "[MP/REGION] client tiled replay leaf failed sequence="
                     + replay.Sequence.ToString(CultureInfo.InvariantCulture)
                     + " orderType="
                     + replay.OrderType
