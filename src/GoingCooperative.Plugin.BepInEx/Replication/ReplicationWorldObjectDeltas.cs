@@ -1835,6 +1835,25 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var key = (originalMethod.DeclaringType?.FullName ?? string.Empty) + "." + originalMethod.Name;
+            var legacyGroundPileSurface =
+                key.EndsWith(".TryAddToResourcePile", StringComparison.Ordinal)
+                || key.EndsWith(".SpawnNewPile", StringComparison.Ordinal)
+                || key.EndsWith(".SpawnResource", StringComparison.Ordinal)
+                || key.EndsWith(".ProducePile", StringComparison.Ordinal)
+                || key.EndsWith(".ResourcePileInstance.Dispose", StringComparison.Ordinal)
+                || key.EndsWith(".ForceDisposePile", StringComparison.Ordinal)
+                || key.EndsWith(".DisposePilesById", StringComparison.Ordinal)
+                || key.EndsWith(".OnPileDisposed", StringComparison.Ordinal);
+            if (legacyGroundPileSurface && ReplicationGroundPileStateV2Enabled())
+            {
+                // Ground-pile V2 observes ProducePile, pile mutations and Dispose,
+                // emits revisioned current-state rows, and repairs missed packets.
+                // Running the legacy spawn/add/dispose lane in parallel duplicated
+                // the same native mutation and was the dominant worker-action retry
+                // storm during chopping and construction.
+                return;
+            }
+
             if (key.EndsWith(".TryAddToResourcePile", StringComparison.Ordinal)
                 && (!hasResult || result is not bool added || added)
                 && TryCreateReplicationWorldObjectDelta("ResourcePileAmountAdded", target, args, result, hasResult, key, out var addedDelta)
