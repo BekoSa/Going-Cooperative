@@ -2753,7 +2753,7 @@ namespace GoingCooperative.Plugin.BepInEx
                 }
             }
 
-            var deferBuildingInitialSend = requiredPeers.Length > 0
+            var deferReliableInitialSend = requiredPeers.Length > 0
                 && (string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingLifecycleV2DeltaKind,
@@ -2769,14 +2769,14 @@ namespace GoingCooperative.Plugin.BepInEx
                     || string.Equals(
                         delta.DeltaKind,
                         ReplicationBuildingTerminalBatchV2DeltaKind,
-                        StringComparison.Ordinal));
-            if (deferBuildingInitialSend)
+                        StringComparison.Ordinal)
+                    || IsReplicationDeferredWorkerStateDelta(delta));
+            if (deferReliableInitialSend)
             {
-                // Building state can arrive in bursts of hundreds/thousands during
-                // drag placement, cancel or deconstruct. The reliable scheduler
-                // already owns the pending rows; let its bounded queue perform the
-                // initial sends too instead of adding a transport burst to the same
-                // frame that is mutating the Unity world.
+                // Building bursts and worker action mutations are captured while the
+                // Unity world is already doing expensive native work. The reliable
+                // scheduler owns these pending rows, so let its bounded 32-send pass
+                // perform the first transmission outside the native callback.
                 replicationNextWorldObjectDeltaRetryScanRealtime = Math.Min(
                     replicationNextWorldObjectDeltaRetryScanRealtime,
                     Time.realtimeSinceStartup);
@@ -5071,6 +5071,24 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(delta.DeltaKind, "AgentAnimationQuit", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationParameter", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentActionPhase", StringComparison.Ordinal);
+        }
+
+        private static bool IsReplicationDeferredWorkerStateDelta(
+            ReplicationWorldObjectDelta delta)
+        {
+            // These mutations are captured from native worker/GOAP callbacks. They
+            // must remain reliable, but serializing/sending them immediately keeps
+            // UDP work inside the game's hottest action path. Queue the authoritative
+            // row and let the bounded reliable scheduler perform the first send.
+            return string.Equals(delta.DeltaKind, "MapResourceDisposed", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "ResourcePileSpawned", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "ResourcePileAmountAdded", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "ResourcePileDisposed", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentSkillExperience", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryResourceChanged", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryResourceCleared", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryEquipped", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentCarryCleared", StringComparison.Ordinal);
         }
 
         private static bool IsReplicationHighFrequencyPresentationUpdate(
