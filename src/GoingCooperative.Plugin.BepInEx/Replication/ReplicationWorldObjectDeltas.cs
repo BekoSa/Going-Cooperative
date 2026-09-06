@@ -47,6 +47,8 @@ namespace GoingCooperative.Plugin.BepInEx
         // Keep the identity observed during Init so concurrent workers remain distinguishable.
         private static readonly Dictionary<object, ReplicationGoapActionOwnerBinding> ReplicationGoapActionOwnerBindings = new Dictionary<object, ReplicationGoapActionOwnerBinding>();
         private static readonly Dictionary<string, ulong> ReplicationLastAgentCharacterStateSignatureByEntityId = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        private const float ReplicationSkillUiRefreshMinSeconds = 0.5f;
+        private static float replicationNextSkillUiRefreshRealtime;
         private static readonly Dictionary<string, ReplicationAgentCharacterState> ReplicationClientAgentCharacterStateByEntityId = new Dictionary<string, ReplicationAgentCharacterState>(StringComparer.Ordinal);
         private static readonly Dictionary<string, ReplicationPuppetActionState> ReplicationPuppetActionStateByEntityId = new Dictionary<string, ReplicationPuppetActionState>(StringComparer.Ordinal);
         private static readonly Dictionary<string, string> ReplicationPuppetActionHandItemByEntityId = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -641,7 +643,6 @@ namespace GoingCooperative.Plugin.BepInEx
             }
 
             var uniqueId = TryParseReplicationEntityNumericId(entityId, out var parsedId) ? parsedId : 0L;
-            var animatorStateDetail = CaptureReplicationAnimatorStateDetail(action, entityId);
             current.SendReplicationWorldObjectDelta(new ReplicationWorldObjectDelta(
                 ++replicationWorldObjectDeltaSequence,
                 Time.realtimeSinceStartup,
@@ -658,7 +659,6 @@ namespace GoingCooperative.Plugin.BepInEx
                     + " targetId=" + targetId
                     + " targetBlueprintId=" + FormatReplicationWorldObjectDetailToken(targetBlueprintId)
                     + " targetGrid=" + targetX.ToString(CultureInfo.InvariantCulture) + "," + targetY.ToString(CultureInfo.InvariantCulture) + "," + targetZ.ToString(CultureInfo.InvariantCulture)
-                    + (string.IsNullOrWhiteSpace(animatorStateDetail) ? string.Empty : " " + animatorStateDetail)
                     + " source=GoapAction." + phase));
         }
 
@@ -1224,15 +1224,6 @@ namespace GoingCooperative.Plugin.BepInEx
                     + totalExperience.ToString("F3", CultureInfo.InvariantCulture)
                     + " source="
                     + source));
-
-            current.LogReplicationInfo("Going Cooperative replication character xp sent entityId="
-                + entityId
-                + " skill="
-                + skillToken
-                + " amount="
-                + amount.ToString("F3", CultureInfo.InvariantCulture)
-                + " totalXp="
-                + totalExperience.ToString("F3", CultureInfo.InvariantCulture));
 
             if (replicationConfigCharacterStateDiagnostics)
             {
@@ -3568,17 +3559,28 @@ namespace GoingCooperative.Plugin.BepInEx
                 return false;
             }
 
-            var key = delta.DeltaKind
-                + "|"
-                + delta.UniqueId.ToString(CultureInfo.InvariantCulture)
-                + "|"
-                + delta.BlueprintId
-                + "|"
-                + delta.GridX.ToString(CultureInfo.InvariantCulture)
-                + ","
-                + delta.GridY.ToString(CultureInfo.InvariantCulture)
-                + ","
-                + delta.GridZ.ToString(CultureInfo.InvariantCulture);
+            var objectLifecycleByUid =
+                delta.UniqueId != 0L
+                && (string.Equals(delta.DeltaKind, "ResourcePileSpawned", StringComparison.Ordinal)
+                    || string.Equals(delta.DeltaKind, "ResourcePileDisposed", StringComparison.Ordinal)
+                    || string.Equals(delta.DeltaKind, "MapResourceDisposed", StringComparison.Ordinal));
+            var key = objectLifecycleByUid
+                ? delta.DeltaKind
+                    + "|uid="
+                    + delta.UniqueId.ToString(CultureInfo.InvariantCulture)
+                    + "|blueprint="
+                    + delta.BlueprintId
+                : delta.DeltaKind
+                    + "|"
+                    + delta.UniqueId.ToString(CultureInfo.InvariantCulture)
+                    + "|"
+                    + delta.BlueprintId
+                    + "|"
+                    + delta.GridX.ToString(CultureInfo.InvariantCulture)
+                    + ","
+                    + delta.GridY.ToString(CultureInfo.InvariantCulture)
+                    + ","
+                    + delta.GridZ.ToString(CultureInfo.InvariantCulture);
             var now = Time.realtimeSinceStartup;
             lock (ReplicationWorldObjectDeltaLock)
             {
@@ -5066,7 +5068,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 || string.Equals(delta.DeltaKind, ReplicationWorkstationRuntimeDeltaKind, StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationTriggered", StringComparison.Ordinal)
                 || string.Equals(delta.DeltaKind, "AgentAnimationReset", StringComparison.Ordinal)
-                || string.Equals(delta.DeltaKind, "AgentAnimationQuit", StringComparison.Ordinal);
+                || string.Equals(delta.DeltaKind, "AgentAnimationQuit", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentAnimationParameter", StringComparison.Ordinal)
+                || string.Equals(delta.DeltaKind, "AgentActionPhase", StringComparison.Ordinal);
         }
 
         private static bool IsReplicationHighFrequencyPresentationUpdate(
@@ -7731,7 +7735,10 @@ namespace GoingCooperative.Plugin.BepInEx
                 return disposed;
             }
 
-            if (delta.Detail.IndexOf("PlantMapResourceInstance.Dispose", StringComparison.Ordinal) >= 0
+            if ((delta.Detail.IndexOf("PlantMapResourceInstance.Dispose", StringComparison.Ordinal) >= 0
+                    || delta.Detail.IndexOf(
+                        "target type=NSMedieval.State.PlantMapResourceInstance",
+                        StringComparison.Ordinal) >= 0)
                 && !TryGetPlantAt(delta.GridX, delta.GridY, delta.GridZ, out _, out var directPlantDetail)
                 && string.Equals(directPlantDetail, "plant-missing", StringComparison.Ordinal))
             {
@@ -13030,13 +13037,23 @@ namespace GoingCooperative.Plugin.BepInEx
             try
             {
                 setExperience.Invoke(workerSkill, new object[] { totalExperience });
-                RefreshReplicationSkillUiForEntity(entityId);
-                instance?.LogReplicationInfo("Going Cooperative replication character xp applied entityId="
-                    + entityId
-                    + " skill="
-                    + skillToken
-                    + " totalXp="
-                    + totalExperience.ToString("F3", CultureInfo.InvariantCulture));
+                var now = Time.realtimeSinceStartup;
+                if (now >= replicationNextSkillUiRefreshRealtime)
+                {
+                    replicationNextSkillUiRefreshRealtime =
+                        now + ReplicationSkillUiRefreshMinSeconds;
+                    RefreshReplicationSkillUiForEntity(entityId);
+                }
+
+                if (replicationConfigCharacterStateDiagnostics)
+                {
+                    instance?.LogReplicationInfo("Going Cooperative replication character xp applied entityId="
+                        + entityId
+                        + " skill="
+                        + skillToken
+                        + " totalXp="
+                        + totalExperience.ToString("F3", CultureInfo.InvariantCulture));
+                }
                 detail = "ok agent-skill-xp entityId="
                     + entityId
                     + " skill="
@@ -16421,8 +16438,14 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private static string FormatReplicationWorldObjectDeltaSpawnKey(ReplicationWorldObjectDelta delta)
         {
-            return delta.UniqueId.ToString(CultureInfo.InvariantCulture)
-                + "|"
+            if (delta.UniqueId != 0L)
+            {
+                return delta.UniqueId.ToString(CultureInfo.InvariantCulture)
+                    + "|"
+                    + delta.BlueprintId;
+            }
+
+            return "loc|"
                 + delta.BlueprintId
                 + "|"
                 + delta.GridX.ToString(CultureInfo.InvariantCulture)
