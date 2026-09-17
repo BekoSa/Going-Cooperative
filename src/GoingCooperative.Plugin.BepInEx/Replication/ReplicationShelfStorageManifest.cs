@@ -217,7 +217,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 return true;
             }
 
-            var parts = state.ContainerId.Split(':');
+            var parts = state.ContainerId.Split(
+                new[] { ':' },
+                StringSplitOptions.None);
             if (parts.Length != 6
                 || !string.Equals(parts[0], "shelf-slot", StringComparison.Ordinal)
                 || !long.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostUid)

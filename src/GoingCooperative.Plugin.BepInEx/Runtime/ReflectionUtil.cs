@@ -145,7 +145,7 @@ namespace GoingCooperative.Plugin.BepInEx
                     return false;
             }
         }
-        private static bool TryReadMemberValue(object owner, Type type, string memberName, out object value)
+        private static bool TryReadMemberValue(object owner, Type type, string memberName, out object? value)
         {
             value = null;
             for (var current = type; current != null; current = current.BaseType)

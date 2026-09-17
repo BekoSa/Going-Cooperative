@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using GoingCooperative.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -26,6 +27,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private Image? multiplayerResyncProgressFill;
         private Text? multiplayerCanvasConnectionText;
         private Text? multiplayerCanvasStatusValuesText;
+        private Text? multiplayerCanvasRosterText;
         private Text? multiplayerCanvasMessageText;
         private Text? multiplayerCanvasTransferPhaseText;
         private Text? multiplayerCanvasTransferDetailText;
@@ -37,6 +39,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private InputField? multiplayerCanvasHostInput;
         private InputField? multiplayerCanvasPortInput;
         private InputField? multiplayerCanvasSessionInput;
+        private InputField? multiplayerCanvasNicknameInput;
         private MultiplayerMenuPage multiplayerCanvasPage = MultiplayerMenuPage.Home;
         private bool multiplayerCanvasFailureLogged;
         private bool multiplayerCanvasOpenedAtUsableResolution;
@@ -128,7 +131,14 @@ namespace GoingCooperative.Plugin.BepInEx
 
             if (multiplayerCanvasStatusValuesText != null)
             {
-                multiplayerCanvasStatusValuesText.text = BuildMultiplayerCanvasStatusValues();
+                multiplayerCanvasStatusValuesText.text =
+                    BuildMultiplayerCanvasStatusValues();
+            }
+
+            if (multiplayerCanvasRosterText != null)
+            {
+                multiplayerCanvasRosterText.text =
+                    BuildMultiplayerCanvasRosterText();
             }
         }
 
@@ -376,59 +386,359 @@ namespace GoingCooperative.Plugin.BepInEx
         private void BuildMultiplayerCanvasHostPage()
         {
             EnsureDirectHostSessionCode();
-            CreateMultiplayerCanvasHeading("Host Multiplayer Game", "Select the load that will be transferred to the joining player.");
-            CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Selected Save", "SELECT LOAD:  " + GetSelectedMultiplayerSaveLabel(), 16, FontStyle.Bold, TextAnchor.MiddleCenter, MultiplayerCanvasText, new Vector2(0.12f, 0.68f), new Vector2(0.76f, 0.78f));
-            var previousSave = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Previous Save", "<", SelectPreviousMultiplayerSave, MultiplayerCanvasCard);
-            SetMultiplayerCanvasRect(previousSave.GetComponent<RectTransform>(), new Vector2(0.78f, 0.68f), new Vector2(0.84f, 0.78f), Vector2.zero, Vector2.zero);
-            var nextSave = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Next Save", ">", SelectNextMultiplayerSave, MultiplayerCanvasCard);
-            SetMultiplayerCanvasRect(nextSave.GetComponent<RectTransform>(), new Vector2(0.85f, 0.68f), new Vector2(0.91f, 0.78f), Vector2.zero, Vector2.zero);
-            multiplayerCanvasPortInput = CreateMultiplayerCanvasInput("Listen port", MultiplayerMenu.PortText, 0.54f);
+            CreateMultiplayerCanvasHeading(
+                "Host Multiplayer Game",
+                multiplayerMainMenuActive
+                    ? "Load a save as the host world. Other players may join later at any time."
+                    : "Open the current live world to other players without restarting it.");
+
+            if (multiplayerMainMenuActive)
+            {
+                CreateMultiplayerCanvasText(
+                    multiplayerCanvasContent!.transform,
+                    "Selected Save",
+                    "SELECT LOAD:  " + GetSelectedMultiplayerSaveLabel(),
+                    16,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleCenter,
+                    MultiplayerCanvasText,
+                    new Vector2(0.12f, 0.7f),
+                    new Vector2(0.76f, 0.79f));
+                var previousSave = CreateMultiplayerCanvasButton(
+                    multiplayerCanvasContent.transform,
+                    "Previous Save",
+                    "<",
+                    SelectPreviousMultiplayerSave,
+                    MultiplayerCanvasCard);
+                SetMultiplayerCanvasRect(
+                    previousSave.GetComponent<RectTransform>(),
+                    new Vector2(0.78f, 0.7f),
+                    new Vector2(0.84f, 0.79f),
+                    Vector2.zero,
+                    Vector2.zero);
+                var nextSave = CreateMultiplayerCanvasButton(
+                    multiplayerCanvasContent.transform,
+                    "Next Save",
+                    ">",
+                    SelectNextMultiplayerSave,
+                    MultiplayerCanvasCard);
+                SetMultiplayerCanvasRect(
+                    nextSave.GetComponent<RectTransform>(),
+                    new Vector2(0.85f, 0.7f),
+                    new Vector2(0.91f, 0.79f),
+                    Vector2.zero,
+                    Vector2.zero);
+            }
+            else
+            {
+                CreateMultiplayerCanvasText(
+                    multiplayerCanvasContent!.transform,
+                    "Current World",
+                    "CURRENT WORLD  ·  join-in-progress enabled",
+                    16,
+                    FontStyle.Bold,
+                    TextAnchor.MiddleLeft,
+                    MultiplayerCanvasText,
+                    new Vector2(0.08f, 0.7f),
+                    new Vector2(0.92f, 0.79f));
+            }
+
+            multiplayerCanvasNicknameInput =
+                CreateMultiplayerCanvasInput(
+                    "Nickname",
+                    MultiplayerMenu.Nickname,
+                    0.59f);
+            multiplayerCanvasNicknameInput.characterLimit =
+                MultiplayerNickname.MaxLength;
+
+            multiplayerCanvasPortInput =
+                CreateMultiplayerCanvasInput(
+                    "Listen port",
+                    MultiplayerMenu.PortText,
+                    0.49f);
+
             if (replicationConfigDirectTransportSecurityV1)
             {
-                multiplayerCanvasSessionInput = CreateMultiplayerCanvasInput("Session code", MultiplayerMenu.DirectSessionCode, 0.44f);
+                multiplayerCanvasSessionInput =
+                    CreateMultiplayerCanvasInput(
+                        "Session code",
+                        MultiplayerMenu.DirectSessionCode,
+                        0.39f);
             }
-            CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Preflight", "Share this address: " + GetMultiplayerLanAddressSummary() + ":" + MultiplayerMenu.PortText
-                + "\nPlugin " + GoingCooperativeConstants.Version + "  ·  Protocol " + GetMultiplayerProtocolLabel()
-                + "\nThe selected load will be checksummed, transferred, verified, and staged separately on the client.", 14, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.27f), new Vector2(0.92f, 0.42f));
-            var start = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Start", "HOST", StartMultiplayerCanvasHost, MultiplayerCanvasAccent);
-            SetMultiplayerCanvasRect(start.GetComponent<RectTransform>(), new Vector2(0.08f, 0.17f), new Vector2(0.34f, 0.26f), Vector2.zero, Vector2.zero);
-            CreateMultiplayerTransferProgressUi(0.04f, 0.14f);
+
+            CreateMultiplayerCanvasText(
+                multiplayerCanvasContent!.transform,
+                "Player Limit Label",
+                "PLAYER LIMIT",
+                14,
+                FontStyle.Normal,
+                TextAnchor.MiddleLeft,
+                MultiplayerCanvasMuted,
+                new Vector2(0.08f, 0.29f),
+                new Vector2(0.32f, 0.36f));
+            var playerLimit = CreateMultiplayerCanvasButton(
+                multiplayerCanvasContent.transform,
+                "Player Limit",
+                MultiplayerMenu.RequestedPlayerLimit.ToString(
+                    CultureInfo.InvariantCulture)
+                    + (MultiplayerMenu.RequestedPlayerLimit > 4
+                        ? "  EXPERIMENTAL"
+                        : " PLAYERS"),
+                CycleMultiplayerPlayerLimit,
+                MultiplayerMenu.RequestedPlayerLimit <= 4
+                    ? MultiplayerCanvasAccent
+                    : MultiplayerCanvasCard);
+            SetMultiplayerCanvasRect(
+                playerLimit.GetComponent<RectTransform>(),
+                new Vector2(0.34f, 0.29f),
+                new Vector2(0.66f, 0.36f),
+                Vector2.zero,
+                Vector2.zero);
+
+            CreateMultiplayerCanvasText(
+                multiplayerCanvasContent.transform,
+                "Preflight",
+                "Address: "
+                    + GetMultiplayerLanAddressSummary()
+                    + ":"
+                    + MultiplayerMenu.PortText
+                    + "  ·  "
+                    + GoingCooperativeConstants.Version
+                    + "  ·  "
+                    + GetMultiplayerProtocolLabel()
+                    + "\nJoining players receive a fresh checkpoint automatically. "
+                    + "The host only pauses briefly while that checkpoint is created.",
+                13,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                MultiplayerCanvasMuted,
+                new Vector2(0.08f, 0.2f),
+                new Vector2(0.92f, 0.28f));
+
+            var startButton = CreateMultiplayerCanvasButton(
+                multiplayerCanvasContent.transform,
+                "Start",
+                multiplayerMainMenuActive
+                    ? "HOST & LOAD"
+                    : "HOST CURRENT WORLD",
+                StartMultiplayerCanvasHost,
+                MultiplayerCanvasAccent);
+            SetMultiplayerCanvasRect(
+                startButton.GetComponent<RectTransform>(),
+                new Vector2(0.08f, 0.1f),
+                new Vector2(0.38f, 0.18f),
+                Vector2.zero,
+                Vector2.zero);
             CreateMultiplayerCanvasMessage();
+        }
+
+        private void CycleMultiplayerPlayerLimit()
+        {
+            MultiplayerMenu.RequestedPlayerLimit =
+                MultiplayerMenu.RequestedPlayerLimit <= 2
+                    ? 4
+                    : MultiplayerMenu.RequestedPlayerLimit <= 4
+                        ? 8
+                        : 2;
+            ShowMultiplayerCanvasPage(MultiplayerMenuPage.Host);
         }
 
         private void BuildMultiplayerCanvasJoinPage()
         {
             CreateMultiplayerCanvasHeading("Join Multiplayer Game", "Enter the host computer's reachable address.");
             multiplayerCanvasHostInput = CreateMultiplayerCanvasInput("Host address", MultiplayerMenu.HostAddress, 0.7f);
-            multiplayerCanvasPortInput = CreateMultiplayerCanvasInput("Port", MultiplayerMenu.PortText, 0.54f);
+            multiplayerCanvasNicknameInput = CreateMultiplayerCanvasInput("Nickname", MultiplayerMenu.Nickname, 0.6f);
+            multiplayerCanvasNicknameInput.characterLimit = MultiplayerNickname.MaxLength;
+            multiplayerCanvasPortInput = CreateMultiplayerCanvasInput("Port", MultiplayerMenu.PortText, 0.5f);
             if (replicationConfigDirectTransportSecurityV1)
             {
-                multiplayerCanvasSessionInput = CreateMultiplayerCanvasInput("Session code", MultiplayerMenu.DirectSessionCode, 0.44f);
+                multiplayerCanvasSessionInput = CreateMultiplayerCanvasInput("Session code", MultiplayerMenu.DirectSessionCode, 0.4f);
             }
             CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Compatibility", replicationConfigDirectTransportSecurityV1
                 ? "A matching protocol, plugin build, and session code must respond before the session becomes Connected."
-                : "A matching protocol and plugin build must respond before the session becomes Connected.", 14, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.29f), new Vector2(0.92f, 0.42f));
+                : "A matching protocol and plugin build must respond before the session becomes Connected.", 14, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.27f), new Vector2(0.92f, 0.37f));
             var connect = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Connect", "CONNECT", StartMultiplayerCanvasJoin, MultiplayerCanvasAccent);
-            SetMultiplayerCanvasRect(connect.GetComponent<RectTransform>(), new Vector2(0.08f, 0.17f), new Vector2(0.31f, 0.26f), Vector2.zero, Vector2.zero);
+            SetMultiplayerCanvasRect(connect.GetComponent<RectTransform>(), new Vector2(0.08f, 0.16f), new Vector2(0.31f, 0.25f), Vector2.zero, Vector2.zero);
             CreateMultiplayerCanvasMessage();
         }
 
         private void BuildMultiplayerCanvasStatusPage()
         {
-            CreateMultiplayerCanvasHeading("Session Status", "Live replication and compatibility state.");
-            var status = "Connection\nRole\nEndpoint\nProtocol\nPlugin\nHandshake";
-            CreateMultiplayerCanvasText(multiplayerCanvasContent!.transform, "Labels", status, 15, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasMuted, new Vector2(0.08f, 0.33f), new Vector2(0.3f, 0.72f));
-            multiplayerCanvasStatusValuesText = CreateMultiplayerCanvasText(multiplayerCanvasContent.transform, "Values", BuildMultiplayerCanvasStatusValues(), 15, FontStyle.Normal, TextAnchor.UpperLeft, MultiplayerCanvasText, new Vector2(0.31f, 0.33f), new Vector2(0.92f, 0.72f));
-            var disconnect = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Disconnect", "DISCONNECT", () => { StopMultiplayerSession(); ShowMultiplayerCanvasPage(MultiplayerMenuPage.Status); }, MultiplayerCanvasCard);
-            SetMultiplayerCanvasRect(disconnect.GetComponent<RectTransform>(), new Vector2(0.08f, 0.17f), new Vector2(0.31f, 0.26f), Vector2.zero, Vector2.zero);
-            var play = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Play", "PLAY", MarkMultiplayerReadyToPlay, MultiplayerCanvasAccent);
-            SetMultiplayerCanvasRect(play.GetComponent<RectTransform>(), new Vector2(0.34f, 0.17f), new Vector2(0.58f, 0.26f), Vector2.zero, Vector2.zero);
-            if (!replicationConfigHostMode)
+            CreateMultiplayerCanvasHeading(
+                "Session Status",
+                "The session stays live while this menu is closed. Players can join the running world.");
+
+            var status =
+                "Connection\nRole\nNickname\nEndpoint\nPlayers\nProtocol\nPlugin\nHandshake";
+            CreateMultiplayerCanvasText(
+                multiplayerCanvasContent!.transform,
+                "Labels",
+                status,
+                15,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                MultiplayerCanvasMuted,
+                new Vector2(0.08f, 0.48f),
+                new Vector2(0.3f, 0.77f));
+            multiplayerCanvasStatusValuesText =
+                CreateMultiplayerCanvasText(
+                    multiplayerCanvasContent.transform,
+                    "Values",
+                    BuildMultiplayerCanvasStatusValues(),
+                    15,
+                    FontStyle.Normal,
+                    TextAnchor.UpperLeft,
+                    MultiplayerCanvasText,
+                    new Vector2(0.31f, 0.48f),
+                    new Vector2(0.92f, 0.77f));
+
+            multiplayerCanvasRosterText = CreateMultiplayerCanvasText(
+                multiplayerCanvasContent.transform,
+                "Roster",
+                BuildMultiplayerCanvasRosterText(),
+                14,
+                FontStyle.Normal,
+                TextAnchor.UpperLeft,
+                MultiplayerCanvasText,
+                new Vector2(0.08f, 0.25f),
+                new Vector2(0.92f, 0.45f));
+
+            var disconnect = CreateMultiplayerCanvasButton(
+                multiplayerCanvasContent.transform,
+                "Disconnect",
+                replicationConfigHostMode
+                    ? "CLOSE SESSION"
+                    : "LEAVE SESSION",
+                () =>
+                {
+                    StopMultiplayerSession();
+                    ShowMultiplayerCanvasPage(MultiplayerMenuPage.Status);
+                },
+                MultiplayerCanvasCard);
+            SetMultiplayerCanvasRect(
+                disconnect.GetComponent<RectTransform>(),
+                new Vector2(0.08f, 0.13f),
+                new Vector2(0.31f, 0.21f),
+                Vector2.zero,
+                Vector2.zero);
+
+            if (!replicationConfigHostMode && replicationRuntimeStarted)
             {
-                var resync = CreateMultiplayerCanvasButton(multiplayerCanvasContent.transform, "Resync", "FULL RESYNC", RequestMultiplayerCanvasResync, MultiplayerCanvasAccent);
-                SetMultiplayerCanvasRect(resync.GetComponent<RectTransform>(), new Vector2(0.61f, 0.17f), new Vector2(0.87f, 0.26f), Vector2.zero, Vector2.zero);
+                var resync = CreateMultiplayerCanvasButton(
+                    multiplayerCanvasContent.transform,
+                    "Resync",
+                    "FULL RESYNC",
+                    RequestMultiplayerCanvasResync,
+                    MultiplayerCanvasAccent);
+                SetMultiplayerCanvasRect(
+                    resync.GetComponent<RectTransform>(),
+                    new Vector2(0.34f, 0.13f),
+                    new Vector2(0.58f, 0.21f),
+                    Vector2.zero,
+                    Vector2.zero);
             }
-            CreateMultiplayerTransferProgressUi(0.04f, 0.14f);
+
+            CreateMultiplayerTransferProgressUi(0.04f, 0.11f);
+        }
+
+        private string BuildMultiplayerCanvasRosterText()
+        {
+            var builder = new StringBuilder();
+            builder.Append("PLAYERS  ");
+            builder.Append(
+                GetReplicationVisibleConnectedPeerCount().ToString(
+                    CultureInfo.InvariantCulture));
+            builder.Append("/");
+            builder.Append(
+                multiplayerSaveTransfer.MaxPlayers.ToString(
+                    CultureInfo.InvariantCulture));
+            builder.AppendLine();
+
+            if (replicationConfigHostMode)
+            {
+                var peers = multiplayerSaveTransfer.GetPeerSnapshots();
+                for (var i = 0; i < peers.Count; i++)
+                {
+                    var peer = peers[i];
+                    AppendMultiplayerCanvasRosterRow(
+                        builder,
+                        peer.PeerId,
+                        peer.Nickname,
+                        peer.Phase,
+                        peer.Connected,
+                        peer.Playing);
+                    if (i + 1 < peers.Count)
+                    {
+                        builder.AppendLine();
+                    }
+                }
+
+                return builder.ToString();
+            }
+
+            if (ReplicationPeerStatuses.Count > 0)
+            {
+                var ids = new List<string>(
+                    ReplicationPeerStatuses.Keys);
+                ids.Sort(StringComparer.Ordinal);
+                for (var i = 0; i < ids.Count; i++)
+                {
+                    var peer = ReplicationPeerStatuses[ids[i]];
+                    AppendMultiplayerCanvasRosterRow(
+                        builder,
+                        peer.PeerId,
+                        peer.DisplayName,
+                        peer.Phase,
+                        peer.Connected,
+                        peer.Playing);
+                    if (i + 1 < ids.Count)
+                    {
+                        builder.AppendLine();
+                    }
+                }
+
+                return builder.ToString();
+            }
+
+            var fallback = multiplayerSaveTransfer.GetPeerSnapshots();
+            for (var i = 0; i < fallback.Count; i++)
+            {
+                var peer = fallback[i];
+                AppendMultiplayerCanvasRosterRow(
+                    builder,
+                    peer.PeerId,
+                    peer.Nickname,
+                    peer.Phase,
+                    peer.Connected,
+                    peer.Playing);
+                if (i + 1 < fallback.Count)
+                {
+                    builder.AppendLine();
+                }
+            }
+
+            if (fallback.Count == 0)
+            {
+                builder.Append("No active peer information yet.");
+            }
+
+            return builder.ToString();
+        }
+
+        private static void AppendMultiplayerCanvasRosterRow(
+            StringBuilder builder,
+            string peerId,
+            string nickname,
+            string phase,
+            bool connected,
+            bool playing)
+        {
+            builder.Append(playing ? "● " : connected ? "○ " : "× ");
+            builder.Append(MultiplayerNickname.Normalize(nickname));
+            builder.Append("  [");
+            builder.Append(peerId);
+            builder.Append("]  ");
+            builder.Append(phase);
         }
 
         private void BuildMultiplayerCanvasSettingsPage()
@@ -495,6 +805,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void StartMultiplayerCanvasHost()
         {
+            MultiplayerMenu.Nickname = MultiplayerNickname.Normalize(
+                multiplayerCanvasNicknameInput?.text ?? MultiplayerMenu.Nickname);
             if (replicationConfigDirectTransportSecurityV1) MultiplayerMenu.DirectSessionCode = multiplayerCanvasSessionInput?.text ?? MultiplayerMenu.DirectSessionCode;
             MultiplayerMenu.PortText = multiplayerCanvasPortInput?.text ?? MultiplayerMenu.PortText;
             TryStartMultiplayerHost(MultiplayerMenu.PortText, out var detail);
@@ -505,6 +817,8 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void StartMultiplayerCanvasJoin()
         {
+            MultiplayerMenu.Nickname = MultiplayerNickname.Normalize(
+                multiplayerCanvasNicknameInput?.text ?? MultiplayerMenu.Nickname);
             MultiplayerMenu.HostAddress = multiplayerCanvasHostInput?.text ?? MultiplayerMenu.HostAddress;
             MultiplayerMenu.PortText = multiplayerCanvasPortInput?.text ?? MultiplayerMenu.PortText;
             if (replicationConfigDirectTransportSecurityV1) MultiplayerMenu.DirectSessionCode = multiplayerCanvasSessionInput?.text ?? MultiplayerMenu.DirectSessionCode;
@@ -780,8 +1094,13 @@ namespace GoingCooperative.Plugin.BepInEx
             multiplayerResyncDetailText = null;
             multiplayerResyncProgressFill = null;
             multiplayerCanvasStatusValuesText = null;
+            multiplayerCanvasRosterText = null;
             multiplayerCanvasLauncherButton = null;
             multiplayerCanvasHudStatusText = null;
+            multiplayerCanvasHostInput = null;
+            multiplayerCanvasPortInput = null;
+            multiplayerCanvasSessionInput = null;
+            multiplayerCanvasNicknameInput = null;
             multiplayerEventPresentationPanel = null;
             multiplayerEventPresentationKey = string.Empty;
             multiplayerEventWarningPanel = null;
@@ -792,14 +1111,38 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private string BuildMultiplayerCanvasStatusValues()
         {
+            var connected = GetReplicationVisibleConnectedPeerCount();
+            var maximum = multiplayerSaveTransfer.MaxPlayers;
+            var handshake = replicationConfigHostMode
+                ? ReplicationCompatiblePeerIds.Count.ToString(
+                        CultureInfo.InvariantCulture)
+                    + " client"
+                    + (ReplicationCompatiblePeerIds.Count == 1 ? string.Empty : "s")
+                    + " verified"
+                : replicationRemoteHelloReceived
+                    ? "Host verified"
+                    : replicationRemoteCompatibilityRefused
+                        ? "Refused"
+                        : "Pending";
+
             return GetMultiplayerConnectionLabel() + "\n"
                 + (replicationConfigHostMode ? "Host" : "Client") + "\n"
-                + replicationConfigHost + ":" + replicationConfigPort.ToString(CultureInfo.InvariantCulture) + "\n"
+                + MultiplayerNickname.Normalize(MultiplayerMenu.Nickname) + "\n"
+                + replicationConfigHost
+                + ":"
+                + replicationConfigPort.ToString(
+                    CultureInfo.InvariantCulture)
+                + "\n"
+                + connected.ToString(CultureInfo.InvariantCulture)
+                + "/"
+                + maximum.ToString(CultureInfo.InvariantCulture)
+                + (maximum > MultiplayerPeerLimits.StableTargetPlayers
+                    ? " experimental"
+                    : " Direct")
+                + "\n"
                 + GetMultiplayerProtocolLabel() + "\n"
                 + GoingCooperativeConstants.Version + "\n"
-                + (replicationRemoteHelloReceived
-                    ? "Compatible peer verified"
-                    : replicationRemoteCompatibilityRefused ? "Refused" : "Pending");
+                + handshake;
         }
 
         private static string GetMultiplayerLanAddressSummary()

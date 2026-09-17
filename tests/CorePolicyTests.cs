@@ -34,6 +34,7 @@ internal static class CorePolicyTests
     public static int Main()
     {
         failures += DirectTransportSecurityTests.Run();
+        failures += MultiPeerUdpTransportTests.Run();
 
         Equal(true,
             MultiplayerActionRegistry.ClientIntentFingerprint.StartsWith(
@@ -80,6 +81,225 @@ internal static class CorePolicyTests
                 clientAction && hostAction,
                 "payload action registry has one owner " + field.Name);
         }
+
+        var roster = new MultiplayerPeerRoster(
+            "host",
+            "Host",
+            MultiplayerPeerLimits.StableTargetPlayers);
+        Equal(1, roster.Count, "peer roster starts with host");
+        Equal(4, roster.MaxPlayers, "stable peer target is four players");
+        Equal(true, roster.TryAddPeer("client-1", "Client 1", out _), "peer roster adds first client");
+        Equal(true, roster.TryAddPeer("client-2", "Client 2", out _), "peer roster adds second client");
+        Equal(true, roster.TryAddPeer("client-3", "Client 3", out _), "peer roster adds third client");
+        Equal(true, roster.IsFull, "four-player roster reaches capacity");
+        Equal(false, roster.TryAddPeer("client-4", "Client 4", out var fullError), "four-player roster rejects fifth player");
+        Equal("session-full", fullError, "peer roster reports full session");
+        Equal(false, roster.TryAddPeer("client-1", "Duplicate", out var duplicateError), "peer roster rejects duplicate id");
+        Equal("peer-id-already-present", duplicateError, "peer roster reports duplicate id");
+        Equal(true, roster.TrySetConnected("client-2", false), "peer roster tracks disconnect");
+        Equal(3, roster.ConnectedCount, "peer roster connected count excludes disconnected peer");
+        Equal(true, roster.RemovePeer("client-2"), "peer roster removes client");
+        Equal(false, roster.RemovePeer("host"), "peer roster never removes host");
+        Equal(8, MultiplayerPeerLimits.ExperimentalMaximumPlayers, "experimental peer ceiling is eight players");
+        Equal("client-1", MultiplayerPeerIds.Client(1), "first client peer id");
+        Equal("client-7", MultiplayerPeerIds.Client(7), "last experimental client peer id");
+        Equal(true, MultiplayerPeerIds.TryParseClientSlot("client-3", out var peerSlot), "client peer id parses");
+        Equal(3, peerSlot, "client peer id slot roundtrip");
+        Equal(false, MultiplayerPeerIds.TryParseClientSlot("client-8", out _), "peer id rejects slot above eight-player ceiling");
+        Equal(true, MultiplayerPeerIds.IsValid(MultiplayerPeerIds.Host), "host peer id valid");
+        Equal("Player", MultiplayerNickname.Normalize("   "), "blank nickname falls back");
+        Equal("Alice Bob", MultiplayerNickname.Normalize("  Alice   Bob  "), "nickname whitespace normalized");
+        Equal("AB", MultiplayerNickname.Normalize("A\u0001B"), "nickname control characters removed");
+        Equal(24, MultiplayerNickname.Normalize(new string('X', 40)).Length, "nickname length bounded");
+        Equal("Игрок 2", MultiplayerNickname.Normalize("Игрок 2"), "unicode nickname preserved");
+
+        var peerStatusEnvelope = ReplicationPeerStatusCodec.ForStatus(
+            MultiplayerPeerIds.Host,
+            new ReplicationPeerStatus(
+                "client-2",
+                "Игрок 2",
+                "Loading",
+                true,
+                false));
+        Equal(true,
+            ReplicationPeerStatusCodec.TryReadStatus(
+                peerStatusEnvelope,
+                out var peerStatus,
+                out _),
+            "peer status payload roundtrip parses");
+        Equal("client-2",
+            peerStatus == null ? string.Empty : peerStatus.PeerId,
+            "peer status id roundtrip");
+        Equal("Игрок 2",
+            peerStatus == null ? string.Empty : peerStatus.DisplayName,
+            "peer status nickname roundtrip");
+        Equal("Loading",
+            peerStatus == null ? string.Empty : peerStatus.Phase,
+            "peer status phase roundtrip");
+        Equal(true,
+            peerStatus != null && peerStatus.Connected,
+            "peer status connected roundtrip");
+        Equal(false,
+            peerStatus != null && peerStatus.Playing,
+            "peer status playing roundtrip");
+        var disconnectedPeerStatus = new ReplicationPeerStatus(
+            "client-3",
+            "Player 3",
+            "Left",
+            false,
+            true);
+        Equal(false,
+            disconnectedPeerStatus.Playing,
+            "disconnected peer status cannot remain playing");
+
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                false,
+                7L,
+                7L),
+            "peer work accepts exact live connection generation");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                false,
+                8L,
+                7L),
+            "peer work rejects stale reconnect generation");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsCurrentPeerWork(
+                true,
+                7L,
+                7L),
+            "peer work rejects closed connection");
+        Equal(false,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(1, 0),
+            "host world remains loading before native resume");
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(1, 1),
+            "host world becomes ready after matching native resume");
+        Equal(true,
+            MultiplayerLifecyclePolicy.IsHostWorldReady(0, 0),
+            "current-world hosting is ready without a native load");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                false,
+                5d,
+                1d),
+            "native load cannot finalize before completion callback");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                true,
+                0.5d,
+                1d),
+            "native load waits through the settle barrier");
+        Equal(true,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                true,
+                true,
+                1d,
+                1d),
+            "native load finalizes after settle barrier");
+        Equal(false,
+            MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                false,
+                true,
+                2d,
+                1d),
+            "inactive native load cannot finalize");
+
+        var hostSyncBarrier = new MultiplayerHostSyncBarrier();
+        Equal(true,
+            hostSyncBarrier.Enter("client-1", 11L),
+            "first syncing peer requests host pause");
+        Equal(false,
+            hostSyncBarrier.Enter("client-2", 21L),
+            "additional syncing peer reuses host pause");
+        Equal(2,
+            hostSyncBarrier.Count,
+            "host sync barrier tracks multiple peers");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 10L),
+            "stale generation cannot release host pause");
+        Equal(2,
+            hostSyncBarrier.Count,
+            "stale generation preserves host sync barrier");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 11L),
+            "non-final peer release keeps host paused");
+        Equal(1,
+            hostSyncBarrier.Count,
+            "one syncing peer remains after first completion");
+        Equal(true,
+            hostSyncBarrier.ExitCurrent("client-2"),
+            "final syncing peer release requests host resume");
+        Equal(0,
+            hostSyncBarrier.Count,
+            "host sync barrier empties after all peers complete");
+        Equal(true,
+            hostSyncBarrier.Enter("client-1", 31L),
+            "reused peer slot can enter a new sync generation");
+        Equal(false,
+            hostSyncBarrier.Enter("client-1", 32L),
+            "replacement generation keeps existing host pause");
+        Equal(false,
+            hostSyncBarrier.Exit("client-1", 31L),
+            "old generation cannot release replacement sync barrier");
+        Equal(1,
+            hostSyncBarrier.Count,
+            "replacement generation remains protected");
+        Equal(true,
+            hostSyncBarrier.Exit("client-1", 32L),
+            "current replacement generation may release host pause");
+
+        var projectilePayload = CombatProjectilePresentationPayloads.Create(
+            new CombatProjectilePresentationState(
+                17L,
+                "uid:attacker",
+                1.25d,
+                2.5d,
+                3.75d,
+                10d,
+                11d,
+                12d,
+                0.1d,
+                0.2d,
+                0.3d,
+                14.5d,
+                2.25d,
+                0.75d,
+                true,
+                true,
+                false,
+                true,
+                "ProjectileHitCreature"));
+        Equal(true,
+            CombatProjectilePresentationPayloads.TryRead(
+                projectilePayload,
+                out var projectileState,
+                out _),
+            "combat projectile payload roundtrip parses");
+        Equal(17L,
+            projectileState == null ? 0L : projectileState.Sequence,
+            "combat projectile sequence roundtrip");
+        Equal("uid:attacker",
+            projectileState == null ? string.Empty : projectileState.AttackerEntityId,
+            "combat projectile attacker roundtrip");
+        Equal(14.5d,
+            projectileState == null ? 0d : projectileState.Speed,
+            "combat projectile speed roundtrip");
+        Equal(true,
+            projectileState != null && projectileState.FireEffect,
+            "combat projectile fire effect roundtrip");
+        Equal(true,
+            projectileState != null && projectileState.PenaltyTrail,
+            "combat projectile penalty trail roundtrip");
+        Equal(false,
+            CombatProjectilePresentationPayloads.TryRead(
+                "combat-projectile-v1|0",
+                out _,
+                out _),
+            "combat projectile payload rejects malformed rows");
 
         var pause = LockstepCommandPayloads.CreatePausePayload(true);
         Equal(true, LockstepCommandPayloads.TryReadPausePayload(pause, out var paused), "pause payload runtime-safe parse");
@@ -322,6 +542,11 @@ internal static class CorePolicyTests
         Equal(false, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 1), "snapshot End before final row remains pending");
         Equal(true, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 2), "snapshot final row after End completes checkpoint");
         Equal(false, ReplicationOrderingPolicy.IsSnapshotComplete(true, 2, 3), "snapshot over-count does not falsely complete");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(10f, 11f), "building result older than removal is superseded");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11f, 11f), "building result at removal boundary is superseded");
+        Equal(true, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11.0005f, 11f), "building result inside ordering tolerance is superseded");
+        Equal(false, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(11.01f, 11f), "building result created after removal remains valid");
+        Equal(false, ReplicationOrderingPolicy.IsBuildSupersededByRemoval(-1f, 11f), "invalid building timestamp never becomes a removal tombstone match");
         Equal(false, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(1, 128), "build batch 1/128 partial commit is rejected");
         Equal(false, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(127, 128), "build batch 127/128 partial commit is rejected");
         Equal(true, ReplicationOrderingPolicy.ShouldAcceptBuildBatch(128, 128), "build batch 128/128 exact commits remain accepted after a post-commit throw");

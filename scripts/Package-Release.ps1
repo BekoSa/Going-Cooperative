@@ -108,6 +108,24 @@ function Assert-ReleaseConfig([string]$Path) {
             throw "Release config must disable $key."
         }
     }
+
+    $requiredPerfSettings = @{
+        "snapshotHz" = "10"
+        "worldObjectDeltaApplyBudgetPerFrame" = "8"
+        "worldObjectDeltaApplyBudgetMsPerFrame" = "2"
+        "runtimeMainThreadBudgetMsPerFrame" = "4"
+        "presentationApplyBudgetMsPerFrame" = "1.25"
+        "presentationApplyMaxEntitiesPerFrame" = "48"
+        "snapshotViewCacheSafetyRefreshSeconds" = "0"
+    }
+    foreach ($key in $requiredPerfSettings.Keys) {
+        if (-not $values.ContainsKey($key)) {
+            throw "Release config is missing performance key $key."
+        }
+        if ($values[$key] -ne $requiredPerfSettings[$key]) {
+            throw "Release config performance key $key must be $($requiredPerfSettings[$key]), got $($values[$key])."
+        }
+    }
 }
 
 function Get-VerifiedBepInExArchive {

@@ -29,22 +29,36 @@ else {
 $outputDirectory = Join-Path $repositoryRoot "artifacts\tests"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $output = Join-Path $outputDirectory "CorePolicyTests.exe"
+$legacyMonoSplitViolations = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src") -Recurse -Filter "*.cs" |
+    Select-String -Pattern "\.Split\(\s*'[^']+'\s*\)"
+if ($legacyMonoSplitViolations) {
+    $locations = ($legacyMonoSplitViolations | ForEach-Object { "$($_.Path):$($_.LineNumber)" }) -join ", "
+    throw "Runtime source uses String.Split(char), which can bind to an API missing from Going Medieval Mono: $locations"
+}
+
 $sources = @(
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\BuildingReplicationV2Policy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\CoordinateResolverPolicy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\CombatPresentationOrderingPolicy.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\CombatProjectilePresentationPayloads.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\ReplicationOrderingPolicy.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportContracts.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportEnvelopeCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\TransportChunkCodec.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DirectTransportSecurity.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\UdpNetworkTransport.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\DeterminismHash.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\LockstepCommandPayloads.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerActionRegistry.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\StoragePolicyContracts.cs"),
     (Join-Path $repositoryRoot "src\GoingCooperative.Core\MedicalReplicationPayloads.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerPeerRoster.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerHostSyncBarrier.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\MultiplayerLifecyclePolicy.cs"),
+    (Join-Path $repositoryRoot "src\GoingCooperative.Core\ReplicationPeerStatus.cs"),
     (Join-Path $repositoryRoot "tests\BuildingReplicationV2PolicyTests.cs"),
     (Join-Path $repositoryRoot "tests\DirectTransportSecurityTests.cs"),
+    (Join-Path $repositoryRoot "tests\MultiPeerUdpTransportTests.cs"),
     (Join-Path $repositoryRoot "tests\CorePolicyTests.cs")
 )
 
@@ -119,6 +133,21 @@ foreach ($diagnosticGate in @(
         throw "Release config must disable $diagnosticGate."
     }
 }
+$requiredPerfSettings = @{
+    "snapshothz" = "10"
+    "worldobjectdeltaapplybudgetperframe" = "8"
+    "worldobjectdeltaapplybudgetmsperframe" = "2"
+    "runtimemainthreadbudgetmsperframe" = "4"
+    "presentationapplybudgetmsperframe" = "1.25"
+    "presentationapplymaxentitiesperframe" = "48"
+    "snapshotviewcachesafetyrefreshseconds" = "0"
+}
+foreach ($key in $requiredPerfSettings.Keys) {
+    if ($settings[$key] -ne $requiredPerfSettings[$key]) {
+        throw "Release config performance key $key must be $($requiredPerfSettings[$key]), got $($settings[$key])."
+    }
+}
+
 foreach ($disabledGate in @(
     "eventschedulerauthority",
     "eventwarningreplication",
@@ -133,3 +162,9 @@ foreach ($disabledGate in @(
 }
 if ($settings.ContainsKey("mode") -or $settings.ContainsKey("host")) { throw "Release config must not hard-code a session role or host address." }
 Write-Host "PASS TestedConfigPolicy"
+
+& (Join-Path $PSScriptRoot "Test-PathingPerfDiagnosticsSource.ps1") -RepositoryRoot $repositoryRoot
+if ($LASTEXITCODE -ne 0) { throw "Replication perf source contract tests failed." }
+
+& (Join-Path $PSScriptRoot "Test-BuildingReplicationV2.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Building V2 source contract tests failed." }

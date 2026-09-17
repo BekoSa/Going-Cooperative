@@ -13,8 +13,13 @@ $paths = @{
     Runtime = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntime.cs"
     BuildBatch = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildBatch.cs"
     Capture = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.Building.cs"
+    CommandCapture = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.cs"
     Lifecycle = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationBuildingLifecycleV2.cs"
     WorldDeltas = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationWorldObjectDeltas.cs"
+    SaveTransfer = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveTransfer.cs"
+    SaveWorkflow = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Multiplayer\MultiplayerSaveWorkflow.cs"
+    RegionOrders = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationCommandCapture.RegionOrders.cs"
+    RuntimeActions = Join-Path $repositoryRoot "src\GoingCooperative.Plugin.BepInEx\Replication\ReplicationRuntimeCommandActions.cs"
 }
 
 $sources = @{}
@@ -50,10 +55,12 @@ Require-SourcePattern $sources.ConfigSource 'replicationConfigBuildingReplicatio
     "The runtime buildingReplicationV2 default is not enabled."
 Require-SourcePattern $sources.ConfigSource 'case\s+"buildingreplicationv2"\s*:.*?TryParseConfigBool\(.*?replicationConfigBuildingReplicationV2\s*=\s*buildingReplicationV2\s*;' `
     "The buildingReplicationV2 config key is not parsed into the runtime gate."
-foreach ($gate in @("beamPlacementReplication", "beamLifecycleReplication", "socketablePlacementReplication", "beamReplicationDiagnostics")) {
+foreach ($gate in @("beamPlacementReplication", "beamLifecycleReplication", "socketablePlacementReplication")) {
     Require-SourcePattern $sources.Config ('(?m)^\s*' + $gate + '\s*=\s*true\s*(?:[#;].*)?$') `
-        ("The release config does not enable the test gate " + $gate + ".")
+        ("The release config does not enable the functional gate " + $gate + ".")
 }
+Require-SourcePattern $sources.Config '(?m)^\s*beamReplicationDiagnostics\s*=\s*false\s*(?:[#;].*)?$' `
+    "The release config must keep beamReplicationDiagnostics disabled."
 Require-SourcePattern $sources.CorePolicy 'CurrentTransactionSchemaVersion\s*=\s*2\s*;' `
     "Tagged beam/socket placement did not bump the strict Building V2 schema."
 
@@ -91,6 +98,12 @@ Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprint
     "Authoritative client-command batch results are not rejected on client epoch mismatch."
 Require-SourcePattern $sources.BuildBatch 'BuildingTransactionApplyLedger.*?TryBeginReplicationBuildTransaction\(.*?\.Begin\(.*?GetReplicationBuildBatchEpoch\(.*?CommitReplicationBuildTransaction\(.*?\.Commit\(.*?AbortReplicationBuildTransaction\(.*?\.Abort\(' `
     "The BuildBatch apply path is not wired to the epoch-scoped exact-once ledger."
+Require-SourcePattern $sources.BuildBatch 'TryResolveReplicationBuildBatchNativeApi\(.*?replicationBuildBatchNativeApi.*?detail\s*=\s*"cached".*?AccessTools\.TypeByName.*?AccessTools\.Method' `
+    "BuildBatch native reflection metadata is not cached across remote chunks."
+Require-SourcePattern $sources.BuildBatch 'TryApplyReplicationBuildBatchAuthoritative\(.*?TryResolveReplicationBuildBatchNativeApi\(.*?nativeApi\.SpawnFromPool.*?nativeApi\.MouseUpSpawn' `
+    "BuildBatch apply still resolves native placement methods on every remote chunk."
+Require-SourcePattern $sources.BuildBatch 'MouseUpSpawnInitializeBuildings.*?ObjectPlacedOnMap.*?catch\s*\(TargetInvocationException\s+ex\).*?ex\.InnerException\s+is\s+NullReferenceException.*?resultCapture\.CommittedCount\s*==\s*committedBeforeFinalize.*?objectPlacedOnMap\.Invoke.*?directCommitted\s*!=\s*groupSpawned' `
+    "Remote BuildBatch has no fail-closed ObjectPlacedOnMap fallback when native drag finalization dereferences missing host raycast state."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchPlaced\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchPlacedCore\(.*?CommitReplicationBuildTransaction\(' `
     "Host-placement batch replay is not begin/apply/commit transactional."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchResult\(.*?TryBeginReplicationBuildTransaction\(.*?TryApplyReplicationBuildingBlueprintBatchResultCore\(.*?CommitReplicationBuildTransaction\(' `
@@ -99,8 +112,10 @@ Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprint
 # A host-local placement transaction must keep one semantic identity when its
 # reliable envelope is retried or reissued. Transport sequence is ACK identity
 # only and must never be used as the transaction-ledger key.
-Require-SourcePattern $sources.Capture 'EmitHostLocalReplicationBuildPlacements\(.*?long\s+transactionId\s*,\s*int\s+groupIndex.*?" transactionId="\s*\+\s*transactionId\.ToString.*?" group="\s*\+\s*groupIndex\.ToString' `
-    "Host-local BuildBatch emission does not serialize semantic transactionId/group identity."
+Require-SourcePattern $sources.Capture 'EmitHostLocalReplicationBuildPlacements\(.*?long\s+transactionId\s*,\s*int\s+groupIndex.*?semanticGroup\s*=\s*checked\(groupIndex\s*\*\s*1024\s*\+\s*chunkIndex\).*?semanticTransactionId:\s*transactionId.*?semanticGroup:\s*semanticGroup' `
+    "Host-local BuildBatch emission does not assign a chunk-unique semantic transaction/group identity."
+Require-SourcePattern $sources.WorldDeltas 'ReplicationBuildBatchCommitManifest\(.*?long\s+semanticTransactionId\s*=\s*-1L.*?int\s+semanticGroup\s*=\s*-1.*?" transactionId=".*?semanticTransactionId\.ToString.*?" group=".*?semanticGroup\.ToString' `
+    "BuildBatch commit manifests do not serialize semantic transactionId/group tokens into the reliable delta."
 Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchPlaced\(.*?"transactionId"\s*,\s*out\s+var\s+captureTransactionId.*?"group"\s*,\s*out\s+var\s+captureGroup.*?"host-placement:"\s*\+\s*captureTransactionId\.ToString.*?captureGroup\.ToString.*?TryBeginReplicationBuildTransaction\(transactionId' `
     "Host-placement replay is not keyed by its semantic transactionId/group."
 if ([regex]::IsMatch(
@@ -109,6 +124,83 @@ if ([regex]::IsMatch(
         [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
     $contractFailures.Add("Host-placement transaction identity regressed to transport delta.Sequence.")
 }
+
+# A targeted full resync advances the peer checkpoint epoch on the host and the
+# received epoch on the client. Building exact-once fences must read the shared
+# replication epoch rather than the host-global transfer epoch, which stays zero.
+Require-SourcePattern $sources.SaveTransfer 'public\s+int\s+ReplicationEpoch.*?if\s*\(!hostMode\).*?return\s+Math\.Max\(0,\s*epoch\).*?foreach\s*\(var\s+peer\s+in\s+hostPeers\.Values\).*?peer\.Epoch' `
+    "Multiplayer save transfer does not expose the peer checkpoint epoch to host building replication."
+Require-SourcePattern $sources.SaveTransfer 'lock\s*\(stateLock\).*?if\s*\(isResync\).*?peer\.Epoch\+\+.*?bundleEpoch\s*=\s*peer\.Epoch' `
+    "Targeted resync does not atomically publish the incremented peer epoch before sending the bundle."
+Require-SourcePattern $sources.BuildBatch 'GetReplicationBuildBatchEpoch\(\).*?multiplayerSaveTransfer\.ReplicationEpoch' `
+    "Building transaction fences still use the host-global transfer epoch and will diverge after resync."
+
+# Client-authored BuildBatch chunks are serialized by authoritative result, not
+# merely by the command ACK. A result is the durable per-item commit proof and is
+# the only event allowed to clear the preceding pending receipt.
+Require-SourcePattern $sources.CommandCapture 'SendReplicationLocalCommandIntent\(.*?IsReplicationBuildBatchCommand\(command\).*?!IsOldestPendingReplicationBuildBatch\(\s*command\.Sequence\).*?queued behind prior authoritative transaction' `
+    "Client BuildBatch admission does not park later chunks behind the oldest unresolved result."
+Require-SourcePattern $sources.CommandCapture 'SendPendingReplicationCommandIntentsIfDue\(\).*?if\s*\(buildBatch\s*&&\s*!IsOldestPendingReplicationBuildBatch\(\s*pending\.Command\.Sequence\)\).*?continue\s*;' `
+    "BuildBatch retry scheduling can release later chunks after CommandAck but before BuildBatchResult reconciliation."
+Require-SourcePattern $sources.CommandCapture 'IsOldestPendingReplicationBuildBatch\(.*?foreach\s*\(var\s+pair\s+in\s+ReplicationPendingCommandIntents\).*?if\s*\(!IsReplicationBuildBatchCommand\(candidate\.Command\)\).*?candidate\.Command\.Sequence\s*<\s*commandSequence' `
+    "BuildBatch ordering does not treat host-responded-but-unreconciled receipts as pending."
+if ([regex]::IsMatch(
+        $sources.CommandCapture,
+        'IsOldestPendingReplicationBuildBatch\(.*?candidate\.HostResponded',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("BuildBatch result pacing regressed to ignoring host-responded pending transactions.")
+}
+
+# Build command sequence is per-player, not global. Broadcast authoritative results
+# must update world state on every observer without touching another player's local
+# provisional view, pending receipt, or replay-failure quarantine.
+Require-SourcePattern $sources.CommandCapture 'CompleteReplicationBuildBatchPendingIntent\(.*?string\.Equals\(\s*playerId,\s*GetReplicationLocalPeerId\(\),\s*StringComparison\.Ordinal\).*?ReplicationPendingCommandIntents\.TryGetValue\(\s*commandKey.*?return\s+false\s*;' `
+    "BuildBatch pending receipts are not fail-closed to the exact local player lane."
+if ([regex]::IsMatch(
+        $sources.CommandCapture,
+        'CompleteReplicationBuildBatchPendingIntent\(.*?pair\.Value\.Command\.Sequence\s*==\s*commandSequence',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("BuildBatch pending receipt still has the unsafe sequence-only multi-peer fallback.")
+}
+Require-SourcePattern $sources.Capture 'BuildReplicationBuildBatchReplayFailureKey\(\s*string\s+playerId,\s*long\s+commandSequence,\s*int\s+itemIndex\).*?return\s+playerId.*?commandSequence.*?itemIndex' `
+    "BuildBatch replay-failure state is not scoped by playerId."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintBatchResultCore\(.*?localPlayerResult\s*=\s*string\.Equals\(\s*playerId,\s*GetReplicationLocalPeerId\(\).*?localPlayerResult\s*&&\s*TryGetReplicationProvisionalBuildView' `
+    "Broadcast BuildBatchResult can still resolve another player's command against the local provisional sequence lane."
+Require-SourcePattern $sources.WorldDeltas 'if\s*\(!localPlayerResult\).*?ClearReplicationBuildBatchReplayFailure\(\s*playerId,\s*commandSequence,\s*i\).*?resolved\+\+.*?continue\s*;' `
+    "Foreign rejected BuildBatch results can still mutate local provisional objects."
+Require-SourcePattern $sources.WorldDeltas 'receiptCleared\s*=\s*reconciled\s*&&\s*localPlayerResult\s*&&\s*CompleteReplicationBuildBatchPendingIntent' `
+    "Foreign BuildBatchResult can still clear a local pending receipt."
+Require-SourcePattern $sources.WorldDeltas 'ResendReplicationBuildBatchResult\(.*?pending\.Delta\.UniqueId\s*==\s*command\.Sequence.*?"player".*?pendingPlayerId.*?command\.PlayerId' `
+    "BuildBatch retry lookup can resend another player's same-sequence commit manifest."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintPlaced\(.*?IsReplicationClientOriginBuildingDelta\(delta\).*?TryGetReplicationProvisionalBuildView' `
+    "Legacy placed-result reconciliation can still consume another player's provisional sequence."
+Require-SourcePattern $sources.WorldDeltas 'TryApplyReplicationBuildingBlueprintRejected\(.*?"player".*?!string\.Equals\(\s*commandPlayerId,\s*GetReplicationLocalPeerId\(\).*?return\s+true\s*;' `
+    "Legacy rejected-result reconciliation can still remove another player's provisional object."
+
+# The Host page must not synchronously rescan the save catalog on Unity's UI thread.
+# Received-client checkpoints retain their explicit import path separately.
+Require-SourcePattern $sources.SaveWorkflow 'GetMultiplayerSaves\(\).*?GlobalSaveController\.Instance\.SavesList' `
+    "Host save picker no longer reads the existing native save catalog."
+if ([regex]::IsMatch(
+        $sources.SaveWorkflow,
+        'GetMultiplayerSaves\(\).*?SynchronizeWithFiles\(',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)) {
+    $contractFailures.Add("Host save picker performs synchronous SynchronizeWithFiles and can freeze the main-menu thread.")
+}
+
+# Host-local large drags are staged before the reliable map. Replay uses a
+# bounded ACK window: several small chunks may be in flight to remove RTT bubbles,
+# while the runtime pump still admits at most one new chunk per host frame.
+Require-SourcePattern $sources.Capture 'ReplicationPendingHostBuildReplayChunks.*?EmitHostLocalReplicationBuildPlacements\(.*?ReplicationPendingHostBuildReplayChunks\.Enqueue' `
+    "Host-local build chunks are still registered into the reliable map in one placement frame."
+Require-SourcePattern $sources.Capture 'ReplicationHostBuildReplayMaxInFlightChunks\s*=\s*4.*?ProcessPendingReplicationHostBuildReplayChunks\(\).*?IsReplicationBuildingDurableBackpressured\(out\s+var\s+durablePending\).*?if\s*\(durablePending\s*>=\s*ReplicationHostBuildReplayMaxInFlightChunks\).*?SendReplicationWorldObjectDelta' `
+    "Host-local build replay is not bounded by the ACK in-flight window before reliable admission."
+Require-SourcePattern $sources.Runtime 'UpdateReplicationBuildingLifecycleV2\(\);.*?ProcessPendingReplicationHostBuildReplayChunks\(\);.*?ShouldYieldReplicationMainThreadWork\(\)' `
+    "The host runtime does not pump staged build replay inside the shared frame budget."
+Require-SourcePattern $sources.Capture 'ShouldCaptureReplicationBuildTransaction\(\).*?replicationConfigHostMode.*?multiplayerLoadingInProgress.*?!replicationRuntimeStarted.*?!replicationRemoteHelloReceived.*?multiplayerHostSyncPauseApplied' `
+    "Host build capture is not suppressed during native loading or peer catch-up."
+Require-SourcePattern $sources.Runtime 'ResetReplicationPeerRuntimeState\(.*?ReleaseReplicationPeerWorldDeltaObligations\(.*?ClearPendingReplicationHostBuildReplayChunks\(\)' `
+    "A resync can retain pre-checkpoint host build replay chunks with stale epoch manifests."
 
 # V2 routine play must never enter the whole-scene BuildingState collector. The
 # legacy scan remains available only when both peers explicitly select rollback.
@@ -123,7 +215,7 @@ Require-SourcePattern $sources.Runtime 'UpdateReplicationBuildingLifecycleV2\(\)
     "The Building V2 lifecycle pump is not called from runtime Update."
 Require-SourcePattern $sources.Runtime 'ResetReplicationBuildTransactionLedger\(\)\s*;\s*ResetReplicationBuildingLifecycleV2\(\)' `
     "Building V2 transaction and lifecycle state are not reset together."
-Require-SourcePattern $sources.Capture 'TrackReplicationBuildingLifecycleV2\(placements\[i\],\s*"host-local-building-v2"\)' `
+Require-SourcePattern $sources.Capture 'TrackReplicationBuildingLifecycleV2\(\s*placements\[i\],\s*"host-local-building-v2"\s*\)' `
     "Host-local committed BuildBatch items do not enter lifecycle tracking."
 Require-SourcePattern $sources.WorldDeltas 'TrackReplicationBuildingLifecycleV2\(committed!,\s*"client-command-building-v2"\)' `
     "Client-command committed BuildBatch items do not enter lifecycle tracking."
@@ -177,6 +269,51 @@ if ($sources.Lifecycle.Contains('TryApplyReplicationBuildingState(delta')) {
     $contractFailures.Add("Building V2 still falls through to the broad legacy BuildingState apply path.")
 }
 
+# Host-local area Cancel/Deconstruct must lead with one semantic region replay.
+# Reliable terminal rows remain as a delayed fallback if that transient state is lost.
+Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionActionPrefix\(.*?replicationHostLocalSemanticRegionArmed\s*=\s*false.*?TryResolveReplicationSelectionRegion\(.*?replicationHostLocalSemanticRegionArmed\s*=\s*true.*?replicationHostLocalSemanticRegionStartX\s*=\s*startX.*?replicationHostLocalSemanticRegionEndZ\s*=\s*endZ' `
+    "Host-local Cancel/Deconstruct does not bind semantic replay to the exact successfully resolved drag."
+Require-SourcePattern $sources.RegionOrders 'ReplicationRegionSelectionEventPostfix\(.*?applyingRuntimeCommandDepth\s*<=\s*0.*?replicationHostLocalSemanticRegionArmed.*?replicationHostLocalSemanticRegionFrame\s*==\s*Time\.frameCount.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(.*?replicationHostLocalSemanticRegionStartX.*?replicationHostLocalSemanticRegionEndZ' `
+    "Host-local Cancel/Deconstruct does not publish its exact semantic region replay after native completion."
+Require-SourcePattern $sources.Runtime 'SendReplicationRegionOrderStateIfSupported\(.*?IsReplicationMassBuildingRegionOrder\(orderType\).*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?SendReplicationRegionOrderState\(' `
+    "Client-originated Cancel/Deconstruct does not pace durable terminals behind the canonical region state."
+Require-SourcePattern $sources.Runtime 'HandleReplicationRegionOrderState\(.*?IsReplicationMassBuildingRegionOrder\(state\.OrderType\).*?ScheduleReplicationClientMassBuildingRegionReplay\(.*?return\s*;' `
+    "Client authoritative Cancel/Deconstruct can still invoke one giant SelectionManager region action synchronously."
+Require-SourcePattern $sources.RegionOrders 'ReplicationClientMassBuildingRegionBaseTileSpan\s*=\s*6.*?ScheduleReplicationClientMassBuildingRegionReplay\(.*?ReplicationPendingClientMassBuildingRegionTiles\.Enqueue' `
+    "Client mass-building region replay is not split into bounded initial tiles."
+Require-SourcePattern $sources.RegionOrders 'ProcessPendingReplicationClientMassBuildingRegionReplay\(.*?TryInvokeSelectionManagerRegionAction\(.*?TrySplitReplicationClientMassBuildingRegionTile\(.*?FailedLeafTiles\+\+' `
+    "Client mass-building region replay does not split failed native tiles down to a lifecycle safety-net leaf."
+Require-SourcePattern $sources.Runtime 'ProcessPendingReplicationClientMassBuildingRegionReplay\(\);.*?ShouldYieldReplicationMainThreadWork\(\).*?UpdateReplicationBuildingLifecycleV2\(\).*?ProcessPendingReplicationWorldObjectDeltaApplies\(\)' `
+    "Client tiled Cancel/Deconstruct replay is not frame-budgeted ahead of terminal world-delta application."
+Require-SourcePattern $sources.Runtime 'replicationRegionOrderStateCaptureSuppressionDepth\s*=\s*0\s*;.*?ResetReplicationClientMassBuildingRegionReplay\(\)' `
+    "Client mass-building replay queue is not cleared across replication runtime reset/resync."
+Require-SourcePattern $sources.RegionOrders 'replicationRegionSelectionActionDepth.*?ReplicationRegionResourceSurfacePostfix\(.*?replicationRegionSelectionActionFrame\s*==\s*Time\.frameCount.*?return\s*;' `
+    "Cancel/Deconstruct side-effect resource callbacks can still emit a duplicate region command."
+Require-SourcePattern $sources.RegionOrders 'ZoneSelectionFinished.*?orderType.*?None.*?replicationLastRegionOrderType.*?Cancel.*?Deconstruct.*?return\s+true\s*;' `
+    "Cancel/Deconstruct can still emit a second orderType=None ZoneSelectionFinished command."
+Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingSemanticRegionTerminalGraceSecondsV2\s*=\s*1\.25f.*?MarkReplicationBuildingSemanticRegionReplayV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2' `
+    "Building terminals do not give tiled semantic area replay enough bounded head start."
+Require-SourcePattern $sources.Lifecycle 'ProcessPendingReplicationBuildingTerminalsV2\(\).*?replicationBuildingSemanticRegionTerminalGraceUntilRealtimeV2.*?return\s*;' `
+    "Reliable terminal replay can race the semantic area operation in the same frame."
+Require-SourcePattern $sources.Lifecycle 'ReplicationBuildingTerminalMaxInFlightV2\s*=\s*16.*?CountReplicationBuildingTerminalInFlightV2\(\).*?IsReplicationBuildingRemovedLifecycleDelta.*?inFlight\s*>=\s*ReplicationBuildingTerminalMaxInFlightV2' `
+    "Mass building terminal safety-net is not bounded by ACK progress."
+Require-SourcePattern $sources.Lifecycle 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?state.*?removed.*?TryMapReplicationLocalBuildingByNativeUniqueIdV2.*?native-id-not-found.*?RemoveReplicationHostIdentity' `
+    "Already-removed semantic region terminals do not have a native-ID fast path."
+Require-SourcePattern $sources.Lifecycle 'TryApplyReplicationBuildingAbsentTerminalV2\(.*?EvaluateLiveDelta\(.*?CommitLiveDelta\(.*?ReplicationClientBuildingTerminalRevisionV2.*?RemoveReplicationClientBuildingPresentationV2' `
+    "Already-removed building terminals do not have a ledger-only apply path."
+Require-SourcePattern $sources.WorldDeltas 'IsReplicationBuildingLifecycleTerminalAlreadyAbsentV2\(.*?TryApplyReplicationBuildingAbsentTerminalV2\(.*?replicationBuildingLifecycleFastTerminalAcksV2\+\+.*?SendReplicationWorldObjectDeltaAck\(' `
+    "Already-removed building terminals still re-enter the heavy native lifecycle apply path."
+Require-SourcePattern $sources.Lifecycle 'ReplicationTrackedHostBuildingsByInstanceV2.*?ReferenceObjectComparer\.Instance' `
+    "Host lifecycle hooks do not maintain an O(1) building-instance tracker cache."
+Require-SourcePattern $sources.Lifecycle 'TryEnsureReplicationHostBuildingTrackerV2\(.*?ReplicationTrackedHostBuildingsByInstanceV2\.TryGetValue' `
+    "Mass removal still starts every lifecycle callback with full building identity reflection."
+Require-SourcePattern $sources.Lifecycle 'replicationDestroyBuildingMethodV2.*?DestroyBuilding\(skipStabilityCheck=true,cachedMethod=true\)' `
+    "Client terminal replay re-enumerates BuildingsManagerMain methods per removed cell."
+Require-SourcePattern $sources.RuntimeActions 'TryInvokeSelectionManagerRegionAction\(.*?actionMs=' `
+    "Native region-action duration is not observable in the next performance logs."
+Require-SourcePattern $sources.RegionOrders '\[MP/REGION\]\s+local native area action.*?actionMs=' `
+    "Local host/client native Cancel/Deconstruct duration is not observable in the next performance logs."
+
 # Rapid lifecycle changes must bypass the generic 500 ms duplicate filter. Reliable
 # lifecycle rows get the extended bounded retry budget; selected progress is visual,
 # on-demand, and transient so it cannot build a resend backlog.
@@ -186,7 +323,7 @@ Require-SourcePattern $sources.WorldDeltas 'ReplicationBuildBatchWorldObjectDelt
     "The reliable building V2 retry budget is not 20 sends."
 Require-SourcePattern $sources.WorldDeltas 'ShouldDropReplicationWorldObjectDeltaAfterRetries\(.*?ReplicationBuildingLifecycleV2DeltaKind.*?ReplicationBuildBatchWorldObjectDeltaMaxSends' `
     "Building lifecycle rows do not use the extended 20-send reliability budget."
-Require-SourcePattern $sources.WorldDeltas 'SendReplicationWorldObjectDelta\(.*?ReplicationBuildingLifecycleV2DeltaKind.*?ReplicationBuildingRepairV2DeltaKind.*?SupersedePendingReplicationBuildingLifecycleDeltas\(delta\)' `
+Require-SourcePattern $sources.WorldDeltas 'private\s+bool\s+SendReplicationWorldObjectDelta\(\s*ReplicationWorldObjectDelta\s+delta\s*\).*?if\s*\(!transient\).*?ReplicationBuildingLifecycleV2DeltaKind.*?ReplicationBuildingRepairV2DeltaKind.*?SupersedePendingReplicationBuildingLifecycleDeltas\(\s*delta\s*\).*?replicationPendingWorldObjectDeltas\[delta\.Sequence\]' `
     "Reliable lifecycle/repair rows are not superseded before entering the pending map."
 Require-SourcePattern $sources.WorldDeltas 'FormatReplicationPendingBuildingLifecycleSupersessionKey\(.*?ReplicationBuildingLifecycleV2DeltaKind.*?ReplicationBuildingRepairV2DeltaKind.*?"\|epoch=".*?"\|uid="' `
     "Lifecycle/repair supersession is not fenced by delta kind, epoch, and building identity."

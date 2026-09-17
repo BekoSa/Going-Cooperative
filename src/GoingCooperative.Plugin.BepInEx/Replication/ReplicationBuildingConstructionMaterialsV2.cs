@@ -345,7 +345,9 @@ namespace GoingCooperative.Plugin.BepInEx
                 return true;
             }
 
-            var owner = state.OwnerId.Split(':');
+            var owner = state.OwnerId.Split(
+                new[] { ':' },
+                StringSplitOptions.None);
             if (owner.Length != 2
                 || !long.TryParse(
                     owner[0],

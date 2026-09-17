@@ -61,6 +61,10 @@ $sources = @(
 $outputDirectory = Join-Path $repositoryRoot "artifacts\bin\$Configuration"
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
 $output = Join-Path $outputDirectory "GoingCooperative.dll"
+$configSource = Join-Path $repositoryRoot "config\replication.cfg"
+if (-not (Test-Path -LiteralPath $configSource -PathType Leaf)) {
+    throw "Tracked replication config is missing: $configSource"
+}
 $arguments = @(
     "-noconfig",
     "-nostdlib+",
@@ -83,4 +87,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Going Cooperative compilation failed with exit code $LASTEXITCODE."
 }
 
+$configOutput = Join-Path $outputDirectory "replication.cfg"
+Copy-Item -LiteralPath $configSource -Destination $configOutput -Force
+
 Write-Host "Built $output"
+Write-Host "Copied $configOutput"

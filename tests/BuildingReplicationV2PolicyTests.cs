@@ -14,6 +14,7 @@ internal static class BuildingReplicationV2PolicyTests
         RecoveryAndLiveDeliveryOrdersConverge();
         CapabilitySelectionFailsClosed();
         CapabilityWireTokenRoundTripsStrictly();
+        RegionReplayStartsWithSingleNativeAttempt();
 
         Console.WriteLine(failures == 0
             ? "PASS BuildingReplicationV2PolicyTests"
@@ -204,6 +205,22 @@ internal static class BuildingReplicationV2PolicyTests
         Equal(false, BuildingReplicationCapability.TryParseWireToken("building-replication-v2:2:1:yes:1", out _), "noncanonical rollback bit is rejected");
         Equal(false, BuildingReplicationCapability.TryParseWireToken("building-replication-v2:2:1:1:yes", out _), "noncanonical construction-material bit is rejected");
         Equal(false, BuildingReplicationCapability.TryParseWireToken("building-replication-v1:2:1:1:1", out _), "old capability prefix is rejected");
+    }
+
+    private static void RegionReplayStartsWithSingleNativeAttempt()
+    {
+        Equal(true,
+            ReplicationOrderingPolicy.ShouldStartRegionReplayWithSingleNativeAction("Cancel"),
+            "cancel starts with one whole-region native replay");
+        Equal(true,
+            ReplicationOrderingPolicy.ShouldStartRegionReplayWithSingleNativeAction("Deconstruct"),
+            "deconstruct starts with one whole-region native replay");
+        Equal(true,
+            ReplicationOrderingPolicy.ShouldStartRegionReplayWithSingleNativeAction("Chopping"),
+            "chopping starts with one whole-region native replay");
+        Equal(false,
+            ReplicationOrderingPolicy.ShouldStartRegionReplayWithSingleNativeAction("AllowForbid"),
+            "unrelated region order does not enter the deferred replay lane");
     }
 
     private static void Equal<T>(T expected, T actual, string name)

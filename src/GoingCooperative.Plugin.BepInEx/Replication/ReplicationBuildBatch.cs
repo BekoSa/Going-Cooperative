@@ -19,6 +19,7 @@ namespace GoingCooperative.Plugin.BepInEx
         private const string ReplicationBuildingBlueprintBatchPlacedDeltaKind = "BuildingBlueprintBatchPlaced";
         private const string ReplicationBuildingBlueprintBatchResultDeltaKind = "BuildingBlueprintBatchResult";
         private static bool replicationBuildBatchReplayDisabled;
+        private static ReplicationBuildBatchNativeApi? replicationBuildBatchNativeApi;
         private static BuildingTransactionApplyLedger replicationBuildingTransactionApplyLedger =
             new BuildingTransactionApplyLedger(65536);
 
@@ -27,7 +28,7 @@ namespace GoingCooperative.Plugin.BepInEx
             var current = instance;
             return ReferenceEquals(current, null)
                 ? 0L
-                : Math.Max(0, current.multiplayerSaveTransfer.Epoch);
+                : Math.Max(0, current.multiplayerSaveTransfer.ReplicationEpoch);
         }
 
         private static void ResetReplicationBuildTransactionLedger()
@@ -447,6 +448,128 @@ namespace GoingCooperative.Plugin.BepInEx
                 && number <= 1048576;
         }
 
+        private static bool TryResolveReplicationBuildBatchNativeApi(
+            out ReplicationBuildBatchNativeApi api,
+            out string detail)
+        {
+            if (replicationBuildBatchNativeApi != null)
+            {
+                api = replicationBuildBatchNativeApi;
+                detail = "cached";
+                return true;
+            }
+
+            var placementManagerType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BuildingPlacementManager");
+            var buildingsPoolType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BuildingsPool");
+            var blueprintType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BaseBuildingBlueprint");
+            var factionOwnershipType = AccessTools.TypeByName(
+                "NSMedieval.Village.FactionOwnership");
+            var vec3IntType = AccessTools.TypeByName("NSMedieval.Vec3Int");
+            var baseBuildingInstanceType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BaseBuildingInstance");
+            var baseBuildingViewComponentType = AccessTools.TypeByName(
+                "NSMedieval.BuildingComponents.BaseBuildingViewComponent");
+            if (placementManagerType == null
+                || buildingsPoolType == null
+                || blueprintType == null
+                || factionOwnershipType == null
+                || vec3IntType == null
+                || baseBuildingInstanceType == null
+                || baseBuildingViewComponentType == null)
+            {
+                api = null!;
+                detail = "build-batch-required-type-missing";
+                return false;
+            }
+
+            var getBuildableBase = AccessTools.Method(
+                buildingsPoolType,
+                "GetBuildableBase",
+                new[] { typeof(string) });
+            var spawnFromPool = AccessTools.Method(
+                placementManagerType,
+                "SpawnFromPool",
+                new[] { blueprintType, vec3IntType, typeof(int), factionOwnershipType });
+            var mouseUpSpawn = AccessTools.Method(
+                placementManagerType,
+                "MouseUpSpawnInitializeBuildings",
+                new[] { typeof(int) });
+            var objectPlacedOnMap = AccessTools.Method(
+                placementManagerType,
+                "ObjectPlacedOnMap",
+                new[] { baseBuildingViewComponentType });
+            var spawnRoofAutoTesting = AccessTools.Method(
+                placementManagerType,
+                "SpawnRoofAutoTesting",
+                new[]
+                {
+                    blueprintType,
+                    vec3IntType,
+                    typeof(int),
+                    vec3IntType,
+                    typeof(List<>).MakeGenericType(vec3IntType)
+                });
+            var spawnBeamAxisX = AccessTools.Method(
+                placementManagerType,
+                "SpawnBeamAxisX",
+                new[] { blueprintType, typeof(object), typeof(object), baseBuildingInstanceType });
+            var spawnBeamAxisZ = AccessTools.Method(
+                placementManagerType,
+                "SpawnBeamAxisZ",
+                new[] { blueprintType, typeof(object), typeof(object), baseBuildingInstanceType });
+            var objectSideType = AccessTools.TypeByName("NSMedieval.Construction.ObjectSide");
+            var tryPlaceSocketable = objectSideType == null
+                ? null
+                : AccessTools.Method(
+                    placementManagerType,
+                    "TryPlaceSocketable",
+                    new[] { vec3IntType, vec3IntType, objectSideType, typeof(int) });
+            if (getBuildableBase == null
+                || spawnFromPool == null
+                || mouseUpSpawn == null
+                || objectPlacedOnMap == null
+                || spawnRoofAutoTesting == null)
+            {
+                api = null!;
+                detail = "build-batch-required-method-missing get="
+                    + (getBuildableBase != null)
+                    + " spawn="
+                    + (spawnFromPool != null)
+                    + " finalize="
+                    + (mouseUpSpawn != null)
+                    + " objectPlaced="
+                    + (objectPlacedOnMap != null)
+                    + " roof="
+                    + (spawnRoofAutoTesting != null);
+                return false;
+            }
+
+            api = new ReplicationBuildBatchNativeApi
+            {
+                PlacementManagerType = placementManagerType,
+                BuildingsPoolType = buildingsPoolType,
+                BlueprintType = blueprintType,
+                FactionOwnershipType = factionOwnershipType,
+                Vec3IntType = vec3IntType,
+                BaseBuildingInstanceType = baseBuildingInstanceType,
+                ObjectSideType = objectSideType,
+                GetBuildableBase = getBuildableBase,
+                SpawnFromPool = spawnFromPool,
+                MouseUpSpawn = mouseUpSpawn,
+                ObjectPlacedOnMap = objectPlacedOnMap,
+                SpawnRoofAutoTesting = spawnRoofAutoTesting,
+                SpawnBeamAxisX = spawnBeamAxisX,
+                SpawnBeamAxisZ = spawnBeamAxisZ,
+                TryPlaceSocketable = tryPlaceSocketable
+            };
+            replicationBuildBatchNativeApi = api;
+            detail = "resolved";
+            return true;
+        }
+
         private static bool TryApplyReplicationBuildBatchAuthoritative(
             string blueprintId,
             string factionOwnership,
@@ -469,78 +592,38 @@ namespace GoingCooperative.Plugin.BepInEx
 
             try
             {
-                var placementManagerType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BuildingPlacementManager");
-                var buildingsPoolType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BuildingsPool");
-                var blueprintType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BaseBuildingBlueprint");
-                var factionOwnershipType = AccessTools.TypeByName("NSMedieval.Village.FactionOwnership");
-                var vec3IntType = AccessTools.TypeByName("NSMedieval.Vec3Int");
-                var baseBuildingInstanceType = AccessTools.TypeByName("NSMedieval.BuildingComponents.BaseBuildingInstance");
-                if (placementManagerType == null
-                    || buildingsPoolType == null
-                    || blueprintType == null
-                    || factionOwnershipType == null
-                    || vec3IntType == null
-                    || baseBuildingInstanceType == null)
+                if (!TryResolveReplicationBuildBatchNativeApi(
+                        out var nativeApi,
+                        out var nativeApiDetail))
                 {
-                    detail = "build-batch-required-type-missing";
+                    detail = nativeApiDetail;
                     return false;
                 }
 
-                var placementManager = buildingPlacementManagerInstance ?? ResolveReplicationUnityManagerInstance(placementManagerType);
-                var buildingsPool = buildingsPoolInstance ?? ResolveReplicationUnityManagerInstance(buildingsPoolType);
+                var placementManagerType = nativeApi.PlacementManagerType;
+                var buildingsPoolType = nativeApi.BuildingsPoolType;
+                var blueprintType = nativeApi.BlueprintType;
+                var factionOwnershipType = nativeApi.FactionOwnershipType;
+                var vec3IntType = nativeApi.Vec3IntType;
+                var placementManager = buildingPlacementManagerInstance
+                    ?? ResolveReplicationUnityManagerInstance(placementManagerType);
+                var buildingsPool = buildingsPoolInstance
+                    ?? ResolveReplicationUnityManagerInstance(buildingsPoolType);
                 if (placementManager == null || buildingsPool == null)
                 {
                     detail = "build-batch-manager-missing";
                     return false;
                 }
 
-                var getBuildableBase = AccessTools.Method(buildingsPoolType, "GetBuildableBase", new[] { typeof(string) });
-                var spawnFromPool = AccessTools.Method(
-                    placementManagerType,
-                    "SpawnFromPool",
-                    new[] { blueprintType, vec3IntType, typeof(int), factionOwnershipType });
-                var mouseUpSpawn = AccessTools.Method(
-                    placementManagerType,
-                    "MouseUpSpawnInitializeBuildings",
-                    new[] { typeof(int) });
-                var spawnRoofAutoTesting = AccessTools.Method(
-                    placementManagerType,
-                    "SpawnRoofAutoTesting",
-                    new[]
-                    {
-                        blueprintType,
-                        vec3IntType,
-                        typeof(int),
-                        vec3IntType,
-                        typeof(List<>).MakeGenericType(vec3IntType)
-                    });
-                var spawnBeamAxisX = AccessTools.Method(
-                    placementManagerType,
-                    "SpawnBeamAxisX",
-                    new[] { blueprintType, typeof(object), typeof(object), baseBuildingInstanceType });
-                var spawnBeamAxisZ = AccessTools.Method(
-                    placementManagerType,
-                    "SpawnBeamAxisZ",
-                    new[] { blueprintType, typeof(object), typeof(object), baseBuildingInstanceType });
-                var objectSideType = AccessTools.TypeByName("NSMedieval.Construction.ObjectSide");
-                var tryPlaceSocketable = objectSideType == null
-                    ? null
-                    : AccessTools.Method(
-                        placementManagerType,
-                        "TryPlaceSocketable",
-                        new[] { vec3IntType, vec3IntType, objectSideType, typeof(int) });
-                if (getBuildableBase == null || spawnFromPool == null || mouseUpSpawn == null || spawnRoofAutoTesting == null)
-                {
-                    detail = "build-batch-required-method-missing get="
-                        + (getBuildableBase != null)
-                        + " spawn="
-                        + (spawnFromPool != null)
-                        + " finalize="
-                        + (mouseUpSpawn != null)
-                        + " roof="
-                        + (spawnRoofAutoTesting != null);
-                    return false;
-                }
+                var getBuildableBase = nativeApi.GetBuildableBase;
+                var spawnFromPool = nativeApi.SpawnFromPool;
+                var mouseUpSpawn = nativeApi.MouseUpSpawn;
+                var objectPlacedOnMap = nativeApi.ObjectPlacedOnMap;
+                var spawnRoofAutoTesting = nativeApi.SpawnRoofAutoTesting;
+                var spawnBeamAxisX = nativeApi.SpawnBeamAxisX;
+                var spawnBeamAxisZ = nativeApi.SpawnBeamAxisZ;
+                var objectSideType = nativeApi.ObjectSideType;
+                var tryPlaceSocketable = nativeApi.TryPlaceSocketable;
 
                 var blueprint = getBuildableBase.Invoke(buildingsPool, new object[] { blueprintId });
                 if (blueprint == null)
@@ -645,6 +728,7 @@ namespace GoingCooperative.Plugin.BepInEx
                         state.Set("raycastGridPrevious", firstPosition);
 
                         var groupSpawned = 0;
+                        var groupSpawnedViews = new List<object>();
                         for (var i = 0; i < group.Count; i++)
                         {
                             var itemIndex = group[i];
@@ -664,13 +748,63 @@ namespace GoingCooperative.Plugin.BepInEx
                             }
 
                             resultCapture.TrackSpawnedView(itemIndex, view);
+                            groupSpawnedViews.Add(view);
                             groupSpawned++;
                         }
 
                         if (groupSpawned > 0)
                         {
                             state.Set("raycastGridCurrent", lastPosition);
-                            mouseUpSpawn.Invoke(placementManager, new object[] { angleY });
+                            var committedBeforeFinalize = resultCapture.CommittedCount;
+                            try
+                            {
+                                mouseUpSpawn.Invoke(
+                                    placementManager,
+                                    new object[] { angleY });
+                            }
+                            catch (TargetInvocationException ex)
+                                when (ex.InnerException is NullReferenceException
+                                    && resultCapture.CommittedCount == committedBeforeFinalize)
+                            {
+                                // MouseUpSpawnInitializeBuildings depends on live drag/
+                                // raycast state owned by the host cursor. Remote batches
+                                // can legitimately have no such hit and some native
+                                // branches dereference it before calling ObjectPlacedOnMap.
+                                // Fall back only when nothing committed yet, and require
+                                // every exact spawned view to pass through the native
+                                // ObjectPlacedOnMap commit hook before accepting the group.
+                                for (var viewIndex = 0;
+                                     viewIndex < groupSpawnedViews.Count;
+                                     viewIndex++)
+                                {
+                                    objectPlacedOnMap.Invoke(
+                                        placementManager,
+                                        new[] { groupSpawnedViews[viewIndex] });
+                                }
+
+                                var directCommitted =
+                                    resultCapture.CommittedCount
+                                    - committedBeforeFinalize;
+                                if (directCommitted != groupSpawned)
+                                {
+                                    throw new InvalidOperationException(
+                                        "build-batch-direct-finalize-incomplete committed="
+                                            + directCommitted.ToString(CultureInfo.InvariantCulture)
+                                            + "/"
+                                            + groupSpawned.ToString(CultureInfo.InvariantCulture),
+                                        ex);
+                                }
+
+                                instance?.LogReplicationWarning(
+                                    "Going Cooperative BuildBatch native drag finalize NRE recovered via ObjectPlacedOnMap"
+                                        + " blueprintId="
+                                        + blueprintId
+                                        + " angleY="
+                                        + angleY.ToString(CultureInfo.InvariantCulture)
+                                        + " count="
+                                        + groupSpawned.ToString(CultureInfo.InvariantCulture));
+                            }
+
                             placed += groupSpawned;
                         }
                     }
@@ -1101,6 +1235,25 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 return false;
             }
+        }
+
+        private sealed class ReplicationBuildBatchNativeApi
+        {
+            public Type PlacementManagerType { get; set; } = null!;
+            public Type BuildingsPoolType { get; set; } = null!;
+            public Type BlueprintType { get; set; } = null!;
+            public Type FactionOwnershipType { get; set; } = null!;
+            public Type Vec3IntType { get; set; } = null!;
+            public Type BaseBuildingInstanceType { get; set; } = null!;
+            public Type? ObjectSideType { get; set; }
+            public MethodInfo GetBuildableBase { get; set; } = null!;
+            public MethodInfo SpawnFromPool { get; set; } = null!;
+            public MethodInfo MouseUpSpawn { get; set; } = null!;
+            public MethodInfo ObjectPlacedOnMap { get; set; } = null!;
+            public MethodInfo SpawnRoofAutoTesting { get; set; } = null!;
+            public MethodInfo? SpawnBeamAxisX { get; set; }
+            public MethodInfo? SpawnBeamAxisZ { get; set; }
+            public MethodInfo? TryPlaceSocketable { get; set; }
         }
 
         private sealed class ReplicationPlacementManagerStateScope : IDisposable

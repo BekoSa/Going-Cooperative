@@ -7,9 +7,9 @@ namespace GoingCooperative.Core.Replication
 {
     public static class ReplicationPayloadCodec
     {
-        // REPL-5 moves Direct transport encode/auth/receive/send off the Unity main
-        // thread, adds coalesced presence state, and negotiates the client-action registry.
-        public const string ProtocolVersion = "GCOOP-REPL-5";
+        // REPL-7 introduces authenticated multi-peer Direct fan-out, per-peer
+        // reliable ACK obligations, live join-in-progress and peer replication epochs.
+        public const string ProtocolVersion = "GCOOP-REPL-7";
 
         public static TransportEnvelope ForHello(string senderId, ReplicationHello hello)
         {
@@ -28,7 +28,9 @@ namespace GoingCooperative.Core.Replication
                     EncodeText(hello.PeerId),
                     EncodeText(hello.Mode),
                     EncodeText(hello.ProtocolVersion),
-                    EncodeText(hello.BuildHash)
+                    EncodeText(hello.BuildHash),
+                    EncodeText(hello.DisplayName),
+                    EncodeText(hello.PeerBindingToken)
                 }));
         }
 
@@ -44,9 +46,9 @@ namespace GoingCooperative.Core.Replication
             }
 
             var parts = envelope.Payload.Split(new[] { '|' }, StringSplitOptions.None);
-            if (parts.Length != 5)
+            if (parts.Length != 7)
             {
-                error = "expected hello payload with 5 fields";
+                error = "expected hello payload with 7 fields";
                 return false;
             }
 
@@ -54,12 +56,20 @@ namespace GoingCooperative.Core.Replication
                 || !TryDecodeText(parts[1], out var peerId, out error)
                 || !TryDecodeText(parts[2], out var mode, out error)
                 || !TryDecodeText(parts[3], out var protocolVersion, out error)
-                || !TryDecodeText(parts[4], out var buildHash, out error))
+                || !TryDecodeText(parts[4], out var buildHash, out error)
+                || !TryDecodeText(parts[5], out var displayName, out error)
+                || !TryDecodeText(parts[6], out var peerBindingToken, out error))
             {
                 return false;
             }
 
-            hello = new ReplicationHello(peerId, mode, protocolVersion, buildHash);
+            hello = new ReplicationHello(
+                peerId,
+                mode,
+                protocolVersion,
+                buildHash,
+                displayName,
+                peerBindingToken);
             return true;
         }
 

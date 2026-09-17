@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using GoingCooperative.Core;
 using NSMedieval;
 using NSMedieval.Managers;
 using NSMedieval.Controllers;
@@ -23,13 +24,27 @@ namespace GoingCooperative.Plugin.BepInEx
         private bool multiplayerWaitingForHomeScene;
         private VillageSaveInfo? multiplayerPendingNativeLoad;
         private float multiplayerHomeReadyRealtime;
+        private const double MultiplayerNativeLoadSettleSeconds = 1d;
+        private readonly MultiplayerHostSyncBarrier multiplayerHostSyncBarrier =
+            new MultiplayerHostSyncBarrier();
+        private bool multiplayerHostSyncPauseApplied;
+        private int multiplayerHostSyncPauseRestoreSpeedIndex;
+        private bool multiplayerNativeLoadFinishedObserved;
+        private float multiplayerNativeLoadFinishedObservedRealtime;
+        private bool multiplayerNativeLoadFinishedAfterLoad;
+        private float multiplayerNextCatchupWaitLogRealtime;
 
         private List<VillageSaveInfo> GetMultiplayerSaves()
         {
             try
             {
-                GlobalSaveController.Instance.SynchronizeWithFiles();
-                return GlobalSaveController.Instance.SavesList ?? new List<VillageSaveInfo>();
+                // The main menu has already populated GlobalSaveController.SavesList.
+                // SynchronizeWithFiles performs synchronous disk/catalog work and this
+                // helper is called while constructing the Host UI. Forcing a rescan
+                // here can freeze the Unity main thread before the host session even
+                // starts. Client checkpoint import has its own explicit catalog import.
+                return GlobalSaveController.Instance.SavesList
+                    ?? new List<VillageSaveInfo>();
             }
             catch (Exception ex)
             {
@@ -70,49 +85,99 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private bool StartMultiplayerSaveHost(int port, out string detail)
         {
-            var save = GetSelectedMultiplayerSave();
-            if (save == null) { detail = "No local save is available to host."; return false; }
             try
             {
+                ResetMultiplayerHostSyncPause("start-host");
                 multiplayerLoadInvoked = false;
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
-                multiplayerHostCheckpointToLoad = save;
-                multiplayerSaveTransfer.StartHost(port, save, replicationDirectSecurityActive, replicationDirectSessionCode);
-                detail = "Waiting for Connections. Selected load: " + save.VillageName + " / " + save.FileName;
+
+                VillageSaveInfo? save = null;
+                if (multiplayerMainMenuActive)
+                {
+                    save = GetSelectedMultiplayerSave();
+                    if (save == null)
+                    {
+                        detail = "No local save is available to host.";
+                        return false;
+                    }
+
+                    multiplayerHostCheckpointToLoad = save;
+                }
+                else
+                {
+                    multiplayerHostCheckpointToLoad = null;
+                }
+
+                multiplayerSaveTransfer.StartHost(
+                    port,
+                    replicationDirectSecurityActive,
+                    replicationDirectSessionCode,
+                    MultiplayerMenu.Nickname,
+                    MultiplayerMenu.RequestedPlayerLimit);
+
+                if (save != null)
+                {
+                    multiplayerSaveTransfer.BeginHostWorldLoad();
+                    detail = "Hosting started. Loading "
+                        + save.VillageName
+                        + " / "
+                        + save.FileName
+                        + "; players may connect while the host world loads.";
+                }
+                else
+                {
+                    SetReplicationLocalPeerId(MultiplayerPeerIds.Host);
+                    replicationConfigEnabled = true;
+                    TryStartReplicationRuntime();
+                    detail = "Hosting the current world. Players may join at any time.";
+                }
+
                 return true;
             }
-            catch (Exception ex) { detail = "Save host failed: " + ex.Message; return false; }
+            catch (Exception ex)
+            {
+                detail = "Save host failed: " + ex.Message;
+                return false;
+            }
         }
 
         private bool StartMultiplayerSaveClient(string host, int port, out string detail)
         {
             try
             {
+                ResetMultiplayerHostSyncPause("start-client");
                 multiplayerLoadInvoked = false;
                 multiplayerHandledLoadGeneration = 0;
                 multiplayerHandledResumeGeneration = 0;
                 var saveRoot = Path.Combine(Application.persistentDataPath, "VillageSaves");
-                multiplayerSaveTransfer.StartClient(host, port, saveRoot, replicationDirectSecurityActive, replicationDirectSessionCode);
-                detail = "Connecting and waiting to receive the host load.";
+                multiplayerSaveTransfer.StartClient(
+                    host,
+                    port,
+                    saveRoot,
+                    replicationDirectSecurityActive,
+                    replicationDirectSessionCode,
+                    MultiplayerMenu.Nickname);
+                detail = "Connecting. The host will send a current-world checkpoint automatically.";
                 return true;
             }
             catch (Exception ex) { detail = "Save connection failed: " + ex.Message; return false; }
         }
 
-        private void MarkMultiplayerReadyToPlay()
-        {
-            if (!multiplayerSaveTransfer.TransferComplete)
-            {
-                MultiplayerMenu.StatusMessage = "Play is available after the load is transferred and verified.";
-                return;
-            }
-            multiplayerSaveTransfer.MarkReadyToPlay();
-            MultiplayerMenu.StatusMessage = multiplayerSaveTransfer.Detail;
-        }
-
         private void UpdateMultiplayerSaveWorkflow()
         {
+            if (MultiplayerLifecyclePolicy.ShouldFinalizeNativeLoad(
+                    multiplayerLoadingInProgress,
+                    multiplayerNativeLoadFinishedObserved,
+                    multiplayerNativeLoadFinishedObserved
+                        ? Time.realtimeSinceStartup
+                            - multiplayerNativeLoadFinishedObservedRealtime
+                        : 0d,
+                    MultiplayerNativeLoadSettleSeconds))
+            {
+                FinalizeMultiplayerNativeCheckpointLoad();
+            }
+
             if (multiplayerWaitingForHomeScene
                 && multiplayerMainMenuActive
                 && multiplayerPendingNativeLoad != null)
@@ -141,22 +206,156 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 OnMultiplayerNativeLoadFailed("Timed out after 180 seconds.");
             }
-            if (replicationConfigHostMode && multiplayerSaveTransfer.ResyncCaptureRequested && !multiplayerResyncCaptureInProgress)
+            if (replicationConfigHostMode && replicationRuntimeStarted)
             {
-                CaptureAndQueueMultiplayerResync();
+                while (multiplayerSaveTransfer.TryDequeueReplicationResetPeer(
+                    out var resetPeerId))
+                {
+                    HandleReplicationPeerResyncStarted(resetPeerId);
+                }
+
+                while (multiplayerSaveTransfer.TryDequeueDisconnectedPeer(
+                    out var disconnectedPeerId))
+                {
+                    var replacementConnected =
+                        multiplayerSaveTransfer.IsClientPeerConnected(
+                            disconnectedPeerId);
+                    if (!MultiplayerLifecyclePolicy
+                        .ShouldApplyDisconnectedPeerCleanup(
+                            replacementConnected))
+                    {
+                        LogReplicationInfo(
+                            "[MP/SESSION] stale disconnect cleanup skipped peer="
+                            + disconnectedPeerId
+                            + " reason=reconnected-slot");
+                        continue;
+                    }
+
+                    ReleaseMultiplayerHostSyncPause(
+                        disconnectedPeerId,
+                        "peer-disconnected");
+                    HandleReplicationPeerDisconnected(disconnectedPeerId);
+                }
+
+                var failedSyncPeers =
+                    multiplayerSaveTransfer.GetFailedClientPeerIds();
+                for (var failedIndex = 0;
+                    failedIndex < failedSyncPeers.Length;
+                    failedIndex++)
+                {
+                    ReleaseMultiplayerHostSyncPause(
+                        failedSyncPeers[failedIndex],
+                        "peer-failed");
+                }
+            }
+
+            if (replicationConfigHostMode && replicationRuntimeStarted)
+            {
+                var catchupPeers =
+                    multiplayerSaveTransfer.GetCatchupPendingClientPeerIds();
+                for (var catchupIndex = 0;
+                    catchupIndex < catchupPeers.Length;
+                    catchupIndex++)
+                {
+                    var catchupPeerId = catchupPeers[catchupIndex];
+                    var udpReady = replicationTransport != null
+                        && replicationTransport.IsPeerApplicationReady(
+                            catchupPeerId);
+                    var pendingDurable =
+                        HasPendingReplicationWorldDeltasForPeer(
+                            catchupPeerId);
+                    if (!udpReady || pendingDurable)
+                    {
+                        if (Time.realtimeSinceStartup
+                            >= multiplayerNextCatchupWaitLogRealtime)
+                        {
+                            multiplayerNextCatchupWaitLogRealtime =
+                                Time.realtimeSinceStartup + 2f;
+                            LogReplicationInfo(
+                                "[MP/SYNC] catch-up waiting peer="
+                                + catchupPeerId
+                                + " udpReady="
+                                + udpReady
+                                + " pendingDurable="
+                                + pendingDurable
+                                + " boundPeers="
+                                + (replicationTransport?.BoundPeerCount ?? 0)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                + " authFailures="
+                                + (replicationTransport?.AuthenticationFailures ?? 0L)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture)
+                                + " bindingFailures="
+                                + (replicationTransport?.PeerBindingFailures ?? 0L)
+                                    .ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture));
+                        }
+
+                        continue;
+                    }
+
+                    if (multiplayerSaveTransfer.CompletePeerCatchup(
+                            catchupPeerId,
+                            out var catchupError))
+                    {
+                        ReleaseMultiplayerHostSyncPause(
+                            catchupPeerId,
+                            "catch-up-complete");
+                        LogReplicationInfo(
+                            "[MP/SYNC] catch-up complete peer="
+                            + catchupPeerId);
+                    }
+                    else if (!string.Equals(
+                        catchupError,
+                        "peer-not-awaiting-catchup",
+                        StringComparison.Ordinal))
+                    {
+                        LogReplicationWarning(
+                            "[MP/SYNC] catch-up completion failed peer="
+                            + catchupPeerId
+                            + " error="
+                            + catchupError);
+                    }
+                }
+            }
+
+            if (replicationConfigHostMode
+                && !multiplayerResyncCaptureInProgress
+                && !multiplayerLoadingInProgress
+                && replicationRuntimeStarted)
+            {
+                if (multiplayerSaveTransfer.TryDequeueJoinCapture(
+                        out var joinPeerId,
+                        out var joinConnectionGeneration))
+                {
+                    CaptureAndQueueMultiplayerJoin(
+                        joinPeerId,
+                        joinConnectionGeneration);
+                }
+                else if (multiplayerSaveTransfer.TryDequeueResyncCapture(
+                    out var resyncPeerId,
+                    out var resyncConnectionGeneration))
+                {
+                    CaptureAndQueueMultiplayerResync(
+                        resyncPeerId,
+                        resyncConnectionGeneration);
+                }
             }
 
             if (multiplayerSaveTransfer.ResumeGeneration > multiplayerHandledResumeGeneration)
             {
                 multiplayerHandledResumeGeneration = multiplayerSaveTransfer.ResumeGeneration;
+                if (!replicationConfigHostMode)
+                {
+                    SetReplicationLocalPeerId(multiplayerSaveTransfer.AssignedPeerId);
+                }
                 replicationConfigEnabled = true;
                 TryStartReplicationRuntime();
-                if (replicationConfigHostMode)
-                {
-                    TryInvokeStoredGameSpeedManagerMethod("SetSpeedNormal", out var resumeDetail);
-                    LogReplicationInfo("Going Cooperative host simulation resumed detail=" + resumeDetail);
-                }
-                LogReplicationInfo("Going Cooperative replication resumed epoch=" + multiplayerSaveTransfer.Epoch);
+                LogReplicationInfo("Going Cooperative replication resumed epoch="
+                    + multiplayerSaveTransfer.Epoch
+                    + " peer="
+                    + multiplayerSaveTransfer.AssignedPeerId);
             }
 
             if (multiplayerSaveTransfer.LoadGeneration <= multiplayerHandledLoadGeneration || multiplayerLoadInvoked) return;
@@ -198,6 +397,9 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationClientWeatherAuthorityParked = !replicationConfigHostMode && WeatherScheduleLaneEnabled();
             multiplayerLoadingInProgress = true;
             multiplayerNativeLoadStartedRealtime = Time.realtimeSinceStartup;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             replicationConfigEnabled = false;
             LogReplicationInfo("Going Cooperative replication hooks gated off for native save loading.");
             SetMultiplayerCanvasOpen(false);
@@ -232,9 +434,39 @@ namespace GoingCooperative.Plugin.BepInEx
 
         private void OnMultiplayerGameLoadingFinished(bool afterLoad)
         {
-            if (!multiplayerLoadingInProgress) return;
+            if (!multiplayerLoadingInProgress
+                || multiplayerNativeLoadFinishedObserved)
+            {
+                return;
+            }
+
+            multiplayerNativeLoadFinishedObserved = true;
+            multiplayerNativeLoadFinishedObservedRealtime =
+                Time.realtimeSinceStartup;
+            multiplayerNativeLoadFinishedAfterLoad = afterLoad;
+            LogReplicationInfo(
+                "Going Cooperative native loading-finished callback observed afterLoad="
+                + afterLoad
+                + "; waiting "
+                + MultiplayerNativeLoadSettleSeconds.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+                + "s before multiplayer resume.");
+        }
+
+        private void FinalizeMultiplayerNativeCheckpointLoad()
+        {
+            if (!multiplayerLoadingInProgress
+                || !multiplayerNativeLoadFinishedObserved)
+            {
+                return;
+            }
+
+            var afterLoad = multiplayerNativeLoadFinishedAfterLoad;
             multiplayerLoadingInProgress = false;
             multiplayerNativeLoadStartedRealtime = 0f;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             multiplayerLoadInvoked = false;
             replicationConfigEnabled = false;
             multiplayerSaveTransfer.NotifyNativeLoadFinished();
@@ -243,7 +475,10 @@ namespace GoingCooperative.Plugin.BepInEx
             replicationNextWeatherEnvironmentRealtime = 0f;
             replicationLastWeatherScheduleSignature = string.Empty;
             replicationLastWeatherEnvironmentSignature = string.Empty;
-            LogReplicationInfo("Going Cooperative synchronized loading finished afterLoad=" + afterLoad);
+            LogReplicationInfo(
+                "Going Cooperative synchronized loading settled afterLoad="
+                + afterLoad
+                + "; multiplayer resume released.");
         }
 
         private void OnMultiplayerNativeLoadFailed(string reason)
@@ -252,37 +487,327 @@ namespace GoingCooperative.Plugin.BepInEx
             multiplayerLoadingInProgress = false;
             multiplayerLoadInvoked = false;
             multiplayerNativeLoadStartedRealtime = 0f;
+            multiplayerNativeLoadFinishedObserved = false;
+            multiplayerNativeLoadFinishedObservedRealtime = 0f;
+            multiplayerNativeLoadFinishedAfterLoad = false;
             replicationConfigEnabled = false;
             multiplayerSaveTransfer.ReportLoadFailure(reason);
             MultiplayerMenu.StatusMessage = "Native checkpoint load failed: " + reason;
             LogReplicationWarning(MultiplayerMenu.StatusMessage);
         }
 
-        private void CaptureAndQueueMultiplayerResync()
+        private bool HoldMultiplayerHostSyncPause(
+            string peerId,
+            long connectionGeneration,
+            out string detail)
+        {
+            var shouldPause =
+                multiplayerHostSyncBarrier.Enter(
+                    peerId,
+                    connectionGeneration);
+            if (!shouldPause)
+            {
+                detail = "shared-host-sync-pause";
+                return true;
+            }
+
+            multiplayerHostSyncPauseRestoreSpeedIndex =
+                replicationAuthoritativeSpeedIndex;
+            if (!TryInvokeStoredGameSpeedManagerMethod(
+                    "SetSpeedPause",
+                    out detail))
+            {
+                multiplayerHostSyncBarrier.Exit(
+                    peerId,
+                    connectionGeneration);
+                return false;
+            }
+
+            multiplayerHostSyncPauseApplied = true;
+            LogReplicationInfo(
+                "[MP/SYNC] host simulation paused peer="
+                + peerId
+                + " generation="
+                + connectionGeneration
+                + " restoreSpeed="
+                + multiplayerHostSyncPauseRestoreSpeedIndex);
+            return true;
+        }
+
+        private void ReleaseMultiplayerHostSyncPause(
+            string peerId,
+            string reason)
+        {
+            var shouldResume =
+                multiplayerHostSyncBarrier.ExitCurrent(peerId);
+            RestoreMultiplayerHostSyncPauseIfNeeded(
+                shouldResume,
+                reason);
+        }
+
+        private void ReleaseMultiplayerHostSyncPause(
+            string peerId,
+            long connectionGeneration,
+            string reason)
+        {
+            var shouldResume =
+                multiplayerHostSyncBarrier.Exit(
+                    peerId,
+                    connectionGeneration);
+            RestoreMultiplayerHostSyncPauseIfNeeded(
+                shouldResume,
+                reason);
+        }
+
+        private void RestoreMultiplayerHostSyncPauseIfNeeded(
+            bool shouldResume,
+            string reason)
+        {
+            if (!shouldResume || !multiplayerHostSyncPauseApplied)
+            {
+                return;
+            }
+
+            var restoreSpeed =
+                multiplayerHostSyncPauseRestoreSpeedIndex;
+            multiplayerHostSyncPauseApplied = false;
+            RestoreReplicationAuthoritativeSpeed(
+                restoreSpeed,
+                out var resumeDetail);
+            LogReplicationInfo(
+                "[MP/SYNC] host simulation resumed reason="
+                + reason
+                + " speed="
+                + restoreSpeed
+                + " detail="
+                + resumeDetail);
+        }
+
+        private void ResetMultiplayerHostSyncPause(string reason)
+        {
+            var hadBarrier = multiplayerHostSyncBarrier.Clear();
+            if (!multiplayerHostSyncPauseApplied)
+            {
+                return;
+            }
+
+            var restoreSpeed =
+                multiplayerHostSyncPauseRestoreSpeedIndex;
+            multiplayerHostSyncPauseApplied = false;
+            RestoreReplicationAuthoritativeSpeed(
+                restoreSpeed,
+                out var resumeDetail);
+            LogReplicationInfo(
+                "[MP/SYNC] host synchronization pause reset reason="
+                + reason
+                + " hadBarrier="
+                + (hadBarrier ? "true" : "false")
+                + " speed="
+                + restoreSpeed
+                + " detail="
+                + resumeDetail);
+        }
+
+        private void CaptureAndQueueMultiplayerJoin(
+            string peerId,
+            long connectionGeneration)
         {
             multiplayerResyncCaptureInProgress = true;
+            var syncPauseHeld = false;
+            var keepSyncPause = false;
             try
             {
-                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(out var abortFlushDetail))
-                    throw new InvalidOperationException("Trader abort cleanup is incomplete before checkpoint: " + abortFlushDetail);
-                replicationConfigEnabled = false;
-                StopReplicationRuntime(ReplicationTraderPartyResetContext.WorldReloadPending);
-                TryInvokeStoredGameSpeedManagerMethod("SetSpeedPause", out var pauseDetail);
-                var filename = "GoingCooperative_Resync_" + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
-                var checkpoint = GlobalSaveController.Instance.SaveCurrentVillage(filename);
-                if (checkpoint == null) throw new InvalidOperationException("Going Medieval did not create the resync checkpoint.");
-                multiplayerHostCheckpointToLoad = checkpoint;
-                LogReplicationInfo("Going Cooperative full resync checkpoint created path=" + checkpoint.FilePath + " pause=" + pauseDetail);
-                multiplayerSaveTransfer.QueueResyncCheckpoint(checkpoint);
+                if (!HoldMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        out var pauseDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Could not pause the authoritative host before join checkpoint: "
+                        + pauseDetail);
+                }
+
+                syncPauseHeld = true;
+                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(
+                        out var abortFlushDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Trader abort cleanup is incomplete before join checkpoint: "
+                        + abortFlushDetail);
+                }
+
+                var filename = "GoingCooperative_Join_"
+                    + peerId.Replace("-", "_")
+                    + "_"
+                    + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+                var checkpoint =
+                    GlobalSaveController.Instance.SaveCurrentVillage(filename);
+                if (checkpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "Going Medieval did not create the join checkpoint.");
+                }
+
+                if (!multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration))
+                {
+                    LogReplicationInfo(
+                        "[MP/SAVE] discarded stale join checkpoint peer="
+                        + peerId
+                        + " generation="
+                        + connectionGeneration);
+                    return;
+                }
+
+                LogReplicationInfo(
+                    "[MP/SAVE] join checkpoint created peer="
+                    + peerId
+                    + " generation="
+                    + connectionGeneration
+                    + " path="
+                    + checkpoint.FilePath
+                    + " pause="
+                    + pauseDetail
+                    + " hostPausedUntilCatchup=true");
+                multiplayerSaveTransfer.QueueJoinCheckpoint(
+                    peerId,
+                    connectionGeneration,
+                    checkpoint);
+                keepSyncPause = true;
             }
             catch (Exception ex)
             {
-                MultiplayerMenu.StatusMessage = "Full resync capture failed: " + FormatReflectionExceptionDetail(ex);
-                LogReplicationWarning(MultiplayerMenu.StatusMessage);
-                multiplayerSaveTransfer.RejectResync(MultiplayerMenu.StatusMessage);
+                var reason = "Join checkpoint capture failed: "
+                    + FormatReflectionExceptionDetail(ex);
+                MultiplayerMenu.StatusMessage = reason;
+                LogReplicationWarning(
+                    "[MP/SAVE] "
+                    + reason
+                    + " peer="
+                    + peerId);
+                multiplayerSaveTransfer.RejectJoin(
+                    peerId,
+                    connectionGeneration,
+                    reason);
             }
             finally
             {
+                if (syncPauseHeld && !keepSyncPause)
+                {
+                    ReleaseMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        "join-capture-aborted");
+                }
+
+                multiplayerResyncCaptureInProgress = false;
+            }
+        }
+
+        private void CaptureAndQueueMultiplayerResync(
+            string peerId,
+            long connectionGeneration)
+        {
+            multiplayerResyncCaptureInProgress = true;
+            var syncPauseHeld = false;
+            var keepSyncPause = false;
+            try
+            {
+                if (!HoldMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        out var pauseDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Could not pause the authoritative host before resync checkpoint: "
+                        + pauseDetail);
+                }
+
+                syncPauseHeld = true;
+                if (!FlushHostTraderPartyAbortsBeforeCheckpoint(
+                        out var abortFlushDetail))
+                {
+                    throw new InvalidOperationException(
+                        "Trader abort cleanup is incomplete before checkpoint: "
+                        + abortFlushDetail);
+                }
+
+                var filename = "GoingCooperative_Resync_"
+                    + peerId.Replace("-", "_")
+                    + "_"
+                    + DateTime.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+                var checkpoint =
+                    GlobalSaveController.Instance.SaveCurrentVillage(filename);
+                if (checkpoint == null)
+                {
+                    throw new InvalidOperationException(
+                        "Going Medieval did not create the resync checkpoint.");
+                }
+
+                if (!multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration))
+                {
+                    LogReplicationInfo(
+                        "[MP/SAVE] discarded stale resync checkpoint peer="
+                        + peerId
+                        + " generation="
+                        + connectionGeneration);
+                    return;
+                }
+
+                // The checkpoint is now a valid replacement boundary. Only
+                // at this point tear down the old UDP peer/runtime state; doing it
+                // before SaveCurrentVillage() made a stale/failed capture strand the
+                // client in "Waiting for Host" with no usable replication lane.
+                HandleReplicationPeerResyncStarted(peerId);
+
+                LogReplicationInfo(
+                    "[MP/SAVE] targeted resync checkpoint created peer="
+                    + peerId
+                    + " generation="
+                    + connectionGeneration
+                    + " path="
+                    + checkpoint.FilePath
+                    + " pause="
+                    + pauseDetail
+                    + " hostPausedUntilCatchup=true");
+                multiplayerSaveTransfer.QueueResyncCheckpoint(
+                    peerId,
+                    connectionGeneration,
+                    checkpoint);
+                keepSyncPause = true;
+            }
+            catch (Exception ex)
+            {
+                var reason = "Full resync capture failed: "
+                    + FormatReflectionExceptionDetail(ex);
+                MultiplayerMenu.StatusMessage = reason;
+                LogReplicationWarning(
+                    "[MP/SAVE] "
+                    + reason
+                    + " peer="
+                    + peerId);
+                multiplayerSaveTransfer.RejectResync(
+                    peerId,
+                    connectionGeneration,
+                    reason);
+                keepSyncPause =
+                    multiplayerSaveTransfer.IsCurrentHostPeerConnection(
+                        peerId,
+                        connectionGeneration);
+            }
+            finally
+            {
+                if (syncPauseHeld && !keepSyncPause)
+                {
+                    ReleaseMultiplayerHostSyncPause(
+                        peerId,
+                        connectionGeneration,
+                        "resync-capture-aborted");
+                }
+
                 multiplayerResyncCaptureInProgress = false;
             }
         }

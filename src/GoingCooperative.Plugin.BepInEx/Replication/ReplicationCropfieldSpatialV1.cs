@@ -403,7 +403,9 @@ namespace GoingCooperative.Plugin.BepInEx
         {
             cropfield = null;
             detail = string.Empty;
-            var parts = (targetKey ?? string.Empty).Split('|');
+            var parts = (targetKey ?? string.Empty).Split(
+                new[] { '|' },
+                StringSplitOptions.None);
             long.TryParse(parts.Length > 0 ? parts[0] : string.Empty, NumberStyles.Integer, CultureInfo.InvariantCulture, out var wantedUid);
             var wantedBlueprint = parts.Length > 1 ? parts[1] : string.Empty;
             var wantedStart = parts.Length > 2 ? parts[2] : string.Empty;
@@ -420,7 +422,9 @@ namespace GoingCooperative.Plugin.BepInEx
             {
                 if (candidate == null) continue;
                 var candidateKey = FormatReplicationCropfieldTarget(candidate);
-                var candidateParts = candidateKey.Split('|');
+                var candidateParts = candidateKey.Split(
+                    new[] { '|' },
+                    StringSplitOptions.None);
                 if (wantedUid > 0
                     && candidateParts.Length > 0
                     && long.TryParse(candidateParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var candidateUid)

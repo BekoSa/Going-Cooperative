@@ -808,7 +808,9 @@ namespace GoingCooperative.Plugin.BepInEx
             if (replicationConfigProductionStateV2
                 && state.ContainerKind.StartsWith("production-v2-", StringComparison.Ordinal))
             {
-                var ownerParts = state.OwnerId.Split(':');
+                var ownerParts = state.OwnerId.Split(
+                    new[] { ':' },
+                    StringSplitOptions.None);
                 if (ownerParts.Length != 2
                     || !long.TryParse(ownerParts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hostTicketId)
                     || hostTicketId <= 0

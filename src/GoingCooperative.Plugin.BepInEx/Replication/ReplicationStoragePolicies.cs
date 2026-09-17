@@ -2069,7 +2069,13 @@ namespace GoingCooperative.Plugin.BepInEx
             object? anchor = ground
                 ? AccessTools.Property(storage.GetType(), "Start")?.GetValue(storage, null)
                 : AccessTools.Property(storage.GetType(), "GridPosition")?.GetValue(storage, null);
-            TryReadReplicationVec3Int(anchor, out var x, out var y, out var z);
+            var x = 0;
+            var y = 0;
+            var z = 0;
+            if (anchor != null)
+            {
+                TryReadReplicationVec3Int(anchor, out x, out y, out z);
+            }
             if (hostUid <= 0L || string.IsNullOrWhiteSpace(blueprint))
             {
                 detail = "storage-policy-target-identity-incomplete kind="
@@ -3231,7 +3237,7 @@ namespace GoingCooperative.Plugin.BepInEx
 
                 var commandSequence = ++replicationIntentSequence;
                 var command = new LockstepCommand(
-                    ReplicationClientPeerId,
+                    GetReplicationLocalPeerId(),
                     commandSequence,
                     0L,
                     CommandKind.Custom,
