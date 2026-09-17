@@ -121,5 +121,63 @@ namespace GoingCooperative.Plugin.BepInEx
             __result = true;
             return false;
         }
+
+        private static void FinalizeReplicationAppliedRemoteRegionCommand(
+            LockstepCommand command,
+            RuntimeCommandResult result)
+        {
+            if (!replicationConfigHostMode
+                || !result.Invoked
+                || command.Kind != CommandKind.RegionOrder
+                || string.Equals(command.PlayerId, ReplicationHostPeerId, StringComparison.Ordinal)
+                || !LockstepCommandPayloads.TryReadRegionOrderPayload(
+                    command.Payload,
+                    out var orderType,
+                    out var startX,
+                    out _,
+                    out var startZ,
+                    out var endX,
+                    out _,
+                    out var endZ,
+                    out _,
+                    out _,
+                    out _)
+                || !IsReplicationMassBuildingRegionOrder(orderType))
+            {
+                return;
+            }
+
+            // A client-originated mass Cancel/Deconstruct is executed on the host
+            // under applyingRuntimeCommandDepth, so the host-local SelectionManager
+            // postfix intentionally does not run its semantic-removal collapse. By
+            // the time ApplyRuntimeCommand returns, however, every native terminal
+            // hook has queued its exact building ID and no terminal row has needed to
+            // leave the frame yet. Collapse those rows here before the reliable pump
+            // can turn a single area cancel into hundreds of per-building packets.
+            var superseded = SupersedePendingReplicationHostBuildReplayChunksInRegion(
+                startX,
+                startZ,
+                endX,
+                endZ);
+            var collapsed = CollapseReplicationBuildingTerminalsForSemanticRegionV2(
+                startX,
+                startZ,
+                endX,
+                endZ,
+                orderType);
+            MarkReplicationBuildingSemanticRegionReplayV2();
+
+            instance?.LogReplicationInfo(
+                "[MP/REGION] remote semantic removal finalized player="
+                + command.PlayerId
+                + " sequence="
+                + command.Sequence.ToString(CultureInfo.InvariantCulture)
+                + " orderType="
+                + orderType
+                + " supersededReplayPlacements="
+                + superseded.ToString(CultureInfo.InvariantCulture)
+                + " collapsedTerminalItems="
+                + collapsed.ToString(CultureInfo.InvariantCulture));
+        }
     }
 }
