@@ -45,6 +45,7 @@ namespace GoingCooperative.Plugin.BepInEx
             if (replicationConfigEnabled || replicationConfigMultiplayerMenuEnabled)
             {
                 TryInstallReplicationCommandCapture(harmony);
+                TryInstallReplicationClientRegionReplayOptimization(harmony);
                 TryInstallReplicationHostRuntimePump(harmony);
                 TryInstallReplicationTransformViewCacheInvalidation(harmony);
                 TryInstallReplicationClientSimulationSuppression(harmony);
